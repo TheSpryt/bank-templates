@@ -51,9 +51,11 @@ Open the **Bank Templates** side panel from the RuneLite toolbar.
 
 ### Reorganise helper
 
-If you'd rather rearrange your *real* bank to match a template: select the template, then in the
-plugin settings turn **off** "Apply template to bank" and turn **on** "Show reorganise helper". The
-plugin outlines the slots that don't match - you drag the items yourself; it never moves anything.
+If you'd rather rearrange your *real* bank to match a template: select the template, then tick
+**Reorganise helper** at the bottom of *My templates*. The plugin shows your real bank (instead of the
+virtual layout) and outlines the slots that don't match, with an arrow and ghost icon showing where
+the next item goes - you drag the items yourself; it never moves anything. Untick it to go back to the
+virtual layout.
 
 ### Community repository
 
@@ -83,8 +85,9 @@ it in settings.
 | Apply template to bank | on | Render the active template over the bank |
 | Show placeholders for unowned items | on | Faded icons for items you don't own yet |
 | Hide items not in the template | off | Hide leftover items instead of listing them below |
-| Show reorganise helper | off | Outline mismatched slots on the real bank |
-| Target highlight | green | Reorganise-helper highlight colour |
+| Target highlight | cyan | Reorganise-helper highlight colour |
+
+The **Reorganise helper** toggle lives in the side panel (under *My templates*), not in settings.
 | Enable community repository | off | Opt-in; browse/share (sends your IP to the repo server) |
 
 ## Privacy
