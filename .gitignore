@@ -1,0 +1,16 @@
+.gradle
+build
+.idea/
+.project
+.settings/
+.classpath
+nbactions.xml
+nb-configuration.xml
+nbproject/
+
+# Local agent/editor instructions; not for the public repo
+AGENTS.md
+
+# Backend (Cloudflare Worker) - kept out of the public plugin repo so its config/moderation
+# internals aren't exposed. Maintained in a separate private repo.
+cloudflare-worker/
