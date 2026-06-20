@@ -1,0 +1,278 @@
+package com.banktemplates;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonSyntaxException;
+import com.google.gson.reflect.TypeToken;
+import java.io.IOException;
+import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.List;
+import java.util.function.Consumer;
+import javax.inject.Inject;
+import javax.inject.Singleton;
+import lombok.extern.slf4j.Slf4j;
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.HttpUrl;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+
+/**
+ * Talks to the community template repository (the Cloudflare Worker). All calls are async; callbacks
+ * run off the Swing thread, so the panel marshals them back to the EDT.
+ * <p>
+ * The plugin identifies itself with a persistent random {@code clientId} (stored in config). The
+ * server uses it as the owner key: it enforces the per-user upload cap and only lets you update or
+ * delete templates you shared.
+ */
+@Slf4j
+@Singleton
+public class TemplateRepositoryClient
+{
+	private static final MediaType JSON = MediaType.parse("application/json");
+	private static final int PAGE_SIZE = 20;
+	private static final Type PAGE_TYPE = new TypeToken<Page>()
+	{
+	}.getType();
+	// Salt so the value sent to the server is a derived hash, not the raw RuneLite account hash.
+	private static final String SALT = "bank-templates-v1:";
+	// The community repository endpoint. Not a user setting (the plugin has to call it regardless).
+	private static final String REPO_URL = "https://bank-templates-repo.spryt.workers.dev";
+
+	private final OkHttpClient okHttpClient;
+	private final Gson gson;
+	private final BankTemplatesConfig config;
+
+	// The owner key sent to the repository, derived from the logged-in OSRS account hash. Null when
+	// logged out, so sharing/reporting/deleting is tied to the account and survives client restarts.
+	private volatile String identity;
+
+	@Inject
+	TemplateRepositoryClient(OkHttpClient okHttpClient, Gson gson, BankTemplatesConfig config)
+	{
+		this.okHttpClient = okHttpClient;
+		this.gson = gson;
+		this.config = config;
+	}
+
+	boolean isEnabled()
+	{
+		return config.enableRepository();
+	}
+
+	/** Updates the account identity. Pass the value of {@code client.getAccountHash()} (-1 when logged out). */
+	void setIdentity(long accountHash)
+	{
+		identity = accountHash == -1 ? null : sha256(SALT + accountHash);
+	}
+
+	boolean hasIdentity()
+	{
+		return identity != null && !identity.isEmpty();
+	}
+
+	String clientId()
+	{
+		return identity != null ? identity : "";
+	}
+
+	private static String sha256(String s)
+	{
+		try
+		{
+			final byte[] digest = MessageDigest.getInstance("SHA-256").digest(s.getBytes(StandardCharsets.UTF_8));
+			final StringBuilder sb = new StringBuilder(digest.length * 2);
+			for (byte b : digest)
+			{
+				sb.append(Character.forDigit((b >> 4) & 0xf, 16)).append(Character.forDigit(b & 0xf, 16));
+			}
+			return sb.toString();
+		}
+		catch (NoSuchAlgorithmException e)
+		{
+			// SHA-256 is guaranteed to exist on every JVM.
+			throw new IllegalStateException(e);
+		}
+	}
+
+	private String baseUrl()
+	{
+		return REPO_URL;
+	}
+
+	void search(String query, String sort, int offset, Consumer<Page> onSuccess, Consumer<String> onError)
+	{
+		if (!isEnabled())
+		{
+			onError.accept("The community repository is turned off. Enable it in the plugin settings.");
+			return;
+		}
+
+		final HttpUrl base = HttpUrl.parse(baseUrl() + "/api/templates");
+		if (base == null)
+		{
+			onError.accept("The repository URL is invalid.");
+			return;
+		}
+
+		final HttpUrl.Builder url = base.newBuilder()
+			.addQueryParameter("limit", Integer.toString(PAGE_SIZE))
+			.addQueryParameter("offset", Integer.toString(Math.max(0, offset)));
+		if (query != null && !query.trim().isEmpty())
+		{
+			url.addQueryParameter("q", query.trim());
+		}
+		if (sort != null)
+		{
+			url.addQueryParameter("sort", sort);
+		}
+
+		okHttpClient.newCall(new Request.Builder().url(url.build()).get().build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				onError.accept("Could not reach the repository.");
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					if (!r.isSuccessful() || r.body() == null)
+					{
+						onError.accept("Repository returned an error (" + r.code() + ").");
+						return;
+					}
+					final Page page = gson.fromJson(r.body().string(), PAGE_TYPE);
+					onSuccess.accept(page != null ? page : new Page());
+				}
+				catch (IOException | JsonSyntaxException e)
+				{
+					onError.accept("Could not read the repository response.");
+				}
+			}
+		});
+	}
+
+	/** Creates a new shared template. {@code onSuccess} receives the new repo id. */
+	void create(BankTemplate template, String author, Consumer<Long> onSuccess, Consumer<String> onError)
+	{
+		final Request request = new Request.Builder()
+			.url(baseUrl() + "/api/templates")
+			.post(RequestBody.create(JSON, gson.toJson(payload(template, author))))
+			.build();
+		send(request, body ->
+		{
+			final JsonObject o = gson.fromJson(body, JsonObject.class);
+			onSuccess.accept(o != null && o.has("id") ? o.get("id").getAsLong() : null);
+		}, onError);
+	}
+
+	/** Updates a template the user owns, in place. */
+	void update(long repoId, BankTemplate template, String author, Runnable onSuccess, Consumer<String> onError)
+	{
+		final Request request = new Request.Builder()
+			.url(baseUrl() + "/api/templates/" + repoId)
+			.put(RequestBody.create(JSON, gson.toJson(payload(template, author))))
+			.build();
+		send(request, body -> onSuccess.run(), onError);
+	}
+
+	void delete(long repoId, Runnable onSuccess, Consumer<String> onError)
+	{
+		final HttpUrl url = HttpUrl.parse(baseUrl() + "/api/templates/" + repoId)
+			.newBuilder().addQueryParameter("clientId", clientId()).build();
+		send(new Request.Builder().url(url).delete().build(), body -> onSuccess.run(), onError);
+	}
+
+	void report(long repoId, Runnable onSuccess, Consumer<String> onError)
+	{
+		final JsonObject body = new JsonObject();
+		body.addProperty("clientId", clientId());
+		final Request request = new Request.Builder()
+			.url(baseUrl() + "/api/templates/" + repoId + "/report")
+			.post(RequestBody.create(JSON, gson.toJson(body)))
+			.build();
+		send(request, b -> onSuccess.run(), onError);
+	}
+
+	private JsonObject payload(BankTemplate template, String author)
+	{
+		final JsonObject payload = new JsonObject();
+		payload.addProperty("name", template.getName());
+		payload.addProperty("description", template.getDescription() == null ? "" : template.getDescription());
+		payload.addProperty("author", author == null ? "" : author);
+		payload.addProperty("columns", template.getColumns());
+		payload.addProperty("clientId", clientId());
+		payload.add("tabs", gson.toJsonTree(template.getTabs()));
+		return payload;
+	}
+
+	private void send(Request request, Consumer<String> onSuccess, Consumer<String> onError)
+	{
+		if (!isEnabled())
+		{
+			onError.accept("The community repository is turned off. Enable it in the plugin settings.");
+			return;
+		}
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				onError.accept("Could not reach the repository.");
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					final String body = r.body() != null ? r.body().string() : "";
+					if (r.isSuccessful())
+					{
+						onSuccess.accept(body);
+						return;
+					}
+					onError.accept(errorMessage(body, r.code()));
+				}
+				catch (IOException e)
+				{
+					onError.accept("Could not read the repository response.");
+				}
+			}
+		});
+	}
+
+	/** Pulls the server's friendly {@code message} (e.g. a moderation/limit/rate rejection) out of a response. */
+	private String errorMessage(String body, int code)
+	{
+		try
+		{
+			final JsonObject err = gson.fromJson(body, JsonObject.class);
+			if (err != null && err.has("message"))
+			{
+				return err.get("message").getAsString();
+			}
+		}
+		catch (JsonSyntaxException ignored)
+		{
+			// fall through
+		}
+		return "Request failed (" + code + ").";
+	}
+
+	static class Page
+	{
+		List<RemoteTemplate> templates;
+		boolean hasMore;
+	}
+}
