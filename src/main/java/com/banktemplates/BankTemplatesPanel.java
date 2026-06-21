@@ -697,7 +697,17 @@ public class BankTemplatesPanel extends PluginPanel
 					onActiveChanged.run();
 				}),
 				error -> SwingUtilities.invokeLater(() ->
-					JOptionPane.showMessageDialog(this, error + "\nThe local copy was kept.", "Delete failed", JOptionPane.WARNING_MESSAGE)));
+				{
+					final int alsoLocal = JOptionPane.showConfirmDialog(this,
+						error + "\n\nDelete the local copy anyway?", "Delete failed",
+						JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+					if (alsoLocal == JOptionPane.YES_OPTION)
+					{
+						templateManager.deleteUserTemplate(template);
+						rebuildOnEdt();
+						onActiveChanged.run();
+					}
+				}));
 		}
 		else
 		{

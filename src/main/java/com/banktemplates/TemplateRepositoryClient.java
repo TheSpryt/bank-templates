@@ -190,7 +190,9 @@ public class TemplateRepositoryClient
 	{
 		final HttpUrl url = HttpUrl.parse(baseUrl() + "/api/templates/" + repoId)
 			.newBuilder().addQueryParameter("clientId", clientId()).build();
-		send(new Request.Builder().url(url).delete().build(), body -> onSuccess.run(), onError);
+		// A 404 means the template is already gone from the server, which is exactly what delete wants -
+		// treat it as success so the local copy can be cleaned up too.
+		sendAllowingNotFound(new Request.Builder().url(url).delete().build(), body -> onSuccess.run(), onError);
 	}
 
 	void report(long repoId, Runnable onSuccess, Consumer<String> onError)
@@ -218,6 +220,18 @@ public class TemplateRepositoryClient
 
 	private void send(Request request, Consumer<String> onSuccess, Consumer<String> onError)
 	{
+		send(request, onSuccess, onError, false);
+	}
+
+	// Like send(), but a 404 is reported to onSuccess instead of onError. Used by delete, where a
+	// missing template means the work is already done.
+	private void sendAllowingNotFound(Request request, Consumer<String> onSuccess, Consumer<String> onError)
+	{
+		send(request, onSuccess, onError, true);
+	}
+
+	private void send(Request request, Consumer<String> onSuccess, Consumer<String> onError, boolean notFoundIsSuccess)
+	{
 		if (!isEnabled())
 		{
 			onError.accept("The community repository is turned off. Enable it in the plugin settings.");
@@ -237,7 +251,7 @@ public class TemplateRepositoryClient
 				try (Response r = response)
 				{
 					final String body = r.body() != null ? r.body().string() : "";
-					if (r.isSuccessful())
+					if (r.isSuccessful() || (notFoundIsSuccess && r.code() == 404))
 					{
 						onSuccess.accept(body);
 						return;
