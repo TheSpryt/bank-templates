@@ -16,6 +16,29 @@ public interface BankTemplatesConfig extends Config
 	// by the side panel instead. Empty/absent means "None".
 	String ACTIVE_TEMPLATE_KEY = "activeTemplate";
 
+	@ConfigItem(
+		keyName = "alertUpdates",
+		name = "Notify me about updates",
+		description = "Show an Updates tab in the side panel with the patch notes whenever the plugin updates.",
+		position = 0
+	)
+	default boolean alertUpdates()
+	{
+		return true;
+	}
+
+	// The plugin version whose patch notes the user has dismissed. Hidden; managed by the side panel.
+	@ConfigItem(
+		keyName = "lastSeenVersion",
+		name = "",
+		description = "",
+		hidden = true
+	)
+	default String lastSeenVersion()
+	{
+		return "";
+	}
+
 	@ConfigSection(
 		name = "Layout",
 		description = "How the active template is drawn over the bank.",

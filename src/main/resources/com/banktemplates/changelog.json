@@ -1,0 +1,24 @@
+[
+  {
+    "version": "1.1",
+    "notes": [
+      "New layout editor: build or edit a layout without owning the items. Search for any item and drop it in, drag to rearrange, swap or insert, and mark filler/empty slots. Edit in the side panel or live over the bank.",
+      "Tab icons: the bank's tab buttons (and the editor/preview) now show each tab's first item, matching the active template.",
+      "Share anonymously: tick the box when sharing to be shown to other players as \"Anonymous\".",
+      "Reorganise helper redesign: choose Labels, Step-by-step, or both. Labels tag each item with its destination tab, then its row/column.",
+      "Preview now opens beside the client so the game stays clickable, with item names on hover.",
+      "Import counts are now accurate and reflect how many people currently keep a template.",
+      "Variant-aware reorg: item kits and alternate versions of an item (charged/uncharged, degraded, recoloured) count as the same item.",
+      "Fixed the reorganise helper getting stuck in a loop while dragging items around."
+    ],
+    "knownIssues": [
+      "Compatibility issues with the Inventory Setups plugin - to be addressed in the next update."
+    ]
+  },
+  {
+    "version": "1.0",
+    "notes": [
+      "Initial release: save, apply, share and import shareable bank layout templates."
+    ]
+  }
+]
