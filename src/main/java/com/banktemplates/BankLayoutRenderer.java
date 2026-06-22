@@ -14,6 +14,7 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.ScriptID;
 import net.runelite.api.events.MenuOptionClicked;
+import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.ScriptPreFired;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
@@ -114,6 +115,77 @@ public class BankLayoutRenderer
 		}
 
 		layout(layout, template.getColumns());
+	}
+
+	// Tab icons are set during the bank build, so override them AFTER it runs (post-fire), or they'd be
+	// clobbered.
+	void onScriptPostFired(ScriptPostFired event)
+	{
+		if (event.getScriptId() != ScriptID.BANKMAIN_FINISHBUILDING || isBankFiltered(client))
+		{
+			return;
+		}
+		if (config.showReorgHelper() || !config.applyLayout())
+		{
+			return;
+		}
+		final BankTemplate template = templateManager.getActive();
+		if (template != null)
+		{
+			applyTabIcons(template);
+		}
+	}
+
+	// Override the native tab-button icons to the template's first item per tab. The tab icons are the
+	// item-bearing children of Bankmain.TABS, in tab order (1..N). Only existing real tabs are changed;
+	// when the template is switched off, the game's own rebuild restores the real icons.
+	private void applyTabIcons(BankTemplate template)
+	{
+		final Widget tabs = client.getWidget(InterfaceID.Bankmain.TABS);
+		if (tabs == null)
+		{
+			return;
+		}
+		int tab = 1;
+		for (Widget[] group : new Widget[][]{tabs.getDynamicChildren(), tabs.getStaticChildren(), tabs.getNestedChildren()})
+		{
+			if (group == null)
+			{
+				continue;
+			}
+			for (Widget c : group)
+			{
+				if (c == null || c.getItemId() <= 0 || tab > 9)
+				{
+					continue;
+				}
+				final int icon = firstItem(template.tabLayout(tab));
+				if (icon > 0)
+				{
+					c.setItemId(icon);
+					c.setItemQuantity(0);
+					c.revalidate();
+				}
+				tab++;
+			}
+		}
+	}
+
+	// A tab's icon is its first real item.
+	private static int firstItem(int[] layout)
+	{
+		if (layout == null)
+		{
+			return 0;
+		}
+		for (int v : layout)
+		{
+			if (v > 0 && v != BankTemplate.FILLER)
+			{
+				return v;
+			}
+		}
+		return 0;
 	}
 
 	private void layout(int[] layout, int columns)

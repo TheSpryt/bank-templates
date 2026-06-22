@@ -195,6 +195,55 @@ public class TemplateRepositoryClient
 		sendAllowingNotFound(new Request.Builder().url(url).delete().build(), body -> onSuccess.run(), onError);
 	}
 
+	// Records an import server-side, deduped to one per account per template. {@code onDone} (if any)
+	// runs once the server has responded, so callers can refresh the true count.
+	void recordImport(long repoId, Runnable onDone)
+	{
+		fireAndForget(repoId, "import", onDone);
+	}
+
+	// Reverses an import when the user deletes their imported copy (decrements the count).
+	void unimport(long repoId)
+	{
+		fireAndForget(repoId, "unimport", null);
+	}
+
+	// Best-effort POST {clientId} to a template sub-path; the local action has already happened.
+	private void fireAndForget(long repoId, String subPath, Runnable onDone)
+	{
+		if (!isEnabled())
+		{
+			return;
+		}
+		final JsonObject body = new JsonObject();
+		body.addProperty("clientId", clientId());
+		final Request request = new Request.Builder()
+			.url(baseUrl() + "/api/templates/" + repoId + "/" + subPath)
+			.post(RequestBody.create(JSON, gson.toJson(body)))
+			.build();
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				if (onDone != null)
+				{
+					onDone.run();
+				}
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				response.close();
+				if (onDone != null)
+				{
+					onDone.run();
+				}
+			}
+		});
+	}
+
 	void report(long repoId, Runnable onSuccess, Consumer<String> onError)
 	{
 		final JsonObject body = new JsonObject();

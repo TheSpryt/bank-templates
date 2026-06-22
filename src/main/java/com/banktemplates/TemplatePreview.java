@@ -5,6 +5,7 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
+import java.awt.Insets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -50,18 +51,28 @@ final class TemplatePreview
 		scroll.setBorder(BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR));
 		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-		// Tab buttons.
-		final JPanel tabBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 3, 0));
+		// Tab buttons. WrapLayout so a bank with many tabs wraps onto further rows instead of being
+		// clipped by the dialog width.
+		final JPanel tabBar = new JPanel(new WrapLayout(FlowLayout.LEFT, 3, 2));
 		tabBar.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		final List<JButton> tabButtons = new ArrayList<>();
 		for (int i = 0; i < tabs.size(); i++)
 		{
 			final TabLayout tab = tabs.get(i);
-			final JButton b = new JButton(tab.getTab() == BankTemplate.MAIN_TAB ? "Main" : Integer.toString(tab.getTab()));
+			final boolean isMain = tab.getTab() == BankTemplate.MAIN_TAB;
+			// A bank tab's icon is its first item (that's how the game determines it).
+			final int iconId = isMain ? 0 : firstItem(tab.getLayout());
+			final JButton b = new JButton(isMain ? "Main" : iconId > 0 ? "" : Integer.toString(tab.getTab()));
+			if (iconId > 0)
+			{
+				itemManager.getImage(iconId).addTo(b);
+				b.setToolTipText("Tab " + tab.getTab());
+			}
 			b.setFocusPainted(false);
 			b.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 			b.setForeground(Color.WHITE);
-			b.setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
+			b.setBorder(BorderFactory.createEmptyBorder(2, iconId > 0 ? 3 : 8, 2, iconId > 0 ? 3 : 8));
+			b.setMargin(new Insets(0, 0, 0, 0));
 			final int[] columnsRef = {columns};
 			b.addActionListener(e ->
 			{
@@ -88,6 +99,19 @@ final class TemplatePreview
 			tabButtons.get(0).doClick();
 		}
 		return root;
+	}
+
+	// Fallback tab icon: the first real item in the tab.
+	private static int firstItem(List<Integer> layout)
+	{
+		for (Integer v : layout)
+		{
+			if (v != null && v > 0 && v != BankTemplate.FILLER)
+			{
+				return v;
+			}
+		}
+		return 0;
 	}
 
 	private static JPanel grid(ItemManager itemManager, int[] layout, int columns)

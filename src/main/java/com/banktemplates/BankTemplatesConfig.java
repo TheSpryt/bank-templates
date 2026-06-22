@@ -102,6 +102,40 @@ public interface BankTemplatesConfig extends Config
 		return false;
 	}
 
+	// Reorg display style. Panel-driven (hidden here), persisted so the choice survives restarts.
+	@ConfigItem(
+		keyName = "reorgDisplay",
+		name = "Reorganise display",
+		description = "How the reorganise helper guides you.",
+		hidden = true,
+		position = 2,
+		section = reorgSection
+	)
+	default ReorgDisplay reorgDisplay()
+	{
+		return ReorgDisplay.STEP_BY_STEP;
+	}
+
+	enum ReorgDisplay
+	{
+		STEP_BY_STEP("Step-by-step"),
+		LABELS("Labels"),
+		BOTH("Labels + step-by-step");
+
+		private final String label;
+
+		ReorgDisplay(String label)
+		{
+			this.label = label;
+		}
+
+		@Override
+		public String toString()
+		{
+			return label;
+		}
+	}
+
 	@Alpha
 	@ConfigItem(
 		keyName = "reorgHighlightColor",
