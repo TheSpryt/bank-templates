@@ -1,5 +1,6 @@
 package com.banktemplates;
 
+import com.google.gson.Gson;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -54,6 +55,7 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private static final String LOCAL = "local";
 	private static final String BROWSE = "browse";
+	private static final String UPDATES = "updates";
 	private static final int PAGE_SIZE = 20;
 	private static final int MAX_NAME_LENGTH = 25;
 
@@ -71,8 +73,13 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private final JPanel listContainer = new JPanel();
 	private final IconTextField searchBar = new IconTextField();
+	private final JPanel tabsPanel = new JPanel();
 	private final JButton localTab = new JButton("My Templates");
 	private final JButton browseTab = new JButton("Browse");
+	private final JButton updatesTab = new JButton("Updates");
+
+	// The newest bundled patch notes (this build's version + notes), or null if none.
+	private final Changelog.Entry latestUpdate;
 
 	private String mode = LOCAL;
 	private String query = "";
@@ -90,7 +97,7 @@ public class BankTemplatesPanel extends PluginPanel
 	@Inject
 	BankTemplatesPanel(TemplateManager templateManager, ItemManager itemManager, TemplateRepositoryClient repositoryClient,
 		Client client, ClientThread clientThread, ConfigManager configManager, BankTemplatesConfig config,
-		LayoutEditor layoutEditor)
+		LayoutEditor layoutEditor, Gson gson)
 	{
 		this.templateManager = templateManager;
 		this.itemManager = itemManager;
@@ -100,6 +107,13 @@ public class BankTemplatesPanel extends PluginPanel
 		this.configManager = configManager;
 		this.config = config;
 		this.layoutEditor = layoutEditor;
+		this.latestUpdate = Changelog.latest(gson);
+
+		// Open straight onto the Updates tab when there are unseen patch notes.
+		if (hasUnseenUpdate())
+		{
+			mode = UPDATES;
+		}
 
 		setLayout(new BorderLayout());
 		setBorder(BorderFactory.createEmptyBorder(10, 8, 8, 8));
@@ -144,17 +158,16 @@ public class BankTemplatesPanel extends PluginPanel
 
 		header.add(Box.createVerticalStrut(8));
 
-		final JPanel tabs = new JPanel(new GridLayout(1, 2, 4, 0));
-		tabs.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		tabs.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-		tabs.setAlignmentX(Component.LEFT_ALIGNMENT);
+		tabsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		tabsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
 		localTab.setFocusPainted(false);
 		browseTab.setFocusPainted(false);
+		updatesTab.setFocusPainted(false);
 		localTab.addActionListener(e -> switchMode(LOCAL));
 		browseTab.addActionListener(e -> switchMode(BROWSE));
-		tabs.add(localTab);
-		tabs.add(browseTab);
-		header.add(tabs);
+		updatesTab.addActionListener(e -> switchMode(UPDATES));
+		layoutTabs();
+		header.add(tabsPanel);
 
 		header.add(Box.createVerticalStrut(8));
 
@@ -223,6 +236,40 @@ public class BankTemplatesPanel extends PluginPanel
 		localTab.setForeground(LOCAL.equals(mode) ? Color.BLACK : Color.WHITE);
 		browseTab.setBackground(BROWSE.equals(mode) ? ColorScheme.BRAND_ORANGE : ColorScheme.DARKER_GRAY_COLOR);
 		browseTab.setForeground(BROWSE.equals(mode) ? Color.BLACK : Color.WHITE);
+		updatesTab.setBackground(UPDATES.equals(mode) ? ColorScheme.BRAND_ORANGE : ColorScheme.DARKER_GRAY_COLOR);
+		updatesTab.setForeground(UPDATES.equals(mode) ? Color.BLACK : Color.WHITE);
+	}
+
+	// My Templates / Browse share a row; the Updates tab (when unseen) goes on its own row below so it
+	// doesn't squeeze the others into truncation.
+	private void layoutTabs()
+	{
+		tabsPanel.removeAll();
+		tabsPanel.setLayout(new BoxLayout(tabsPanel, BoxLayout.Y_AXIS));
+
+		final JPanel row = new JPanel(new GridLayout(1, 2, 4, 0));
+		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		row.add(localTab);
+		row.add(browseTab);
+		tabsPanel.add(row);
+
+		if (hasUnseenUpdate())
+		{
+			tabsPanel.add(Box.createVerticalStrut(4));
+			updatesTab.setAlignmentX(Component.LEFT_ALIGNMENT);
+			updatesTab.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+			tabsPanel.add(updatesTab);
+		}
+		tabsPanel.revalidate();
+		tabsPanel.repaint();
+	}
+
+	private boolean hasUnseenUpdate()
+	{
+		return config.alertUpdates() && latestUpdate != null && latestUpdate.version != null
+			&& !latestUpdate.version.equals(config.lastSeenVersion());
 	}
 
 	void rebuild()
@@ -241,12 +288,91 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			buildBrowseView();
 		}
+		else if (UPDATES.equals(mode))
+		{
+			buildUpdatesView();
+		}
 		else
 		{
 			buildLocalView();
 		}
 		listContainer.revalidate();
 		listContainer.repaint();
+	}
+
+	// ---- Updates ----------------------------------------------------------------------------
+
+	private void buildUpdatesView()
+	{
+		if (latestUpdate == null)
+		{
+			switchMode(LOCAL);
+			return;
+		}
+
+		// Known issues first, so they're seen before the feature notes.
+		if (latestUpdate.knownIssues != null && !latestUpdate.knownIssues.isEmpty())
+		{
+			final JLabel kiHeading = new JLabel("Known issues");
+			kiHeading.setFont(FontManager.getRunescapeBoldFont());
+			kiHeading.setForeground(ColorScheme.PROGRESS_ERROR_COLOR);
+			kiHeading.setAlignmentX(Component.LEFT_ALIGNMENT);
+			kiHeading.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
+			listContainer.add(kiHeading);
+			for (String issue : latestUpdate.knownIssues)
+			{
+				listContainer.add(bulletLabel(issue, ColorScheme.LIGHT_GRAY_COLOR));
+			}
+			listContainer.add(Box.createVerticalStrut(8));
+		}
+
+		final JLabel heading = new JLabel("What's new");
+		heading.setFont(FontManager.getRunescapeBoldFont());
+		heading.setForeground(Color.WHITE);
+		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
+		listContainer.add(heading);
+
+		final JLabel version = new JLabel("Version " + latestUpdate.version);
+		version.setForeground(ColorScheme.BRAND_ORANGE);
+		version.setAlignmentX(Component.LEFT_ALIGNMENT);
+		version.setBorder(BorderFactory.createEmptyBorder(2, 0, 8, 0));
+		listContainer.add(version);
+
+		if (latestUpdate.notes != null)
+		{
+			for (String note : latestUpdate.notes)
+			{
+				listContainer.add(bulletLabel(note, Color.WHITE));
+			}
+		}
+
+		listContainer.add(Box.createVerticalStrut(6));
+		final JButton dismiss = styledButton("Dismiss");
+		dismiss.setAlignmentX(Component.LEFT_ALIGNMENT);
+		dismiss.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		dismiss.setToolTipText("Hide these notes and go back to My Templates");
+		dismiss.addActionListener(e -> dismissUpdate());
+		listContainer.add(dismiss);
+	}
+
+	// A wrapped bullet-point label sized for the side panel.
+	private JLabel bulletLabel(String text, Color color)
+	{
+		final JLabel b = new JLabel("<html><body style='width:160px'>&#8226;&nbsp;" + escape(text) + "</body></html>");
+		b.setForeground(color);
+		b.setAlignmentX(Component.LEFT_ALIGNMENT);
+		b.setBorder(BorderFactory.createEmptyBorder(0, 2, 7, 0));
+		return b;
+	}
+
+	private void dismissUpdate()
+	{
+		if (latestUpdate != null && latestUpdate.version != null)
+		{
+			configManager.setConfiguration(BankTemplatesConfig.GROUP, "lastSeenVersion", latestUpdate.version);
+		}
+		layoutTabs();        // the Updates tab disappears now it's seen
+		switchMode(LOCAL);   // back to My Templates
 	}
 
 	// ---- Local templates --------------------------------------------------------------------
