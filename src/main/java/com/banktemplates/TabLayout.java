@@ -10,7 +10,7 @@ import java.util.List;
 class TabLayout
 {
 	private int tab;
-	private List<Integer> layout;
+	private List<Integer> layout = new ArrayList<>();
 
 	TabLayout()
 	{
@@ -19,7 +19,7 @@ class TabLayout
 	TabLayout(int tab, List<Integer> layout)
 	{
 		this.tab = tab;
-		this.layout = layout;
+		this.layout = layout != null ? layout : new ArrayList<>();
 	}
 
 	int getTab()
@@ -27,8 +27,16 @@ class TabLayout
 		return tab;
 	}
 
+	/**
+	 * The live, mutable slot list for this tab. Callers that edit a template (the layout editor) rely
+	 * on this being the backing list so their changes stick; everyone else just reads it.
+	 */
 	List<Integer> getLayout()
 	{
-		return layout != null ? layout : new ArrayList<>();
+		if (layout == null)
+		{
+			layout = new ArrayList<>();
+		}
+		return layout;
 	}
 }

@@ -52,14 +52,21 @@ public class BankLayoutRenderer
 	private final ItemManager itemManager;
 	private final TemplateManager templateManager;
 	private final BankTemplatesConfig config;
+	private final LayoutEditor layoutEditor;
+
+	// True while drawing for the layout editor: items render as faded placeholders even if unowned, and
+	// non-template bank items are not appended, so the design (and the "+" slot) stays clean.
+	private boolean editing;
 
 	@Inject
-	BankLayoutRenderer(Client client, ItemManager itemManager, TemplateManager templateManager, BankTemplatesConfig config)
+	BankLayoutRenderer(Client client, ItemManager itemManager, TemplateManager templateManager,
+		BankTemplatesConfig config, LayoutEditor layoutEditor)
 	{
 		this.client = client;
 		this.itemManager = itemManager;
 		this.templateManager = templateManager;
 		this.config = config;
+		this.layoutEditor = layoutEditor;
 	}
 
 	/**
@@ -94,27 +101,43 @@ public class BankLayoutRenderer
 
 		resetWidgets();
 
-		// Reorganise-helper mode shows the real bank (with the guide overlay) rather than the virtual
-		// layout, so don't apply the template while it's on.
-		if (config.showReorgHelper() || !config.applyLayout())
-		{
-			return;
-		}
-
 		final BankTemplate template = templateManager.getActive();
 		if (template == null)
 		{
 			return;
 		}
 
-		final int[] layout = template.tabLayout(client.getVarbitValue(VarbitID.BANK_CURRENTTAB));
-		if (layout == null || layout.length == 0)
+		final boolean editingNow = layoutEditor.isEditing(template);
+
+		// Reorganise-helper mode shows the real bank (with the guide overlay) rather than the virtual
+		// layout, so don't apply the template while it's on - unless we're actively editing this
+		// template, in which case the editable layout always renders.
+		if (!editingNow && (config.showReorgHelper() || !config.applyLayout()))
 		{
-			// This template doesn't define the tab being viewed: leave the bank in its default state.
 			return;
 		}
 
-		layout(layout, template.getColumns());
+		int[] layout = template.tabLayout(client.getVarbitValue(VarbitID.BANK_CURRENTTAB));
+		if (layout == null || layout.length == 0)
+		{
+			if (!editingNow)
+			{
+				// This template doesn't define the tab being viewed: leave the bank in its default state.
+				return;
+			}
+			// Editing a tab the template doesn't cover yet: render an empty, editable grid.
+			layout = new int[0];
+		}
+
+		this.editing = editingNow;
+		try
+		{
+			layout(layout, template.getColumns());
+		}
+		finally
+		{
+			this.editing = false;
+		}
 	}
 
 	// Tab icons are set during the bank build, so override them AFTER it runs (post-fire), or they'd be
@@ -125,15 +148,16 @@ public class BankLayoutRenderer
 		{
 			return;
 		}
-		if (config.showReorgHelper() || !config.applyLayout())
+		final BankTemplate template = templateManager.getActive();
+		if (template == null)
 		{
 			return;
 		}
-		final BankTemplate template = templateManager.getActive();
-		if (template != null)
+		if (!layoutEditor.isEditing(template) && (config.showReorgHelper() || !config.applyLayout()))
 		{
-			applyTabIcons(template);
+			return;
 		}
+		applyTabIcons(template);
 	}
 
 	// Override the native tab-button icons to the template's first item per tab. The tab icons are the
@@ -277,7 +301,9 @@ public class BankLayoutRenderer
 		}
 
 		int slotIdx = appendStart;
-		if (!config.hideNonTemplateItems())
+		// While editing we don't append the player's other bank items - the grid is the design surface,
+		// and the slot right after the layout is the editor's "+" (add item) target.
+		if (!editing && !config.hideNonTemplateItems())
 		{
 			for (int itemId : bankItems)
 			{
@@ -338,7 +364,9 @@ public class BankLayoutRenderer
 
 		if (qty <= 0)
 		{
-			if (!config.showPlaceholders())
+			// In the editor, always show a faded placeholder - otherwise items you add but don't own
+			// would be invisible and impossible to arrange.
+			if (!config.showPlaceholders() && !editing)
 			{
 				drawEmpty(c, idx, columns);
 				return;

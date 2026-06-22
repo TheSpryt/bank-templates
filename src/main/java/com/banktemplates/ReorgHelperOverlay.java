@@ -30,6 +30,7 @@ import net.runelite.api.gameval.SpriteID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.ItemVariationMapping;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -112,7 +113,7 @@ public class ReorgHelperOverlay extends Overlay
 				if (c != null && !c.isSelfHidden() && c.getItemId() > 0 && c.getItemId() != ItemID.BLANKOBJECT)
 				{
 					widgets.add(c);
-					current.add(itemManager.canonicalize(c.getItemId()));
+					current.add(functionalId(c.getItemId()));
 				}
 			}
 		}
@@ -137,7 +138,7 @@ public class ReorgHelperOverlay extends Overlay
 				{
 					continue;
 				}
-				final int canon = itemManager.canonicalize(v);
+				final int canon = functionalId(v);
 				if (!owned.contains(canon) || !seen.add(canon))
 				{
 					continue;
@@ -261,7 +262,7 @@ public class ReorgHelperOverlay extends Overlay
 			{
 				continue;
 			}
-			final int canon = itemManager.canonicalize(id);
+			final int canon = functionalId(id);
 			if (have.contains(canon) && added.add(canon))
 			{
 				target.add(canon);
@@ -342,6 +343,18 @@ public class ReorgHelperOverlay extends Overlay
 		}
 	}
 
+	/**
+	 * A stable id for "this item, ignoring functionally-identical variants". Canonicalises placeholders
+	 * to the real item, then maps the result onto its variation base ({@link ItemVariationMapping}) so
+	 * item kits and alternate versions (charged/uncharged, degraded, recoloured, …) collapse to one id.
+	 * This matches how the virtual renderer pairs template items to bank items, so the reorganise helper
+	 * no longer flags a slot as "wrong" when you hold a functionally-identical version of the item.
+	 */
+	private int functionalId(int id)
+	{
+		return ItemVariationMapping.map(itemManager.canonicalize(id));
+	}
+
 	// Canonical ids of everything in the bank (what the player owns).
 	private Set<Integer> ownedItems()
 	{
@@ -353,7 +366,7 @@ public class ReorgHelperOverlay extends Overlay
 			{
 				if (it.getId() > 0)
 				{
-					owned.add(itemManager.canonicalize(it.getId()));
+					owned.add(functionalId(it.getId()));
 				}
 			}
 		}
