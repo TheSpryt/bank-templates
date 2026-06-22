@@ -12,8 +12,10 @@ import java.awt.Rectangle;
 import java.awt.Shape;
 import java.awt.Stroke;
 import java.awt.image.BufferedImage;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -252,9 +254,17 @@ public class ReorgHelperOverlay extends Overlay
 			return;
 		}
 
-		// Desired order = template items you have in this view (canonical, template order), then leftovers.
-		final Set<Integer> have = new HashSet<>(current);
-		final Set<Integer> added = new HashSet<>();
+		// Desired order = template items you have in this view (canonical, template order), honouring how
+		// many of each you actually hold, then any leftovers in their current order. This must stay a
+		// permutation of `current` (same items, same multiplicity) or the position maths below drifts: if
+		// you hold two functionally-identical items (an item and its placeholder, or two charge/variant
+		// versions), de-duplicating here would make `target` shorter than `current` and shift every later
+		// slot back by one - which is what made the "insert here" arrow point one slot too early.
+		final Map<Integer, Integer> remaining = new HashMap<>();
+		for (int canon : current)
+		{
+			remaining.merge(canon, 1, Integer::sum);
+		}
 		final List<Integer> target = new ArrayList<>();
 		for (int id : desired)
 		{
@@ -263,16 +273,20 @@ public class ReorgHelperOverlay extends Overlay
 				continue;
 			}
 			final int canon = functionalId(id);
-			if (have.contains(canon) && added.add(canon))
+			final Integer count = remaining.get(canon);
+			if (count != null && count > 0)
 			{
 				target.add(canon);
+				remaining.put(canon, count - 1);
 			}
 		}
 		for (int canon : current)
 		{
-			if (added.add(canon))
+			final Integer count = remaining.get(canon);
+			if (count != null && count > 0)
 			{
 				target.add(canon);
+				remaining.put(canon, count - 1);
 			}
 		}
 
@@ -438,16 +452,18 @@ public class ReorgHelperOverlay extends Overlay
 
 	private static int[] permutation(List<Integer> current, List<Integer> target)
 	{
-		final Map<Integer, Integer> idx = new HashMap<>();
+		// Map each value to its target slots in order, so repeated (functionally-identical) items are
+		// matched up one-to-one instead of all collapsing onto the same index.
+		final Map<Integer, Deque<Integer>> slots = new HashMap<>();
 		for (int k = 0; k < target.size(); k++)
 		{
-			idx.put(target.get(k), k);
+			slots.computeIfAbsent(target.get(k), x -> new ArrayDeque<>()).add(k);
 		}
 		final int[] perm = new int[current.size()];
 		for (int k = 0; k < current.size(); k++)
 		{
-			final Integer t = idx.get(current.get(k));
-			perm[k] = t == null ? k : t;
+			final Deque<Integer> q = slots.get(current.get(k));
+			perm[k] = q != null && !q.isEmpty() ? q.poll() : k;
 		}
 		return perm;
 	}
