@@ -1,18 +1,20 @@
 package com.banktemplates;
 
-import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
-import java.awt.Composite;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.Stroke;
-import java.awt.image.BufferedImage;
 import javax.inject.Inject;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import net.runelite.api.Client;
+import net.runelite.api.ScriptID;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.SpriteID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -32,15 +34,16 @@ import net.runelite.client.ui.overlay.OverlayPosition;
 public class LayoutEditorOverlay extends Overlay implements MouseListener
 {
 	private static final Color ADD_COLOR = new Color(110, 200, 110);
-	private static final Color DRAG_COLOR = new Color(255, 165, 0);
-	private static final Color BANNER_BG = new Color(0, 0, 0, 180);
-	private static final Font PLUS_FONT = new Font("Arial", Font.BOLD, 22);
-	private static final Font BANNER_FONT = new Font("Arial", Font.BOLD, 12);
+	private static final Font PLUS_FONT = new Font("Arial", Font.PLAIN, 22);
+
+	private static final int DRAG_THRESHOLD = 5;
 
 	private final Client client;
 	private final ItemManager itemManager;
 	private final LayoutEditor layoutEditor;
 	private final ClientThread clientThread;
+	private final BankTemplatesConfig config;
+	private final BankLayoutRenderer renderer;
 
 	// Captured each frame on the client thread, read by the (AWT-thread) mouse handlers.
 	private volatile Rectangle[] slotRects = new Rectangle[0];
@@ -48,19 +51,30 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	private volatile Rectangle addRect;
 	private volatile Rectangle containerRect;
 	private volatile int currentTab;
+	// Native tab buttons (tab number -> bounds), so a slot can be dragged onto a tab to move it there.
+	private volatile Map<Integer, Rectangle> tabRects = Collections.emptyMap();
+	// The bank's "+" (add tab) button: dropping a slot here creates a new template tab.
+	private volatile Rectangle newTabRect;
 
-	// Drag state, set by the mouse handlers, read while rendering the drag ghost.
+	// Drag state, set by the mouse handlers. The native bank drag draws the item on the cursor; we only
+	// track this to know it's a drag (not a click) and for edge auto-scroll.
 	private volatile int dragFrom = -1;
-	private volatile int dragItem;
 	private volatile java.awt.Point dragPoint;
+	// A press is "armed" until it either moves past the threshold (-> drag/rearrange) or releases in
+	// place (-> click passes through to the bank, e.g. withdraw).
+	private volatile int pressSlot = -1;
+	private volatile java.awt.Point pressPoint;
 
 	@Inject
-	LayoutEditorOverlay(Client client, ItemManager itemManager, LayoutEditor layoutEditor, ClientThread clientThread)
+	LayoutEditorOverlay(Client client, ItemManager itemManager, LayoutEditor layoutEditor, ClientThread clientThread,
+		BankTemplatesConfig config, BankLayoutRenderer renderer)
 	{
 		this.client = client;
 		this.itemManager = itemManager;
 		this.layoutEditor = layoutEditor;
 		this.clientThread = clientThread;
+		this.config = config;
+		this.renderer = renderer;
 		setLayer(OverlayLayer.ABOVE_WIDGETS);
 		setPosition(OverlayPosition.DYNAMIC);
 	}
@@ -68,8 +82,12 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		final BankTemplate template = layoutEditor.getTarget();
-		if (!layoutEditor.isEditing() || template == null || BankLayoutRenderer.isBankFiltered(client))
+		// Editable whenever a user template is applied (always-on), or during an explicit edit session.
+		final BankTemplate template = layoutEditor.liveTemplate();
+		final boolean active = template != null
+			&& (layoutEditor.isEditing() || (config.applyLayout() && !config.showReorgHelper()))
+			&& !BankLayoutRenderer.isBankFiltered(client);
+		if (!active)
 		{
 			clearCache();
 			return null;
@@ -86,48 +104,75 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		final int[] layout = template.tabLayout(tab);
 		final int len = layout == null ? 0 : layout.length;
 
+		// Slots are located via the renderer's position->widget map (a widget's container index no longer
+		// equals its rendered slot, since items are placed by identity for Inventory Setups compatibility).
 		final Rectangle[] rects = new Rectangle[len];
 		final int[] items = new int[len];
 		for (int i = 0; i < len; i++)
 		{
-			final Widget c = itemContainer.getChild(i);
+			final Widget c = renderer.slotWidgetAt(i);
 			rects[i] = c != null ? c.getBounds() : null;
 			items[i] = layout[i];
 		}
 
-		// The "+" lives in the slot right after the layout.
-		final Widget addChild = itemContainer.getChild(len);
-		final Rectangle add = addChild != null ? addChild.getBounds() : null;
+		// The "+" lives in the slot right after the layout. It can be scrolled out of view, where its
+		// widget bounds sit over the bank's bottom buttons - only show/hit-test it when it's actually
+		// inside the visible bank area.
+		final Rectangle container = itemContainer.getBounds();
+		final Widget addChild = renderer.slotWidgetAt(len);
+		Rectangle add = addChild != null ? addChild.getBounds() : null;
+		if (add != null && (container == null || !container.contains(add)))
+		{
+			add = null;
+		}
 
 		this.slotRects = rects;
 		this.slotItems = items;
 		this.addRect = add;
-		this.containerRect = itemContainer.getBounds();
+		this.containerRect = container;
 		this.currentTab = tab;
+		this.tabRects = captureTabRects();
 
 		if (add != null && add.width > 0)
 		{
 			drawAddButton(graphics, add);
 		}
 
-		drawBanner(graphics, template, itemContainer);
+		// The "Editing ..." banner is shown in the bank's real title bar (set by BankLayoutRenderer).
 
-		// Drag ghost.
+		// The native bank drag draws the item on the cursor, so we don't render our own ghost. We only read
+		// the drag point here to auto-scroll the bank when the cursor nears the top/bottom edge.
 		final int from = dragFrom;
 		final java.awt.Point p = dragPoint;
-		if (from >= 0 && from < rects.length && rects[from] != null)
+
+		// While dragging near the top/bottom edge, auto-scroll the bank (like the native bank drag) so an
+		// item can be dragged across many rows without holding click and using the scroll wheel together.
+		if (from >= 0 && p != null)
 		{
-			outline(graphics, rects[from], DRAG_COLOR);
-		}
-		if (from >= 0 && p != null && dragItem > 0)
-		{
-			final BufferedImage img = itemManager.getImage(dragItem);
-			if (img != null)
+			final Rectangle cb = itemContainer.getBounds();
+			if (cb != null && cb.height > 0)
 			{
-				final Composite old = graphics.getComposite();
-				graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.6f));
-				graphics.drawImage(img, p.x - img.getWidth() / 2, p.y - img.getHeight() / 2, null);
-				graphics.setComposite(old);
+				final int edge = 24;
+				int delta = 0;
+				if (p.y < cb.y + edge)
+				{
+					delta = -12;
+				}
+				else if (p.y > cb.y + cb.height - edge)
+				{
+					delta = 12;
+				}
+				if (delta != 0)
+				{
+					final int max = Math.max(0, itemContainer.getScrollHeight() - itemContainer.getHeight());
+					final int newY = Math.max(0, Math.min(max, itemContainer.getScrollY() + delta));
+					if (newY != itemContainer.getScrollY())
+					{
+						itemContainer.setScrollY(newY);
+						itemContainer.revalidateScroll();
+						client.runScript(ScriptID.UPDATE_SCROLLBAR, InterfaceID.Bankmain.SCROLLBAR, InterfaceID.Bankmain.ITEMS, newY);
+					}
+				}
 			}
 		}
 
@@ -151,26 +196,6 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		g.drawString("+", b.x + (b.width - sw) / 2, b.y + (b.height + ascent) / 2 - 2);
 	}
 
-	private void drawBanner(Graphics2D g, BankTemplate template, Widget container)
-	{
-		final Widget title = client.getWidget(InterfaceID.Bankmain.TITLE);
-		final Rectangle anchor = title != null && !title.isHidden() && title.getBounds().width > 0
-			? title.getBounds() : container.getBounds();
-
-		final String text = "Editing \"" + template.getName() + "\" - drag to arrange, click + to add";
-		g.setFont(BANNER_FONT);
-		final int pad = 5;
-		final int w = g.getFontMetrics().stringWidth(text) + pad * 2;
-		final int h = g.getFontMetrics().getHeight() + pad * 2;
-		final int x = anchor.x + Math.max(2, (anchor.width - w) / 2);
-		final int y = anchor.y;
-
-		g.setColor(BANNER_BG);
-		g.fillRect(x, y, w, h);
-		g.setColor(ADD_COLOR);
-		g.drawString(text, x + pad, y + pad + g.getFontMetrics().getAscent());
-	}
-
 	private void outline(Graphics2D g, Rectangle b, Color c)
 	{
 		if (b == null || b.width <= 0)
@@ -192,8 +217,12 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		slotItems = new int[0];
 		addRect = null;
 		containerRect = null;
+		tabRects = Collections.emptyMap();
+		newTabRect = null;
 		dragFrom = -1;
 		dragPoint = null;
+		pressSlot = -1;
+		pressPoint = null;
 	}
 
 	// ---- Mouse handling (AWT thread; hit-tests the cached rectangles only) -------------------
@@ -201,12 +230,13 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	@Override
 	public java.awt.event.MouseEvent mousePressed(java.awt.event.MouseEvent e)
 	{
-		if (!layoutEditor.isEditing() || !javax.swing.SwingUtilities.isLeftMouseButton(e))
+		if (layoutEditor.liveTemplate() == null || !javax.swing.SwingUtilities.isLeftMouseButton(e))
 		{
 			return e;
 		}
 		final java.awt.Point p = e.getPoint();
 
+		// The "+" add button has no withdraw conflict, so act on press.
 		final Rectangle add = addRect;
 		if (add != null && add.contains(p))
 		{
@@ -215,13 +245,13 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 			return e;
 		}
 
+		// Arm a potential drag but DON'T consume yet, so a plain click still reaches the bank (withdraw).
 		final int slot = slotAt(p);
 		if (slot >= 0)
 		{
-			dragFrom = slot;
-			dragItem = slot < slotItems.length ? slotItems[slot] : -1;
-			dragPoint = p;
-			e.consume();
+			pressSlot = slot;
+			pressPoint = p;
+			dragFrom = -1;
 		}
 		return e;
 	}
@@ -229,10 +259,17 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	@Override
 	public java.awt.event.MouseEvent mouseDragged(java.awt.event.MouseEvent e)
 	{
+		final java.awt.Point press = pressPoint;
+		if (dragFrom < 0 && pressSlot >= 0 && press != null && press.distance(e.getPoint()) > DRAG_THRESHOLD)
+		{
+			// Movement past the threshold means a drag (rearrange the template), not a click (withdraw).
+			dragFrom = pressSlot;
+		}
 		if (dragFrom >= 0)
 		{
+			// Track the cursor for edge auto-scroll, but DON'T consume: the native bank drag runs underneath
+			// (item on the cursor) and must complete so the client clears its own drag state.
 			dragPoint = e.getPoint();
-			e.consume();
 		}
 		return e;
 	}
@@ -241,15 +278,43 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	public java.awt.event.MouseEvent mouseReleased(java.awt.event.MouseEvent e)
 	{
 		final int from = dragFrom;
+		pressSlot = -1;
+		pressPoint = null;
+		dragFrom = -1;
+		dragPoint = null;
 		if (from < 0)
 		{
+			// Never crossed the threshold: it was a click, let the bank handle it (e.g. withdraw).
 			return e;
 		}
 		final java.awt.Point p = e.getPoint();
-		dragFrom = -1;
-		dragPoint = null;
-
 		final int tab = currentTab;
+
+		// We deliberately DON'T consume the release. The native bank drag completes underneath us, which is
+		// what clears the client's drag state (so the next click isn't swallowed into a withdraw of the item
+		// we just dragged). Its real reorder is already blocked by the item's drag-complete listener; here we
+		// just rewrite the template to match where the item was dropped.
+
+		// Dropped onto the "+" button -> create a new tab from this item (like the real bank).
+		final Rectangle newTab = newTabRect;
+		if (newTab != null && newTab.contains(p))
+		{
+			clientThread.invoke(() -> layoutEditor.moveToNewTab(tab, from));
+			return e;
+		}
+
+		// Dropped onto a different tab's button -> move the item into that tab.
+		for (Map.Entry<Integer, Rectangle> en : tabRects.entrySet())
+		{
+			final Rectangle r = en.getValue();
+			if (r != null && r.contains(p) && en.getKey() != tab)
+			{
+				final int destTab = en.getKey();
+				clientThread.invoke(() -> layoutEditor.moveToTab(tab, from, destTab));
+				return e;
+			}
+		}
+
 		int target = slotAt(p);
 		final Rectangle add = addRect;
 		final Rectangle container = containerRect;
@@ -266,8 +331,48 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 			final int dest = target;
 			clientThread.invoke(() -> layoutEditor.moveSlot(tab, from, dest));
 		}
-		e.consume();
 		return e;
+	}
+
+	// Native bank tab buttons by tab number (1-9 = the item-icon children of Bankmain.TABS; 0 = the
+	// all-items button, identified by its sprite).
+	private Map<Integer, Rectangle> captureTabRects()
+	{
+		final Map<Integer, Rectangle> map = new HashMap<>();
+		this.newTabRect = null;
+		final Widget tabs = client.getWidget(InterfaceID.Bankmain.TABS);
+		if (tabs == null)
+		{
+			return map;
+		}
+		int tab = 1;
+		for (Widget[] group : new Widget[][]{tabs.getDynamicChildren(), tabs.getStaticChildren(), tabs.getNestedChildren()})
+		{
+			if (group == null)
+			{
+				continue;
+			}
+			for (Widget c : group)
+			{
+				if (c == null)
+				{
+					continue;
+				}
+				if (c.getSpriteId() == SpriteID.BanktabIcons.ALL_ITEMS)
+				{
+					map.put(BankTemplate.MAIN_TAB, c.getBounds());
+				}
+				else if (c.getSpriteId() == SpriteID.BanktabIcons.ADD)
+				{
+					this.newTabRect = c.getBounds();
+				}
+				else if (c.getItemId() > 0 && tab <= 9)
+				{
+					map.put(tab++, c.getBounds());
+				}
+			}
+		}
+		return map;
 	}
 
 	private int slotAt(java.awt.Point p)
@@ -288,7 +393,9 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		final int tab = currentTab;
 		javax.swing.SwingUtilities.invokeLater(() ->
 			ItemSearch.open(client.getCanvas(), itemManager, id ->
-				clientThread.invoke(() -> layoutEditor.addItem(tab, id))));
+				clientThread.invoke(() -> layoutEditor.addItemOrReport(tab, id, msg ->
+					javax.swing.SwingUtilities.invokeLater(() -> javax.swing.JOptionPane.showMessageDialog(
+						null, msg, "Already in layout", javax.swing.JOptionPane.INFORMATION_MESSAGE))))));
 	}
 
 	@Override

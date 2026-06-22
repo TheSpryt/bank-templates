@@ -30,8 +30,10 @@ import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.SpriteID;
 import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.VarClientInt;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.input.MouseListener;
 import net.runelite.client.game.ItemVariationMapping;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -49,12 +51,16 @@ import net.runelite.client.ui.overlay.OverlayPosition;
  * It never moves anything - you do every drag. Only item order is matched (the real bank packs items
  * with no gaps, so template empty/filler columns aren't reproduced). Steps aside for Bank Tags.
  */
-public class ReorgHelperOverlay extends Overlay
+public class ReorgHelperOverlay extends Overlay implements MouseListener
 {
+	// Set true when the user clicks the title-bar "Skip" button to bypass reserving slots with fillers;
+	// the sort then runs as-is (owned items left-shift into place). Reset when the reorg helper is closed.
+	private volatile boolean skipFillers;
+	// Screen bounds of the title-bar "Skip" button (set while the filler-setup step is shown).
+	private volatile Rectangle skipButtonRect;
+
 	private static final Color SOURCE_COLOR = new Color(255, 165, 0);   // orange: item to move
 	private static final Color DONE_COLOR = new Color(110, 200, 110);
-	private static final Color TEXT_BG = new Color(0, 0, 0, 180);
-	private static final Font LABEL_FONT = new Font("Arial", Font.BOLD, 12);
 
 	private static final int[] TAB_COUNT_VARBITS = {
 		VarbitID.BANK_TAB_1, VarbitID.BANK_TAB_2, VarbitID.BANK_TAB_3, VarbitID.BANK_TAB_4,
@@ -66,6 +72,7 @@ public class ReorgHelperOverlay extends Overlay
 	private final BankTemplatesConfig config;
 	private final TemplateManager templateManager;
 	private final ItemManager itemManager;
+	private final BankLayoutRenderer renderer;
 
 	// The chosen swap/insert mode is fixed per tab so the user only toggles once. Cached against the
 	// tab + template it was decided for.
@@ -74,12 +81,14 @@ public class ReorgHelperOverlay extends Overlay
 	private boolean planSwap;
 
 	@Inject
-	ReorgHelperOverlay(Client client, BankTemplatesConfig config, TemplateManager templateManager, ItemManager itemManager)
+	ReorgHelperOverlay(Client client, BankTemplatesConfig config, TemplateManager templateManager, ItemManager itemManager,
+		BankLayoutRenderer renderer)
 	{
 		this.client = client;
 		this.config = config;
 		this.templateManager = templateManager;
 		this.itemManager = itemManager;
+		this.renderer = renderer;
 		setLayer(OverlayLayer.ABOVE_WIDGETS);
 		setPosition(OverlayPosition.DYNAMIC);
 	}
@@ -89,13 +98,54 @@ public class ReorgHelperOverlay extends Overlay
 	{
 		if (!config.showReorgHelper())
 		{
+			skipFillers = false;
+			skipButtonRect = null;
+			return null;
+		}
+		skipButtonRect = null;
+
+		final BankTemplate template = templateManager.getActive();
+		if (template == null)
+		{
 			return null;
 		}
 
-		final BankTemplate template = templateManager.getActive();
-		if (template == null || BankLayoutRenderer.isBankFiltered(client))
+		final BankTemplatesConfig.ReorgDisplay mode = config.reorgDisplay();
+		final boolean labels = mode == BankTemplatesConfig.ReorgDisplay.LABELS || mode == BankTemplatesConfig.ReorgDisplay.BOTH;
+		final boolean steps = mode == BankTemplatesConfig.ReorgDisplay.STEP_BY_STEP || mode == BankTemplatesConfig.ReorgDisplay.BOTH;
+
+		// In a Bank Tags tag tab / search the bank is filtered and can't be reorganised - guide the user
+		// back to the main bank view (the all-items tab) first.
+		if (renderer.isBankFilteredNow())
 		{
+			final Widget items = client.getWidget(InterfaceID.Bankmain.ITEMS);
+			if (steps && items != null)
+			{
+				setBankTitle("Open the main tab to reorganise this template", Color.WHITE, null, false);
+				final Widget allItems = tabButtons().get(BankTemplate.MAIN_TAB);
+				if (allItems != null && !allItems.isHidden())
+				{
+					pulseRect(graphics, allItems.getBounds(), config.reorgHighlightColor());
+				}
+			}
 			return null;
+		}
+
+		// Filler-setup guidance runs first, and even when the bank settings menu is open (which hides the
+		// item container): guide reserving real bank slots for unowned-item placeholders and filler slots.
+		if (steps && !skipFillers)
+		{
+			// Cap the ask at the free bank slots - never request more fillers than physically fit.
+			final int free = freeBankSlots();
+			final int wanted = reservedSlotsNeeded(template, ownedItems()) - bankFillerCount();
+			final int needed = Math.min(wanted, free);
+			if (needed > 0)
+			{
+				// If reserving would fill the bank to the brim, "All" is simpler than typing the count.
+				final boolean fillAll = free != Integer.MAX_VALUE && wanted >= free;
+				drawFillerSetup(graphics, needed, fillAll);
+				return null;
+			}
 		}
 
 		final Widget itemContainer = client.getWidget(InterfaceID.Bankmain.ITEMS);
@@ -157,10 +207,6 @@ public class ReorgHelperOverlay extends Overlay
 		// Which native tab each visible item is currently in.
 		final int[] itemTab = currentItemTabs(current.size(), currentTab);
 
-		final BankTemplatesConfig.ReorgDisplay mode = config.reorgDisplay();
-		final boolean labels = mode == BankTemplatesConfig.ReorgDisplay.LABELS || mode == BankTemplatesConfig.ReorgDisplay.BOTH;
-		final boolean steps = mode == BankTemplatesConfig.ReorgDisplay.STEP_BY_STEP || mode == BankTemplatesConfig.ReorgDisplay.BOTH;
-
 		final Shape oldClip = graphics.getClip();
 
 		if (labels)
@@ -172,10 +218,303 @@ public class ReorgHelperOverlay extends Overlay
 
 		if (steps)
 		{
-			drawSteps(graphics, itemContainer, template, currentTab, widgets, current, itemTab, targetTab);
+			drawSteps(graphics, itemContainer, template, currentTab, widgets, current, itemTab, targetTab, owned);
 		}
 
 		return null;
+	}
+
+	// How many real bank fillers the user should place: one per template filler slot, plus one per slot
+	// holding a placeholder for an item they don't own yet (so the space is reserved until they get it).
+	private int reservedSlotsNeeded(BankTemplate template, Set<Integer> owned)
+	{
+		int n = 0;
+		for (TabLayout tl : template.getTabs())
+		{
+			for (Integer v : tl.getLayout())
+			{
+				if (v == null || v <= 0)
+				{
+					continue;
+				}
+				if (v == BankTemplate.FILLER || !owned.contains(functionalId(v)))
+				{
+					n++;
+				}
+			}
+		}
+		return n;
+	}
+
+	// Genuine bank fillers currently in the real bank.
+	private int bankFillerCount()
+	{
+		int n = 0;
+		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank != null)
+		{
+			for (Item it : bank.getItems())
+			{
+				if (it.getId() == ItemID.BANK_FILLER)
+				{
+					n++;
+				}
+			}
+		}
+		return n;
+	}
+
+	// Free slots in the real bank = its capacity (varies per account) minus items currently stored. Used to
+	// cap how many fillers we ask for, so a template bigger than the player's bank doesn't request more
+	// fillers than can physically fit (the sort then left-shifts the slots that couldn't be reserved).
+	private int freeBankSlots()
+	{
+		final int capacity = parseCount(client.getWidget(InterfaceID.Bankmain.CAPACITY));
+		if (capacity <= 0)
+		{
+			return Integer.MAX_VALUE; // unknown capacity - don't cap
+		}
+		int occupied = 0;
+		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank != null)
+		{
+			for (Item it : bank.getItems())
+			{
+				if (it.getId() > 0)
+				{
+					occupied++;
+				}
+			}
+		}
+		return Math.max(0, capacity - occupied);
+	}
+
+	private static int parseCount(Widget w)
+	{
+		if (w == null || w.getText() == null)
+		{
+			return -1;
+		}
+		final String digits = w.getText().replaceAll("[^0-9]", "");
+		if (digits.isEmpty())
+		{
+			return -1;
+		}
+		try
+		{
+			return Integer.parseInt(digits);
+		}
+		catch (NumberFormatException e)
+		{
+			return -1;
+		}
+	}
+
+	// Fillers each tab needs (indexed by tab 0..9): one per template filler slot and per unowned-item
+	// placeholder, so those slots can be reserved.
+	private int[] fillersNeededPerTab(BankTemplate template, Set<Integer> owned)
+	{
+		final int[] need = new int[LayoutEditor.MAX_TABS + 1];
+		for (TabLayout tl : template.getTabs())
+		{
+			final int tab = tl.getTab();
+			if (tab < 0 || tab >= need.length)
+			{
+				continue;
+			}
+			for (Integer v : tl.getLayout())
+			{
+				if (v == null || v <= 0)
+				{
+					continue;
+				}
+				if (v == BankTemplate.FILLER || !owned.contains(functionalId(v)))
+				{
+					need[tab]++;
+				}
+			}
+		}
+		return need;
+	}
+
+	// Genuine bank fillers currently in each real bank tab (indexed by tab 0..9), bucketed by the per-tab
+	// item counts (items run tab 1..9 then the main view).
+	private int[] fillersPerTab()
+	{
+		final int[] have = new int[LayoutEditor.MAX_TABS + 1];
+		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank == null)
+		{
+			return have;
+		}
+		final Item[] items = bank.getItems();
+		int idx = 0;
+		for (int t = 1; t <= LayoutEditor.MAX_TABS; t++)
+		{
+			final int count = client.getVarbitValue(TAB_COUNT_VARBITS[t - 1]);
+			for (int k = 0; k < count && idx < items.length; k++, idx++)
+			{
+				if (items[idx] != null && items[idx].getId() == ItemID.BANK_FILLER)
+				{
+					have[t]++;
+				}
+			}
+		}
+		for (; idx < items.length; idx++)
+		{
+			if (items[idx] != null && items[idx].getId() == ItemID.BANK_FILLER)
+			{
+				have[BankTemplate.MAIN_TAB]++;
+			}
+		}
+		return have;
+	}
+
+	// Guide the user through the bank's Bank Fillers control to add the fillers that reserve unowned slots.
+	private void drawFillerSetup(Graphics2D g, int needed, boolean fillAll)
+	{
+		final Widget menu = client.getWidget(InterfaceID.Bankmain.MENU_CONTAINER);
+		final boolean settingsOpen = menu != null && !menu.isHidden() && menu.getBounds().width > 0;
+		final String slots = needed + (needed == 1 ? " slot" : " slots");
+		final String goal = "Reserve " + slots + " for items you don't own yet";
+
+		// The title just states the goal; the pulsing buttons (and the chatbox number) guide the clicks.
+		setBankTitle(goal, Color.WHITE, null, false);
+		if (!settingsOpen)
+		{
+			highlight(g, InterfaceID.Bankmain.MENU_BUTTON);
+		}
+		else if (fillAll)
+		{
+			// Reserving fills the bank completely: click All, then Fill (no count to type).
+			highlight(g, InterfaceID.Bankmain.BANK_FILLER_ALL);
+			highlight(g, InterfaceID.Bankmain.BANK_FILLER_CONFIRM);
+		}
+		else
+		{
+			// In the settings menu: walk through the Bank Fillers control - click X, type the count, Fill.
+			highlight(g, InterfaceID.Bankmain.BANK_FILLER_X);
+			highlight(g, InterfaceID.Bankmain.BANK_FILLER_CONFIRM);
+		}
+
+		// Once the "Enter amount" input is open, show the number big in the chatbox so it's easy to read
+		// while typing. (We only display it - typing/entering it for you would be against the rules.)
+		if (!fillAll)
+		{
+			drawChatboxAmount(g, needed);
+		}
+
+		// A "Skip" button in the title bar to bypass reserving slots entirely (sort runs as-is).
+		drawSkipButton(g);
+	}
+
+	// Draws the "Skip" button at the right of the bank title bar and records its bounds for click handling.
+	private void drawSkipButton(Graphics2D g)
+	{
+		final Widget title = client.getWidget(InterfaceID.Bankmain.TITLE);
+		if (title == null || title.isHidden() || title.getBounds().width <= 0)
+		{
+			skipButtonRect = null;
+			return;
+		}
+		final Rectangle tb = title.getBounds();
+		g.setFont(g.getFont().deriveFont(Font.PLAIN, 12f));
+		final FontMetrics fm = g.getFontMetrics();
+		final String label = "Skip";
+		final int w = fm.stringWidth(label) + 12;
+		final int h = Math.min(tb.height - 2, 18);
+		// Sit left of the bank's close (X) button so it isn't crowded against it.
+		final Rectangle r = new Rectangle(tb.x + tb.width - w - 46, tb.y + (tb.height - h) / 2, w, h);
+		g.setColor(new Color(110, 30, 30));
+		g.fillRect(r.x, r.y, r.width, r.height);
+		g.setColor(new Color(220, 90, 90));
+		g.drawRect(r.x, r.y, r.width, r.height);
+		g.setColor(Color.WHITE);
+		g.drawString(label, r.x + 6, r.y + (h + fm.getAscent()) / 2 - 2);
+		skipButtonRect = r;
+	}
+
+	@Override
+	public java.awt.event.MouseEvent mousePressed(java.awt.event.MouseEvent e)
+	{
+		final Rectangle r = skipButtonRect;
+		if (r != null && r.contains(e.getPoint()))
+		{
+			skipFillers = true;
+			e.consume();
+		}
+		return e;
+	}
+
+	@Override
+	public java.awt.event.MouseEvent mouseClicked(java.awt.event.MouseEvent e)
+	{
+		return e;
+	}
+
+	@Override
+	public java.awt.event.MouseEvent mouseReleased(java.awt.event.MouseEvent e)
+	{
+		return e;
+	}
+
+	@Override
+	public java.awt.event.MouseEvent mouseEntered(java.awt.event.MouseEvent e)
+	{
+		return e;
+	}
+
+	@Override
+	public java.awt.event.MouseEvent mouseExited(java.awt.event.MouseEvent e)
+	{
+		return e;
+	}
+
+	@Override
+	public java.awt.event.MouseEvent mouseDragged(java.awt.event.MouseEvent e)
+	{
+		return e;
+	}
+
+	@Override
+	public java.awt.event.MouseEvent mouseMoved(java.awt.event.MouseEvent e)
+	{
+		return e;
+	}
+
+	// Draws the filler count prominently at the top of the chatbox while the "Enter amount" input is open.
+	private void drawChatboxAmount(Graphics2D g, int needed)
+	{
+		// INPUT_TYPE is non-zero whenever a chatbox input dialog (here, "Enter amount") is open.
+		if (client.getVarcIntValue(VarClientInt.INPUT_TYPE) == 0)
+		{
+			return;
+		}
+		// Anchor over the chatbox message layer (the parchment) and draw the number near its top.
+		final Widget area = client.getWidget(InterfaceID.Chatbox.MES_LAYER);
+		if (area == null || area.isHidden() || area.getBounds().width <= 0)
+		{
+			return;
+		}
+		final Rectangle b = area.getBounds();
+		final String num = "Type " + needed;
+		g.setFont(g.getFont().deriveFont(Font.PLAIN, 20f));
+		final FontMetrics fm = g.getFontMetrics();
+		final int x = b.x + (b.width - fm.stringWidth(num)) / 2;
+		final int y = b.y + fm.getAscent() + 8;
+		g.setColor(new Color(0, 0, 0, 190));
+		g.fillRect(x - 6, y - fm.getAscent(), fm.stringWidth(num) + 12, fm.getHeight());
+		g.setColor(new Color(120, 180, 255));
+		g.drawString(num, x, y);
+	}
+
+	private void highlight(Graphics2D g, int widgetId)
+	{
+		final Widget w = client.getWidget(widgetId);
+		if (w != null && !w.isHidden() && w.getBounds().width > 0)
+		{
+			pulseRect(g, w.getBounds(), config.reorgHighlightColor());
+		}
 	}
 
 	// Draw a destination tag on each out-of-place item: tab number if in the wrong tab, else row-col.
@@ -217,49 +556,162 @@ public class ReorgHelperOverlay extends Overlay
 	}
 
 	private void drawSteps(Graphics2D g, Widget itemContainer, BankTemplate template, int currentTab,
-		List<Widget> widgets, List<Integer> current, int[] itemTab, Map<Integer, Integer> targetTab)
+		List<Widget> widgets, List<Integer> current, int[] itemTab, Map<Integer, Integer> targetTab, Set<Integer> owned)
 	{
 		// Tab phase: the first item sitting in the wrong tab. Highlight it and its destination tab button.
+		final Map<Integer, Widget> buttons = tabButtons();
+		int existingTabs = 0;
+		for (int key : buttons.keySet())
+		{
+			if (key != BankTemplate.MAIN_TAB && key > existingTabs)
+			{
+				existingTabs = key;
+			}
+		}
+
+		// Pass 1: move items that belong in a tab that already exists.
 		for (int k = 0; k < current.size(); k++)
 		{
 			final Integer tt = targetTab.get(current.get(k));
-			if (tt == null || itemTab[k] == tt)
+			if (tt == null || itemTab[k] == tt || (tt != BankTemplate.MAIN_TAB && tt > existingTabs))
 			{
 				continue;
 			}
 			final Widget from = widgets.get(k);
+			final String name = client.getItemDefinition(from.getItemId()).getName();
+
+			// If we aren't viewing the tab the item is currently in (e.g. in the all-items view), guide the
+			// user to open that tab first - you can only drag an item to a tab from the tab it's sitting in.
+			if (itemTab[k] != currentTab)
+			{
+				final Widget srcBtn = buttons.get(itemTab[k]);
+				if (srcBtn != null)
+				{
+					pulseRect(g, srcBtn.getBounds(), config.reorgHighlightColor());
+				}
+				outline(g, from.getBounds(), SOURCE_COLOR);
+				final String srcName = itemTab[k] == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + itemTab[k];
+				setBankTitle("Open " + srcName + " to move " + name, Color.WHITE, null, false);
+				return;
+			}
+
 			outline(g, from.getBounds(), SOURCE_COLOR);
-			final Map<Integer, Widget> buttons = tabButtons();
 			final Widget tabBtn = buttons.get(tt);
-			final String tabName = tt == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + tt;
 			if (tabBtn != null)
 			{
 				pulseRect(g, tabBtn.getBounds(), config.reorgHighlightColor());
 			}
-			final String name = client.getItemDefinition(from.getItemId()).getName();
-			drawText(g, itemContainer, "Drag " + name + " to " + tabName, Color.WHITE, null, false);
+			setBankTitle("Drag " + name + " to " + (tt == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + tt), Color.WHITE, null, false);
 			return;
 		}
 
-		// Position phase: order this view's items. (Existing swap/insert guide.)
-		drawPositionStep(g, itemContainer, template, currentTab, widgets, current);
+		// Pass 2: the template has more tabs than you do - guide creating the next one by dragging an item
+		// onto the "+" (new tab) button. Pick the item for the lowest missing tab so tabs are made in order.
+		final Widget addBtn = addTabButton();
+		if (addBtn != null)
+		{
+			int bestK = -1;
+			int lowest = Integer.MAX_VALUE;
+			for (int k = 0; k < current.size(); k++)
+			{
+				final Integer tt = targetTab.get(current.get(k));
+				if (tt != null && tt != BankTemplate.MAIN_TAB && tt > existingTabs && tt < lowest)
+				{
+					lowest = tt;
+					bestK = k;
+				}
+			}
+			if (bestK != -1)
+			{
+				final Widget from = widgets.get(bestK);
+				outline(g, from.getBounds(), SOURCE_COLOR);
+				pulseRect(g, addBtn.getBounds(), config.reorgHighlightColor());
+				final String name = client.getItemDefinition(from.getItemId()).getName();
+				setBankTitle("Drag " + name + " to a new tab (the + button)", Color.WHITE, null, false);
+				return;
+			}
+		}
+
+		// Filler-balancing phase: once items are in their tabs, move SURPLUS bank fillers (a tab holding
+		// more than its template needs) into tabs that still need them. We only ever take a filler from a
+		// tab with more than it needs, so a filler that's already filling a needed slot is never pulled.
+		final int fillerCanon = functionalId(BankTemplate.FILLER);
+		final int[] need = fillersNeededPerTab(template, owned);
+		final int[] have = fillersPerTab();
+		int deficitTab = -1;
+		for (int t = 0; t < need.length; t++)
+		{
+			if (have[t] < need[t])
+			{
+				deficitTab = t;
+				break;
+			}
+		}
+		if (deficitTab != -1)
+		{
+			for (int k = 0; k < current.size(); k++)
+			{
+				final int src = itemTab[k];
+				if (current.get(k) != fillerCanon || src == deficitTab || have[src] <= need[src])
+				{
+					continue;
+				}
+				final Widget from = widgets.get(k);
+				outline(g, from.getBounds(), SOURCE_COLOR);
+				final Widget tabBtn = tabButtons().get(deficitTab);
+				final String tabName = deficitTab == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + deficitTab;
+				if (tabBtn != null)
+				{
+					pulseRect(g, tabBtn.getBounds(), config.reorgHighlightColor());
+				}
+				setBankTitle("Drag the bank filler to " + tabName, Color.WHITE, null, false);
+				return;
+			}
+		}
+
+		// Position phase: order items WITHIN a single tab, never across the whole bank. In the all-items
+		// view we order only the main (untabbed) items here; each numbered tab is ordered in its own view.
+		// A move that crossed a tab boundary couldn't be honoured by the packed real bank and made the
+		// guidance loop (insert pushes the item into the next tab -> tab phase moves it back -> repeat).
+		if (currentTab == BankTemplate.MAIN_TAB)
+		{
+			final List<Widget> mainWidgets = new ArrayList<>();
+			final List<Integer> mainCurrent = new ArrayList<>();
+			for (int k = 0; k < current.size(); k++)
+			{
+				if (itemTab[k] == BankTemplate.MAIN_TAB)
+				{
+					mainWidgets.add(widgets.get(k));
+					mainCurrent.add(current.get(k));
+				}
+			}
+			drawPositionStep(g, itemContainer, template, BankTemplate.MAIN_TAB, mainWidgets, mainCurrent);
+		}
+		else
+		{
+			drawPositionStep(g, itemContainer, template, currentTab, widgets, current);
+		}
 	}
 
 	private void drawPositionStep(Graphics2D graphics, Widget itemContainer, BankTemplate template, int currentTab,
 		List<Widget> widgets, List<Integer> current)
 	{
-		final int[] desired = currentTab == BankTemplate.MAIN_TAB ? template.fullLayout() : template.tabLayout(currentTab);
+		// Always order against this single tab's layout (the main view orders only its untabbed items).
+		final int[] desired = template.tabLayout(currentTab);
 		if (desired == null || desired.length == 0)
 		{
 			return;
 		}
 
-		// Desired order = template items you have in this view (canonical, template order), honouring how
-		// many of each you actually hold, then any leftovers in their current order. This must stay a
-		// permutation of `current` (same items, same multiplicity) or the position maths below drifts: if
-		// you hold two functionally-identical items (an item and its placeholder, or two charge/variant
-		// versions), de-duplicating here would make `target` shorter than `current` and shift every later
-		// slot back by one - which is what made the "insert here" arrow point one slot too early.
+		// Desired order = the template tab walked slot by slot, packed into what you actually have. Each
+		// slot wants either the real item (if you own it) or a genuine bank filler (template filler slots,
+		// and placeholders for items you don't own - so the space is reserved). Whatever isn't present is
+		// skipped, so the remaining items/fillers LEFT-SHIFT into the packed real bank (which has no gaps):
+		// e.g. an item meant for slot 75 lands in slot 72 if the three slots before it are absent.
+		//
+		// This must stay a permutation of `current` (same items, same multiplicity) or the position maths
+		// below drifts - so every slot consumes from `remaining`, and anything left over is appended.
+		final int fillerCanon = functionalId(BankTemplate.FILLER);
 		final Map<Integer, Integer> remaining = new HashMap<>();
 		for (int canon : current)
 		{
@@ -268,17 +720,21 @@ public class ReorgHelperOverlay extends Overlay
 		final List<Integer> target = new ArrayList<>();
 		for (int id : desired)
 		{
-			if (id <= 0 || id == BankTemplate.FILLER)
+			if (id == BankTemplate.EMPTY)
 			{
 				continue;
 			}
-			final int canon = functionalId(id);
-			final Integer count = remaining.get(canon);
-			if (count != null && count > 0)
+			// What this slot wants: the item itself if owned/available, else a filler to reserve it.
+			final int want = id != BankTemplate.FILLER && remaining.getOrDefault(functionalId(id), 0) > 0
+				? functionalId(id)
+				: fillerCanon;
+			final int count = remaining.getOrDefault(want, 0);
+			if (count > 0)
 			{
-				target.add(canon);
-				remaining.put(canon, count - 1);
+				target.add(want);
+				remaining.put(want, count - 1);
 			}
+			// else: neither the item nor a spare filler is present - skip it so the rest left-shift.
 		}
 		for (int canon : current)
 		{
@@ -301,7 +757,7 @@ public class ReorgHelperOverlay extends Overlay
 
 		if (i >= target.size() || i >= current.size())
 		{
-			drawText(graphics, itemContainer, "Bank matches the template", DONE_COLOR, null, false);
+			setBankTitle("Bank matches the template", DONE_COLOR, null, false);
 			graphics.setClip(oldClip);
 			planTab = -1;
 			return;
@@ -345,7 +801,7 @@ public class ReorgHelperOverlay extends Overlay
 		graphics.setClip(oldClip);
 
 		final String name = client.getItemDefinition(from.getItemId()).getName();
-		drawText(graphics, itemContainer,
+		setBankTitle(
 			(swap ? "Swap " : "Insert ") + name + " into the highlighted slot",
 			Color.WHITE,
 			modeOk ? null : "Switch the bank to " + (swap ? "Swap" : "Insert") + " mode (highlighted)",
@@ -450,6 +906,31 @@ public class ReorgHelperOverlay extends Overlay
 		return map;
 	}
 
+	// The bank's "+" (new tab) button, used to guide creating a tab the template needs but you don't have.
+	private Widget addTabButton()
+	{
+		final Widget tabs = client.getWidget(InterfaceID.Bankmain.TABS);
+		if (tabs == null)
+		{
+			return null;
+		}
+		for (Widget[] group : new Widget[][]{tabs.getDynamicChildren(), tabs.getStaticChildren(), tabs.getNestedChildren()})
+		{
+			if (group == null)
+			{
+				continue;
+			}
+			for (Widget c : group)
+			{
+				if (c != null && c.getSpriteId() == SpriteID.BanktabIcons.ADD)
+				{
+					return c;
+				}
+			}
+		}
+		return null;
+	}
+
 	private static int[] permutation(List<Integer> current, List<Integer> target)
 	{
 		// Map each value to its target slots in order, so repeated (functionally-identical) items are
@@ -520,7 +1001,7 @@ public class ReorgHelperOverlay extends Overlay
 
 	private void drawTag(Graphics2D g, Rectangle b, String text, Color color)
 	{
-		g.setFont(LABEL_FONT);
+		g.setFont(g.getFont().deriveFont(Font.PLAIN, 12f));
 		final FontMetrics fm = g.getFontMetrics();
 		final int w = fm.stringWidth(text) + 4;
 		final int h = fm.getHeight() - 2;
@@ -606,36 +1087,26 @@ public class ReorgHelperOverlay extends Overlay
 		g.setStroke(old);
 	}
 
-	private void drawText(Graphics2D g, Widget container, String line, Color color, String warn, boolean warnActive)
+	// Shows a step instruction in the bank's real title bar (with an optional second clause), instead of a
+	// floating box. Set each frame; the bank restores its own title when the reorg helper is switched off.
+	private void setBankTitle(String line, Color color, String warn, boolean warnActive)
 	{
-		// Anchor to the bank title bar (above the items) so the instruction doesn't cover the item grid.
 		final Widget title = client.getWidget(InterfaceID.Bankmain.TITLE);
-		final Rectangle anchor = title != null && !title.isHidden() && title.getBounds().width > 0
-			? title.getBounds() : container.getBounds();
-
-		final int pad = 5;
-		g.setFont(g.getFont().deriveFont(Font.BOLD, 12f));
-		final int w1 = g.getFontMetrics().stringWidth(line);
-		final int lineH = g.getFontMetrics().getHeight();
-		final int boxW = Math.max(w1, warn != null ? g.getFontMetrics().stringWidth(warn) : 0) + pad * 2;
-		final int boxH = (warn != null ? lineH * 2 : lineH) + pad * 2;
-
-		// Centre the box over the title bar (which sits above the tabs and items, so nothing important
-		// is covered).
-		final int x = anchor.x + Math.max(2, (anchor.width - boxW) / 2);
-		final int boxY = anchor.y;
-
-		g.setColor(TEXT_BG);
-		g.fillRect(x, boxY, boxW, boxH);
-
-		int textY = boxY + pad + g.getFontMetrics().getAscent();
-		g.setColor(color);
-		g.drawString(line, x + pad, textY);
+		if (title == null)
+		{
+			return;
+		}
+		String text = "<col=" + hex(color) + ">" + line + "</col>";
 		if (warn != null)
 		{
-			textY += lineH;
-			g.setColor(warnActive ? SOURCE_COLOR : Color.LIGHT_GRAY);
-			g.drawString(warn, x + pad, textY);
+			text += "  <col=" + hex(warnActive ? SOURCE_COLOR : Color.LIGHT_GRAY) + ">" + warn + "</col>";
 		}
+		title.setText(text);
 	}
+
+	private static String hex(Color c)
+	{
+		return String.format("%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue());
+	}
+
 }

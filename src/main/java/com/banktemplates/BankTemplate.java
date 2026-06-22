@@ -19,7 +19,8 @@ import java.util.List;
 public class BankTemplate
 {
 	public static final int EMPTY = -1;
-	public static final int FILLER = 20594;
+	// Must remain 20594: this value is serialized into template JSON. ItemID.BANK_FILLER == 20594 exactly.
+	public static final int FILLER = net.runelite.api.gameval.ItemID.BANK_FILLER;
 	/** The main "all items" bank view. */
 	public static final int MAIN_TAB = 0;
 
@@ -240,29 +241,6 @@ public class BankTemplate
 			}
 		}
 		return null;
-	}
-
-	/**
-	 * Every tab concatenated in bank order (numbered tabs 1-9 ascending, then the main/untabbed area
-	 * last) - i.e. the order the "view all items" tab shows them in. Used when that view is active.
-	 */
-	public synchronized int[] fullLayout()
-	{
-		normalize();
-		final List<TabLayout> sorted = new ArrayList<>(tabs);
-		sorted.sort((a, b) -> tabOrder(a.getTab()) - tabOrder(b.getTab()));
-		final List<Integer> all = new ArrayList<>();
-		for (TabLayout t : sorted)
-		{
-			all.addAll(t.getLayout());
-		}
-		return toArray(all);
-	}
-
-	private static int tabOrder(int tab)
-	{
-		// Main/untabbed (0) sorts last, after the numbered tabs.
-		return tab == MAIN_TAB ? 100 : tab;
 	}
 
 	/** Total real items across all tabs (excludes empty and filler slots). */
