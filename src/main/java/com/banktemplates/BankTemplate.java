@@ -37,6 +37,8 @@ public class BankTemplate
 	// the local user owns it (uploaded it) and may therefore update/delete it on the repo.
 	private Long repoId;
 	private boolean owned;
+	// Whether this template was shared anonymously - remembered so re-sharing (Update) keeps the choice.
+	private boolean sharedAnonymously;
 
 	public BankTemplate()
 	{
@@ -60,6 +62,16 @@ public class BankTemplate
 	public void setOwned(boolean owned)
 	{
 		this.owned = owned;
+	}
+
+	public boolean isSharedAnonymously()
+	{
+		return sharedAnonymously;
+	}
+
+	public void setSharedAnonymously(boolean sharedAnonymously)
+	{
+		this.sharedAnonymously = sharedAnonymously;
 	}
 
 	public String getName()
@@ -193,6 +205,7 @@ public class BankTemplate
 		c.columns = columns;
 		c.repoId = repoId;
 		c.owned = owned;
+		c.sharedAnonymously = sharedAnonymously;
 		c.preset = preset;
 		c.tabs = new ArrayList<>();
 		for (TabLayout t : tabs)

@@ -163,11 +163,11 @@ public class TemplateRepositoryClient
 	}
 
 	/** Creates a new shared template. {@code onSuccess} receives the new repo id. */
-	void create(BankTemplate template, String author, Consumer<Long> onSuccess, Consumer<String> onError)
+	void create(BankTemplate template, String author, boolean anonymous, Consumer<Long> onSuccess, Consumer<String> onError)
 	{
 		final Request request = new Request.Builder()
 			.url(baseUrl() + "/api/templates")
-			.post(RequestBody.create(JSON, gson.toJson(payload(template, author))))
+			.post(RequestBody.create(JSON, gson.toJson(payload(template, author, anonymous))))
 			.build();
 		send(request, body ->
 		{
@@ -177,11 +177,11 @@ public class TemplateRepositoryClient
 	}
 
 	/** Updates a template the user owns, in place. */
-	void update(long repoId, BankTemplate template, String author, Runnable onSuccess, Consumer<String> onError)
+	void update(long repoId, BankTemplate template, String author, boolean anonymous, Runnable onSuccess, Consumer<String> onError)
 	{
 		final Request request = new Request.Builder()
 			.url(baseUrl() + "/api/templates/" + repoId)
-			.put(RequestBody.create(JSON, gson.toJson(payload(template, author))))
+			.put(RequestBody.create(JSON, gson.toJson(payload(template, author, anonymous))))
 			.build();
 		send(request, body -> onSuccess.run(), onError);
 	}
@@ -255,12 +255,19 @@ public class TemplateRepositoryClient
 		send(request, b -> onSuccess.run(), onError);
 	}
 
-	private JsonObject payload(BankTemplate template, String author)
+	private JsonObject payload(BankTemplate template, String author, boolean anonymous)
 	{
+		final String name = author == null ? "" : author;
 		final JsonObject payload = new JsonObject();
 		payload.addProperty("name", template.getName());
 		payload.addProperty("description", template.getDescription() == null ? "" : template.getDescription());
-		payload.addProperty("author", author == null ? "" : author);
+		// Public display name: blanked when sharing anonymously so other clients can never show it, even
+		// against a server that doesn't yet understand the "anonymous" flag.
+		payload.addProperty("author", anonymous ? "" : name);
+		// The real RuneScape name, always sent so the server can keep it privately for dedup/moderation
+		// even when the template is shared anonymously.
+		payload.addProperty("rsn", name);
+		payload.addProperty("anonymous", anonymous);
 		payload.addProperty("columns", template.getColumns());
 		payload.addProperty("clientId", clientId());
 		payload.add("tabs", gson.toJsonTree(template.getTabs()));

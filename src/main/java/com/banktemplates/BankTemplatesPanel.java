@@ -657,11 +657,22 @@ public class BankTemplatesPanel extends PluginPanel
 	private void share(BankTemplate template)
 	{
 		final boolean update = template.isOwned() && template.getRepoId() != null;
-		final int confirm = JOptionPane.showConfirmDialog(this,
-			(update ? "Update your shared copy of \"" : "Share \"") + template.getName()
-				+ "\"" + (update ? "?" : " to the community repository?\nIt will be visible to other players, credited to your RuneScape name."),
-			update ? "Update template" : "Share template", JOptionPane.YES_NO_OPTION);
-		if (confirm != JOptionPane.YES_OPTION)
+
+		final JPanel message = new JPanel(new BorderLayout(0, 8));
+		message.add(new JLabel("<html><body style='width:240px'>"
+			+ (update ? "Update your shared copy of \"" : "Share \"") + escape(template.getName()) + "\""
+			+ (update ? "?" : " to the community repository?<br>It will be visible to other players.")
+			+ "</body></html>"), BorderLayout.NORTH);
+
+		final javax.swing.JCheckBox anon = new javax.swing.JCheckBox(
+			"Share anonymously (show me as \"Anonymous\")", template.isSharedAnonymously());
+		anon.setToolTipText("Other players won't see your RuneScape name. The repository still records it "
+			+ "privately for moderation.");
+		message.add(anon, BorderLayout.CENTER);
+
+		final int confirm = JOptionPane.showConfirmDialog(this, message,
+			update ? "Update template" : "Share template", JOptionPane.OK_CANCEL_OPTION);
+		if (confirm != JOptionPane.OK_OPTION)
 		{
 			return;
 		}
@@ -671,6 +682,9 @@ public class BankTemplatesPanel extends PluginPanel
 			return;
 		}
 
+		final boolean anonymous = anon.isSelected();
+		template.setSharedAnonymously(anonymous);
+
 		clientThread.invoke(() ->
 		{
 			final Player local = client.getLocalPlayer();
@@ -678,24 +692,27 @@ public class BankTemplatesPanel extends PluginPanel
 
 			if (update)
 			{
-				repositoryClient.update(template.getRepoId(), template, author,
+				repositoryClient.update(template.getRepoId(), template, author, anonymous,
 					() -> SwingUtilities.invokeLater(() ->
-						JOptionPane.showMessageDialog(this, "Updated your shared \"" + template.getName() + "\".", "Updated", JOptionPane.INFORMATION_MESSAGE)),
+					{
+						templateManager.saveUserTemplate(template);
+						JOptionPane.showMessageDialog(this, "Updated your shared \"" + template.getName() + "\".", "Updated", JOptionPane.INFORMATION_MESSAGE);
+					}),
 					error -> SwingUtilities.invokeLater(() ->
 						JOptionPane.showMessageDialog(this, error, "Update failed", JOptionPane.WARNING_MESSAGE)));
 			}
 			else
 			{
-				repositoryClient.create(template, author,
+				repositoryClient.create(template, author, anonymous,
 					newId -> SwingUtilities.invokeLater(() ->
 					{
 						if (newId != null)
 						{
 							template.setRepoId(newId);
 							template.setOwned(true);
-							templateManager.saveUserTemplate(template);
-							rebuildOnEdt();
 						}
+						templateManager.saveUserTemplate(template);
+						rebuildOnEdt();
 						JOptionPane.showMessageDialog(this, "Shared \"" + template.getName() + "\" to the repository.", "Shared", JOptionPane.INFORMATION_MESSAGE);
 					}),
 					error -> SwingUtilities.invokeLater(() ->
@@ -845,7 +862,7 @@ public class BankTemplatesPanel extends PluginPanel
 		votes.add(voteLabel("▲ " + rt.downloads, UPVOTE_COLOR));
 		votes.add(voteLabel("▼ " + rt.reports, DOWNVOTE_COLOR));
 
-		final String by = rt.author == null || rt.author.isEmpty() ? "anonymous" : rt.author;
+		final String by = rt.anonymous || rt.author == null || rt.author.isEmpty() ? "Anonymous" : rt.author;
 		final JLabel author = new JLabel("by " + by);
 		author.setFont(FontManager.getRunescapeSmallFont());
 		author.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
