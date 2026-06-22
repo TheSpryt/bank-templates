@@ -28,6 +28,7 @@ import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 import javax.swing.border.Border;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
@@ -46,6 +47,7 @@ final class TemplateEditor
 	private static final Border SELECTED_BORDER = BorderFactory.createLineBorder(ColorScheme.BRAND_ORANGE, 2);
 
 	private final ItemManager itemManager;
+	private final ClientThread clientThread;
 	private final LayoutEditor editor;
 	private final BankTemplate template;
 
@@ -58,9 +60,10 @@ final class TemplateEditor
 	private boolean swapMode = false;
 	private Runnable listener;
 
-	private TemplateEditor(ItemManager itemManager, LayoutEditor editor, BankTemplate template)
+	private TemplateEditor(ItemManager itemManager, ClientThread clientThread, LayoutEditor editor, BankTemplate template)
 	{
 		this.itemManager = itemManager;
+		this.clientThread = clientThread;
 		this.editor = editor;
 		this.template = template;
 		this.tab = template.definedTabs().isEmpty() ? BankTemplate.MAIN_TAB : template.definedTabs().get(0);
@@ -70,13 +73,13 @@ final class TemplateEditor
 	 * Starts an edit session on {@code template} (if not already) and opens the editor window beside
 	 * {@code parent}.
 	 */
-	static void open(Component parent, ItemManager itemManager, LayoutEditor editor, BankTemplate template)
+	static void open(Component parent, ItemManager itemManager, ClientThread clientThread, LayoutEditor editor, BankTemplate template)
 	{
 		if (!editor.isEditing(template) && !editor.start(template))
 		{
 			return;
 		}
-		new TemplateEditor(itemManager, editor, template).show(parent);
+		new TemplateEditor(itemManager, clientThread, editor, template).show(parent);
 	}
 
 	private void show(Component parent)
@@ -98,6 +101,7 @@ final class TemplateEditor
 			ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
 		scroll.setBorder(BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR));
 		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		ThinScrollBarUI.style(scroll);
 		scroll.getVerticalScrollBar().setUnitIncrement(16);
 
 		final JPanel top = new JPanel(new BorderLayout(0, 4));
@@ -235,11 +239,19 @@ final class TemplateEditor
 
 	private JButton tabButton(String text, int t, boolean active)
 	{
-		final JButton b = new JButton(text);
+		// Numbered tabs show their icon (the tab's first item), like the real bank; the main view keeps
+		// its text label. Empty numbered tabs fall back to the text label too.
+		final int iconId = t == BankTemplate.MAIN_TAB ? 0 : firstItem(t);
+		final JButton b = new JButton(iconId > 0 ? "" : text);
+		if (iconId > 0)
+		{
+			itemManager.getImage(iconId).addTo(b);
+			TemplatePreview.setItemTooltip(b, itemManager, clientThread, iconId);
+		}
 		b.setFocusPainted(false);
 		b.setBackground(active ? ColorScheme.BRAND_ORANGE : ColorScheme.DARKER_GRAY_COLOR);
 		b.setForeground(active ? Color.BLACK : Color.WHITE);
-		b.setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
+		b.setBorder(BorderFactory.createEmptyBorder(2, iconId > 0 ? 3 : 8, 2, iconId > 0 ? 3 : 8));
 		b.addActionListener(e ->
 		{
 			tab = t;
@@ -248,6 +260,19 @@ final class TemplateEditor
 			rebuildGrid();
 		});
 		return b;
+	}
+
+	// The icon for a tab is its first real item (filler/empty slots are skipped), or 0 if none.
+	private int firstItem(int t)
+	{
+		for (Integer v : template.copyTab(t))
+		{
+			if (v != null && v > 0 && v != BankTemplate.FILLER)
+			{
+				return v;
+			}
+		}
+		return 0;
 	}
 
 	private static int nextFreeTab(List<Integer> defined)
@@ -305,7 +330,7 @@ final class TemplateEditor
 			{
 				img.addTo(cell);
 			}
-			cell.setToolTipText(TemplatePreview.itemName(itemManager, id));
+			TemplatePreview.setItemTooltip(cell, itemManager, clientThread, id);
 		}
 
 		cell.addMouseListener(new MouseAdapter()

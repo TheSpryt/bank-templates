@@ -11,10 +11,13 @@ import java.util.Comparator;
 import java.util.List;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingUtilities;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.util.AsyncBufferedImage;
@@ -32,7 +35,7 @@ final class TemplatePreview
 	{
 	}
 
-	static JPanel build(ItemManager itemManager, BankTemplate template)
+	static JPanel build(ItemManager itemManager, ClientThread clientThread, BankTemplate template)
 	{
 		final int columns = template.getColumns();
 		final List<TabLayout> tabs = new ArrayList<>(template.getTabs());
@@ -50,6 +53,7 @@ final class TemplatePreview
 			ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
 		scroll.setBorder(BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR));
 		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		ThinScrollBarUI.style(scroll);
 
 		// Tab buttons. WrapLayout so a bank with many tabs wraps onto further rows instead of being
 		// clipped by the dialog width.
@@ -82,7 +86,7 @@ final class TemplatePreview
 				}
 				b.setBackground(ColorScheme.BRAND_ORANGE);
 				gridHolder.removeAll();
-				gridHolder.add(grid(itemManager, BankTemplate.toArray(tab.getLayout()), columnsRef[0]), BorderLayout.NORTH);
+				gridHolder.add(grid(itemManager, clientThread, BankTemplate.toArray(tab.getLayout()), columnsRef[0]), BorderLayout.NORTH);
 				gridHolder.revalidate();
 				gridHolder.repaint();
 			});
@@ -101,7 +105,8 @@ final class TemplatePreview
 		return root;
 	}
 
-	// Display name for a slot's item (filler reads as "Bank filler"). Falls back to the id if unknown.
+	// Display name for a slot's item. MUST run on the client thread (getItemComposition asserts it);
+	// use setItemTooltip from Swing code. Falls back to the id if unknown.
 	static String itemName(ItemManager itemManager, int id)
 	{
 		try
@@ -119,6 +124,17 @@ final class TemplatePreview
 		return "Item " + id;
 	}
 
+	// Sets a component's tooltip to an item's name, resolving the name on the client thread (required by
+	// getItemComposition) and applying it back on the EDT. Safe to call from Swing code.
+	static void setItemTooltip(JComponent comp, ItemManager itemManager, ClientThread clientThread, int id)
+	{
+		clientThread.invoke(() ->
+		{
+			final String name = itemName(itemManager, id);
+			SwingUtilities.invokeLater(() -> comp.setToolTipText(name));
+		});
+	}
+
 	// Fallback tab icon: the first real item in the tab.
 	private static int firstItem(List<Integer> layout)
 	{
@@ -132,7 +148,7 @@ final class TemplatePreview
 		return 0;
 	}
 
-	private static JPanel grid(ItemManager itemManager, int[] layout, int columns)
+	private static JPanel grid(ItemManager itemManager, ClientThread clientThread, int[] layout, int columns)
 	{
 		final int rows = Math.max(1, (layout.length + columns - 1) / columns);
 		final JPanel grid = new JPanel(new GridLayout(rows, columns, 1, 1));
@@ -151,7 +167,7 @@ final class TemplatePreview
 				final AsyncBufferedImage img = itemManager.getImage(id);
 				img.addTo(cell);
 				// Name on hover, so you can identify items in the preview without owning them.
-				cell.setToolTipText(itemName(itemManager, id));
+				setItemTooltip(cell, itemManager, clientThread, id);
 			}
 			grid.add(cell);
 		}
