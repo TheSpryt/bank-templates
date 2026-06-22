@@ -6,11 +6,14 @@ import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Graphics;
 import java.awt.GridLayout;
+import java.awt.Image;
 import java.awt.Point;
 import java.awt.Window;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.ArrayList;
@@ -20,6 +23,7 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JMenuItem;
@@ -59,6 +63,8 @@ final class TemplateEditor
 	private int selected = -1;
 	private boolean swapMode = false;
 	private Runnable listener;
+	private JDialog dialog;
+	private final DragGlass glass = new DragGlass();
 
 	private TemplateEditor(ItemManager itemManager, ClientThread clientThread, LayoutEditor editor, BankTemplate template)
 	{
@@ -85,8 +91,10 @@ final class TemplateEditor
 	private void show(Component parent)
 	{
 		final Window owner = SwingUtilities.getWindowAncestor(parent);
-		final JDialog dialog = new JDialog(owner, "Edit: " + template.getName(), Dialog.ModalityType.MODELESS);
-		dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+		dialog = new JDialog(owner, "Edit: " + template.getName(), Dialog.ModalityType.MODELESS);
+		// Intercept the close so we can confirm discarding unsaved changes before disposing.
+		dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+		dialog.setGlassPane(glass);
 
 		final JPanel root = new JPanel(new BorderLayout(0, 6));
 		root.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -130,13 +138,19 @@ final class TemplateEditor
 		dialog.addWindowListener(new WindowAdapter()
 		{
 			@Override
+			public void windowClosing(WindowEvent e)
+			{
+				attemptClose();
+			}
+
+			@Override
 			public void windowClosed(WindowEvent e)
 			{
 				editor.removeListener(listener);
-				// Closing the editor ends the edit session (also turns off in-bank editing).
+				// Closing WITHOUT Apply discards the session's changes (restores the pre-edit snapshot).
 				if (editor.isEditing(template))
 				{
-					editor.finish();
+					editor.discard();
 				}
 			}
 		});
@@ -163,10 +177,26 @@ final class TemplateEditor
 		dialog.setVisible(true);
 	}
 
+	// Confirm before throwing away unsaved changes, then dispose (windowClosed does the actual discard).
+	private void attemptClose()
+	{
+		if (editor.isEditing(template) && editor.hasUnsavedChanges())
+		{
+			final int choice = JOptionPane.showConfirmDialog(dialog,
+				"Discard unsaved changes to \"" + template.getName() + "\"?",
+				"Discard changes", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+			if (choice != JOptionPane.YES_OPTION)
+			{
+				return;
+			}
+		}
+		dialog.dispose();
+	}
+
 	private JLabel buildHint()
 	{
-		final JLabel hint = new JLabel("<html>Click to select, click again to move here. "
-			+ "Drag to rearrange. Right-click a slot for more.</html>");
+		final JLabel hint = new JLabel("<html>Click to select, click again to move here. Drag to "
+			+ "rearrange. Right-click a slot for more. Apply to save; closing discards changes.</html>");
 		hint.setFont(FontManager.getRunescapeSmallFont());
 		hint.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		return hint;
@@ -177,10 +207,18 @@ final class TemplateEditor
 		final JPanel bar = new JPanel(new WrapLayout(FlowLayout.LEFT, 4, 4));
 		bar.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
+		// Apply commits the changes; closing (X) or Cancel discards them.
+		final JButton apply = button("Apply", editor::finish);
+		apply.setBackground(new Color(60, 110, 60));
+		bar.add(apply);
+		bar.add(button("Cancel", this::attemptClose));
+
 		bar.add(button("Add item", () -> ItemSearch.open(parent, itemManager, id ->
 		{
-			editor.addItem(tab, id);
 			selected = -1;
+			clientThread.invoke(() -> editor.addItemOrReport(tab, id, msg ->
+				SwingUtilities.invokeLater(() ->
+					JOptionPane.showMessageDialog(dialog, msg, "Already in layout", JOptionPane.INFORMATION_MESSAGE))));
 		})));
 		bar.add(button("Add filler", () -> editor.addItem(tab, BankTemplate.FILLER)));
 		bar.add(button("Add row", () -> editor.addRow(tab)));
@@ -344,6 +382,7 @@ final class TemplateEditor
 			@Override
 			public void mouseReleased(MouseEvent e)
 			{
+				glass.stop();
 				if (maybePopup(e, index))
 				{
 					return;
@@ -380,7 +419,72 @@ final class TemplateEditor
 				}
 			}
 		});
+
+		// Show a ghost of the item under the cursor while dragging, so you can see what you're moving.
+		if (id > 0 || id == BankTemplate.FILLER)
+		{
+			cell.addMouseMotionListener(new MouseMotionAdapter()
+			{
+				@Override
+				public void mouseDragged(MouseEvent e)
+				{
+					if (!SwingUtilities.isLeftMouseButton(e))
+					{
+						return;
+					}
+					if (!glass.isVisible())
+					{
+						glass.start(itemManager.getImage(id));
+					}
+					glass.moveTo(SwingUtilities.convertPoint(cell, e.getPoint(), glass));
+				}
+			});
+		}
 		return cell;
+	}
+
+	// A transparent glass-pane layer that paints the dragged item image at the cursor.
+	private static final class DragGlass extends javax.swing.JComponent
+	{
+		private transient Image image;
+		private Point pos;
+
+		DragGlass()
+		{
+			setVisible(false);
+		}
+
+		void start(Image image)
+		{
+			this.image = image;
+			this.pos = null;
+		}
+
+		void moveTo(Point p)
+		{
+			this.pos = p;
+			if (image != null)
+			{
+				setVisible(true);
+				repaint();
+			}
+		}
+
+		void stop()
+		{
+			image = null;
+			pos = null;
+			setVisible(false);
+		}
+
+		@Override
+		protected void paintComponent(Graphics g)
+		{
+			if (image != null && pos != null)
+			{
+				g.drawImage(image, pos.x - image.getWidth(null) / 2, pos.y - image.getHeight(null) / 2, null);
+			}
+		}
 	}
 
 	// Right-click slot menu.

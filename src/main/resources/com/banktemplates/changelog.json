@@ -1,5 +1,27 @@
 [
   {
+    "version": "1.2",
+    "notes": [
+      "Bank view: the all-items tab now shows your whole template grouped by tab (main tab first), with a divider between each tab's block of items and before any of your items that aren't in the template.",
+      "Bank view: numbered tabs show a divider between the template's items and your other items below them.",
+      "Bank view: templates bigger than your bank now render in full (the overflow slots are drawn for you), and the bank's slot counter shows the template's size, turning red when it won't fit your bank.",
+      "Bank view: better compatibility with other bank plugins (such as Inventory Setups). The layout now keeps every item on its own bank slot, so plugins that highlight or withdraw by slot pick the right items.",
+      "Bank view: fixed dragging items while a template is applied. Dragging now uses the game's own bank drag, so it no longer makes your next click withdraw the item you just dragged, and a dragged item no longer briefly looks like an empty placeholder.",
+      "Live editing: the 'Editing' label now shows in the bank's real title bar instead of a floating banner, and the item you drag no longer gets an orange box around it.",
+      "Live editing: drag an item onto the + (new tab) button to start a new template tab, up to the game's nine-tab maximum.",
+      "Live editing: dragging an item to the top or bottom edge of the bank now auto-scrolls, so you can move it across many rows without the scroll wheel.",
+      "Reorganise helper: every step now shows in the bank's title bar.",
+      "Reorganise helper: guides you to reserve slots for items you don't own yet with genuine bank fillers, showing the exact number to type in the chatbox, using the 'All' button when it fills your bank, and never asking for more than your free space. A 'Skip' button bypasses the filler step.",
+      "Reorganise helper: guides you to open the tab an item is in before dragging it, to create extra tabs when the template has more than you do, and to move spare bank fillers into the tabs that still need them.",
+      "Reorganise helper: when a Bank Tags tag tab is open it points you back to the main bank, sorts each tab on its own (no more looping), and packs items into place even when some slots couldn't be reserved.",
+      "Sharing: you can add a description (up to 500 characters) when sharing a template, shown to other players in Browse and the preview.",
+      "Side panel: the Updates tab is now pinned to the bottom of the panel and shows your full version history, newest first. The search box is cleaner and easier to read.",
+      "Community repository: Browse now shows how many templates match your search (Count: N) under the sort, and the pager reads Page X of N.",
+      "Sharing: sharing anonymously now sends nothing that identifies you. Your RuneScape name is no longer sent at all when anonymous (ownership, the per-account limit, bans and duplicate-vote guards all rely only on your account, never your name)."
+    ],
+    "knownIssues": []
+  },
+  {
     "version": "1.1",
     "notes": [
       "New layout editor: build or edit a layout without owning the items. Search for any item and drop it in, drag to rearrange, swap or insert, and mark filler/empty slots. Edit in the side panel or live over the bank.",
@@ -9,7 +31,12 @@
       "Preview now opens beside the client so the game stays clickable, with item names on hover.",
       "Import counts are now accurate and reflect how many people currently keep a template.",
       "Variant-aware reorg: item kits and alternate versions of an item (charged/uncharged, degraded, recoloured) count as the same item.",
-      "Fixed the reorganise helper getting stuck in a loop while dragging items around."
+      "Fixed the reorganise helper getting stuck in a loop while dragging items around.",
+      "New: an Updates tab in the side panel shows the patch notes (like these) whenever the plugin updates.",
+      "UI polish: a slimmer side-panel scrollbar and tidier tab buttons.",
+      "Live editing: while a template is applied, drag items and placeholders around your bank to adjust it - move between tabs, and right-click a slot to Release it (the rest shift up to fill the gap). Click still withdraws as normal. The + add button sits in a scrollable bank slot, and adding an item that's already in the layout tells you which tab/row/slot it's in instead of duplicating it.",
+      "Tab icons now stay as the template's icons even inside Bank Tags tag tabs.",
+      "Editor window: dragging shows a ghost of the item you're moving, View and Edit are now one button, and there's an Apply button (closing the editor discards unsaved changes). In-bank overlay text is no longer bold."
     ],
     "knownIssues": [
       "Compatibility issues with the Inventory Setups plugin - to be addressed in the next update."

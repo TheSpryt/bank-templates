@@ -7,7 +7,6 @@ import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.GridLayout;
 import java.awt.Point;
 import java.awt.Window;
 import java.awt.event.KeyAdapter;
@@ -42,7 +41,6 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
-import net.runelite.client.ui.components.IconTextField;
 
 @Slf4j
 @Singleton
@@ -58,6 +56,7 @@ public class BankTemplatesPanel extends PluginPanel
 	private static final String UPDATES = "updates";
 	private static final int PAGE_SIZE = 20;
 	private static final int MAX_NAME_LENGTH = 25;
+	private static final int MAX_DESCRIPTION_LENGTH = 500;
 
 	private static final String[] SORT_LABELS = {"Most imported", "Newest", "Popular (30 days)"};
 	private static final String[] SORT_KEYS = {"imported", "newest", "popular"};
@@ -72,7 +71,7 @@ public class BankTemplatesPanel extends PluginPanel
 	private final LayoutEditor layoutEditor;
 
 	private final JPanel listContainer = new JPanel();
-	private final IconTextField searchBar = new IconTextField();
+	private final javax.swing.JTextField searchBar = new javax.swing.JTextField();
 	private final JPanel tabsPanel = new JPanel();
 	private final JButton localTab = new JButton("My Templates");
 	private final JButton browseTab = new JButton("Browse");
@@ -80,6 +79,7 @@ public class BankTemplatesPanel extends PluginPanel
 
 	// The newest bundled patch notes (this build's version + notes), or null if none.
 	private final Changelog.Entry latestUpdate;
+	private final java.util.List<Changelog.Entry> allUpdates;
 
 	private String mode = LOCAL;
 	private String query = "";
@@ -89,6 +89,8 @@ public class BankTemplatesPanel extends PluginPanel
 	private String browseSort = "imported";
 	private int browseOffset = 0;
 	private boolean browseHasMore = false;
+	// Total templates matching the current browse filter (from the server), for the count + pager labels.
+	private int browseTotal = 0;
 
 	private Runnable onActiveChanged = () ->
 	{
@@ -99,6 +101,9 @@ public class BankTemplatesPanel extends PluginPanel
 		Client client, ClientThread clientThread, ConfigManager configManager, BankTemplatesConfig config,
 		LayoutEditor layoutEditor, Gson gson)
 	{
+		// Don't let PluginPanel wrap us in its own scrollpane - we manage our own so the Updates bar can
+		// stay pinned to the bottom while only the template list scrolls.
+		super(false);
 		this.templateManager = templateManager;
 		this.itemManager = itemManager;
 		this.repositoryClient = repositoryClient;
@@ -108,9 +113,10 @@ public class BankTemplatesPanel extends PluginPanel
 		this.config = config;
 		this.layoutEditor = layoutEditor;
 		this.latestUpdate = Changelog.latest(gson);
+		this.allUpdates = Changelog.all(gson);
 
-		// Open straight onto the Updates tab when there are unseen patch notes.
-		if (hasUnseenUpdate())
+		// Open straight onto the Updates tab when update notes are enabled.
+		if (updatesTabShown())
 		{
 			mode = UPDATES;
 		}
@@ -121,18 +127,26 @@ public class BankTemplatesPanel extends PluginPanel
 
 		add(buildHeader(), BorderLayout.NORTH);
 
+		// The scrollable content (everything except the fixed bottom Updates bar) lives in the centre.
 		listContainer.setLayout(new BoxLayout(listContainer, BoxLayout.Y_AXIS));
 		listContainer.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		add(listContainer, BorderLayout.CENTER);
+		final JScrollPane scroll = new JScrollPane(listContainer,
+			JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		scroll.setBorder(BorderFactory.createEmptyBorder());
+		scroll.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		ThinScrollBarUI.style(scroll);
+		add(scroll, BorderLayout.CENTER);
 
-		// PluginPanel wraps us in a JScrollPane but leaves its default border (a thin light outline) and
-		// the chunky default scrollbar. Clear the border and apply our thin scrollbar.
-		final Component ancestor = SwingUtilities.getAncestorOfClass(JScrollPane.class, this);
-		if (ancestor instanceof JScrollPane)
+		// Updates is pinned to the very bottom of the panel, shared by every tab (only when there's one).
+		if (updatesTabShown())
 		{
-			final JScrollPane wrapper = (JScrollPane) ancestor;
-			wrapper.setBorder(BorderFactory.createEmptyBorder());
-			ThinScrollBarUI.style(wrapper);
+			updatesTab.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+			final JPanel south = new JPanel(new BorderLayout());
+			south.setBackground(ColorScheme.DARK_GRAY_COLOR);
+			south.setBorder(BorderFactory.createEmptyBorder(8, 0, 0, 0));
+			south.add(updatesTab, BorderLayout.CENTER);
+			add(south, BorderLayout.SOUTH);
 		}
 	}
 
@@ -171,10 +185,15 @@ public class BankTemplatesPanel extends PluginPanel
 
 		header.add(Box.createVerticalStrut(8));
 
-		searchBar.setIcon(IconTextField.Icon.SEARCH);
 		searchBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		searchBar.setPreferredSize(new Dimension(100, 36));
-		searchBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
+		searchBar.setForeground(Color.WHITE);
+		searchBar.setCaretColor(Color.WHITE);
+		searchBar.setToolTipText("Search templates");
+		searchBar.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR),
+			BorderFactory.createEmptyBorder(4, 6, 4, 6)));
+		searchBar.setPreferredSize(new Dimension(100, 28));
+		searchBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		searchBar.setAlignmentX(Component.LEFT_ALIGNMENT);
 		searchBar.addKeyListener(new KeyAdapter()
 		{
@@ -191,18 +210,6 @@ public class BankTemplatesPanel extends PluginPanel
 		searchBar.addActionListener(e ->
 		{
 			if (BROWSE.equals(mode))
-			{
-				newSearch();
-			}
-		});
-		searchBar.addClearListener(() ->
-		{
-			query = "";
-			if (LOCAL.equals(mode))
-			{
-				rebuildOnEdt();
-			}
-			else
 			{
 				newSearch();
 			}
@@ -240,36 +247,33 @@ public class BankTemplatesPanel extends PluginPanel
 		updatesTab.setForeground(UPDATES.equals(mode) ? Color.BLACK : Color.WHITE);
 	}
 
-	// My Templates / Browse share a row; the Updates tab (when unseen) goes on its own row below so it
-	// doesn't squeeze the others into truncation.
+	// Each tab on its own full-width row, so the labels never truncate. Updates lives at the bottom of the
+	// panel (see the constructor), not in this top row.
 	private void layoutTabs()
 	{
 		tabsPanel.removeAll();
 		tabsPanel.setLayout(new BoxLayout(tabsPanel, BoxLayout.Y_AXIS));
 
-		final JPanel row = new JPanel(new GridLayout(1, 2, 4, 0));
-		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-		row.add(localTab);
-		row.add(browseTab);
-		tabsPanel.add(row);
-
-		if (hasUnseenUpdate())
-		{
-			tabsPanel.add(Box.createVerticalStrut(4));
-			updatesTab.setAlignmentX(Component.LEFT_ALIGNMENT);
-			updatesTab.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-			tabsPanel.add(updatesTab);
-		}
+		addTabRow(localTab, false);
+		addTabRow(browseTab, true);
 		tabsPanel.revalidate();
 		tabsPanel.repaint();
 	}
 
-	private boolean hasUnseenUpdate()
+	private void addTabRow(JButton tab, boolean gapAbove)
 	{
-		return config.alertUpdates() && latestUpdate != null && latestUpdate.version != null
-			&& !latestUpdate.version.equals(config.lastSeenVersion());
+		if (gapAbove)
+		{
+			tabsPanel.add(Box.createVerticalStrut(4));
+		}
+		tab.setAlignmentX(Component.LEFT_ALIGNMENT);
+		tab.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		tabsPanel.add(tab);
+	}
+
+	private boolean updatesTabShown()
+	{
+		return config.alertUpdates() && latestUpdate != null && latestUpdate.version != null;
 	}
 
 	void rebuild()
@@ -310,8 +314,41 @@ public class BankTemplatesPanel extends PluginPanel
 			return;
 		}
 
-		// Known issues first, so they're seen before the feature notes.
-		if (latestUpdate.knownIssues != null && !latestUpdate.knownIssues.isEmpty())
+		final JLabel heading = new JLabel("What's New?");
+		heading.setFont(FontManager.getRunescapeBoldFont());
+		heading.setForeground(Color.WHITE);
+		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
+		listContainer.add(heading);
+		listContainer.add(Box.createVerticalStrut(8));
+
+		// Full update history, newest first, each version separated by a divider.
+		boolean first = true;
+		for (Changelog.Entry entry : allUpdates)
+		{
+			if (entry == null || entry.version == null)
+			{
+				continue;
+			}
+			if (!first)
+			{
+				addUpdatesDivider();
+			}
+			first = false;
+			renderUpdateVersion(entry);
+		}
+	}
+
+	private void renderUpdateVersion(Changelog.Entry entry)
+	{
+		final JLabel version = new JLabel("Version " + entry.version);
+		version.setFont(FontManager.getRunescapeBoldFont());
+		version.setForeground(ColorScheme.BRAND_ORANGE);
+		version.setAlignmentX(Component.LEFT_ALIGNMENT);
+		version.setBorder(BorderFactory.createEmptyBorder(2, 0, 8, 0));
+		listContainer.add(version);
+
+		// Known issues directly under the version.
+		if (entry.knownIssues != null && !entry.knownIssues.isEmpty())
 		{
 			final JLabel kiHeading = new JLabel("Known issues");
 			kiHeading.setFont(FontManager.getRunescapeBoldFont());
@@ -319,40 +356,40 @@ public class BankTemplatesPanel extends PluginPanel
 			kiHeading.setAlignmentX(Component.LEFT_ALIGNMENT);
 			kiHeading.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
 			listContainer.add(kiHeading);
-			for (String issue : latestUpdate.knownIssues)
+			for (String issue : entry.knownIssues)
 			{
 				listContainer.add(bulletLabel(issue, ColorScheme.LIGHT_GRAY_COLOR));
 			}
 			listContainer.add(Box.createVerticalStrut(8));
 		}
 
-		final JLabel heading = new JLabel("What's new");
-		heading.setFont(FontManager.getRunescapeBoldFont());
-		heading.setForeground(Color.WHITE);
-		heading.setAlignmentX(Component.LEFT_ALIGNMENT);
-		listContainer.add(heading);
-
-		final JLabel version = new JLabel("Version " + latestUpdate.version);
-		version.setForeground(ColorScheme.BRAND_ORANGE);
-		version.setAlignmentX(Component.LEFT_ALIGNMENT);
-		version.setBorder(BorderFactory.createEmptyBorder(2, 0, 8, 0));
-		listContainer.add(version);
-
-		if (latestUpdate.notes != null)
+		// Changelog.
+		if (entry.notes != null && !entry.notes.isEmpty())
 		{
-			for (String note : latestUpdate.notes)
+			final JLabel clHeading = new JLabel("Changelog");
+			clHeading.setFont(FontManager.getRunescapeBoldFont());
+			clHeading.setForeground(Color.WHITE);
+			clHeading.setAlignmentX(Component.LEFT_ALIGNMENT);
+			clHeading.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
+			listContainer.add(clHeading);
+			for (String note : entry.notes)
 			{
 				listContainer.add(bulletLabel(note, Color.WHITE));
 			}
 		}
+	}
 
-		listContainer.add(Box.createVerticalStrut(6));
-		final JButton dismiss = styledButton("Dismiss");
-		dismiss.setAlignmentX(Component.LEFT_ALIGNMENT);
-		dismiss.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-		dismiss.setToolTipText("Hide these notes and go back to My Templates");
-		dismiss.addActionListener(e -> dismissUpdate());
-		listContainer.add(dismiss);
+	// A thin horizontal divider between version blocks in the Updates history.
+	private void addUpdatesDivider()
+	{
+		listContainer.add(Box.createVerticalStrut(8));
+		final JPanel line = new JPanel();
+		line.setBackground(ColorScheme.MEDIUM_GRAY_COLOR);
+		line.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+		line.setPreferredSize(new Dimension(10, 1));
+		line.setAlignmentX(Component.LEFT_ALIGNMENT);
+		listContainer.add(line);
+		listContainer.add(Box.createVerticalStrut(8));
 	}
 
 	// A wrapped bullet-point label sized for the side panel.
@@ -363,16 +400,6 @@ public class BankTemplatesPanel extends PluginPanel
 		b.setAlignmentX(Component.LEFT_ALIGNMENT);
 		b.setBorder(BorderFactory.createEmptyBorder(0, 2, 7, 0));
 		return b;
-	}
-
-	private void dismissUpdate()
-	{
-		if (latestUpdate != null && latestUpdate.version != null)
-		{
-			configManager.setConfiguration(BankTemplatesConfig.GROUP, "lastSeenVersion", latestUpdate.version);
-		}
-		layoutTabs();        // the Updates tab disappears now it's seen
-		switchMode(LOCAL);   // back to My Templates
 	}
 
 	// ---- Local templates --------------------------------------------------------------------
@@ -506,12 +533,17 @@ public class BankTemplatesPanel extends PluginPanel
 
 		final JPanel buttons = buttonRow();
 		buttons.add(activeOrUse(active, () -> select(template)));
-		buttons.add(iconButton("View", "Preview this template", () -> showPreview(template)));
-		if (!template.isPreset())
+		// One button does both: presets are read-only (View); your own templates open the editor (which
+		// previews and edits in one window).
+		if (template.isPreset())
+		{
+			buttons.add(iconButton("View", "Preview this template", () -> showPreview(template)));
+		}
+		else
 		{
 			final boolean editingThis = layoutEditor.isEditing(template);
 			buttons.add(iconButton(editingThis ? "Done" : "Edit",
-				editingThis ? "Finish editing this layout" : "Add, move and arrange items (no need to own them)",
+				editingThis ? "Finish editing this layout" : "View and edit this layout (add, move and arrange items - no need to own them)",
 				() -> editTemplate(template)));
 		}
 		if (!template.isPreset() && repositoryClient.isEnabled())
@@ -551,6 +583,13 @@ public class BankTemplatesPanel extends PluginPanel
 			listContainer.add(messageLabel(browseStatus));
 			return;
 		}
+
+		final JLabel count = new JLabel("Count: " + browseTotal);
+		count.setFont(FontManager.getRunescapeSmallFont());
+		count.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		count.setAlignmentX(Component.LEFT_ALIGNMENT);
+		listContainer.add(count);
+		listContainer.add(Box.createVerticalStrut(6));
 
 		for (RemoteTemplate rt : browseResults)
 		{
@@ -598,33 +637,68 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private JPanel buildPaginationRow()
 	{
-		final JPanel row = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 4));
-		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		final int currentPage = browseOffset / PAGE_SIZE + 1;
+		final int totalPages = Math.max(currentPage, (browseTotal + PAGE_SIZE - 1) / PAGE_SIZE);
+		final boolean hasPrev = browseOffset > 0;
 
-		final JButton prev = styledButton("‹ Prev");
-		prev.setEnabled(browseOffset > 0);
-		prev.addActionListener(e ->
+		// Nav buttons on one row; the "Page X of N" label on its own row below. The list has no horizontal
+		// scrollbar, so a row wider than the panel clips under the scrollbar - keeping the label off the
+		// button row means large (4-6 digit) page counts never widen it.
+		final JPanel nav = new JPanel(new FlowLayout(FlowLayout.CENTER, 3, 2));
+		nav.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		nav.setAlignmentX(Component.LEFT_ALIGNMENT);
+		nav.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+		nav.add(pagerButton("«", "First page", hasPrev, () ->
+		{
+			browseOffset = 0;
+			loadBrowse();
+		}));
+		nav.add(pagerButton("‹ Prev", "Previous page", hasPrev, () ->
 		{
 			browseOffset = Math.max(0, browseOffset - PAGE_SIZE);
 			loadBrowse();
-		});
-		row.add(prev);
-
-		final JLabel page = new JLabel("Page " + (browseOffset / PAGE_SIZE + 1));
-		page.setFont(FontManager.getRunescapeSmallFont());
-		page.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		row.add(page);
-
-		final JButton next = styledButton("Next ›");
-		next.setEnabled(browseHasMore);
-		next.addActionListener(e ->
+		}));
+		nav.add(pagerButton("Next ›", "Next page", browseHasMore, () ->
 		{
 			browseOffset += PAGE_SIZE;
 			loadBrowse();
-		});
-		row.add(next);
-		return row;
+		}));
+		nav.add(pagerButton("»", "Last page", browseTotal > 0 && currentPage < totalPages, () ->
+		{
+			browseOffset = (totalPages - 1) * PAGE_SIZE;
+			loadBrowse();
+		}));
+
+		final JLabel page = new JLabel(browseTotal > 0
+			? "Page " + currentPage + " of " + totalPages
+			: "Page " + currentPage);
+		page.setFont(FontManager.getRunescapeSmallFont());
+		page.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+
+		final JPanel pageRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
+		pageRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		pageRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		pageRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
+		pageRow.add(page);
+
+		final JPanel container = new JPanel();
+		container.setLayout(new BoxLayout(container, BoxLayout.Y_AXIS));
+		container.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		container.setAlignmentX(Component.LEFT_ALIGNMENT);
+		container.setMaximumSize(new Dimension(Integer.MAX_VALUE, 52));
+		container.add(nav);
+		container.add(pageRow);
+		return container;
+	}
+
+	// A compact pager button (First/Prev/Next/Last), kept narrow so the row fits the fixed panel width.
+	private JButton pagerButton(String text, String tooltip, boolean enabled, Runnable action)
+	{
+		final JButton b = styledButton(text);
+		b.setToolTipText(tooltip);
+		b.setEnabled(enabled);
+		b.addActionListener(e -> action.run());
+		return b;
 	}
 
 	private JPanel buildRemoteCard(RemoteTemplate rt)
@@ -676,6 +750,7 @@ public class BankTemplatesPanel extends PluginPanel
 					browseResults.addAll(page.templates);
 				}
 				browseHasMore = page.hasMore;
+				browseTotal = page.total;
 				browseStatus = browseResults.isEmpty() ? "No templates found." : null;
 				rebuildOnEdt();
 			}),
@@ -792,11 +867,33 @@ public class BankTemplatesPanel extends PluginPanel
 			+ (update ? "?" : " to the community repository?<br>It will be visible to other players.")
 			+ "</body></html>"), BorderLayout.NORTH);
 
+		final JPanel center = new JPanel();
+		center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
+
+		final JLabel descLabel = new JLabel("Description (optional, max " + MAX_DESCRIPTION_LENGTH + " chars):");
+		descLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		center.add(descLabel);
+		center.add(Box.createVerticalStrut(4));
+
+		final javax.swing.JTextArea descArea = new javax.swing.JTextArea(
+			template.getDescription() == null ? "" : template.getDescription(), 4, 24);
+		descArea.setLineWrap(true);
+		descArea.setWrapStyleWord(true);
+		descArea.setToolTipText("Explain your layout - why certain tabs, what it's for, etc. Shown to other players.");
+		final JScrollPane descScroll = new JScrollPane(descArea);
+		descScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
+		descScroll.setPreferredSize(new Dimension(280, 84));
+		center.add(descScroll);
+		center.add(Box.createVerticalStrut(8));
+
 		final javax.swing.JCheckBox anon = new javax.swing.JCheckBox(
 			"Share anonymously (show me as \"Anonymous\")", template.isSharedAnonymously());
 		anon.setToolTipText("Other players won't see your RuneScape name. The repository still records it "
 			+ "privately for moderation.");
-		message.add(anon, BorderLayout.CENTER);
+		anon.setAlignmentX(Component.LEFT_ALIGNMENT);
+		center.add(anon);
+
+		message.add(center, BorderLayout.CENTER);
 
 		final int confirm = JOptionPane.showConfirmDialog(this, message,
 			update ? "Update template" : "Share template", JOptionPane.OK_CANCEL_OPTION);
@@ -812,6 +909,14 @@ public class BankTemplatesPanel extends PluginPanel
 
 		final boolean anonymous = anon.isSelected();
 		template.setSharedAnonymously(anonymous);
+
+		String desc = descArea.getText() == null ? "" : descArea.getText().trim();
+		if (desc.length() > MAX_DESCRIPTION_LENGTH)
+		{
+			desc = desc.substring(0, MAX_DESCRIPTION_LENGTH);
+		}
+		template.setDescription(desc.isEmpty() ? null : desc);
+		templateManager.saveUserTemplate(template);
 
 		clientThread.invoke(() ->
 		{

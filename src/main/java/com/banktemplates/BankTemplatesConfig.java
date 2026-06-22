@@ -19,24 +19,12 @@ public interface BankTemplatesConfig extends Config
 	@ConfigItem(
 		keyName = "alertUpdates",
 		name = "Notify me about updates",
-		description = "Show an Updates tab in the side panel with the patch notes whenever the plugin updates.",
+		description = "Show an Updates tab in the side panel with the latest patch notes. The panel opens on it.",
 		position = 0
 	)
 	default boolean alertUpdates()
 	{
 		return true;
-	}
-
-	// The plugin version whose patch notes the user has dismissed. Hidden; managed by the side panel.
-	@ConfigItem(
-		keyName = "lastSeenVersion",
-		name = "",
-		description = "",
-		hidden = true
-	)
-	default String lastSeenVersion()
-	{
-		return "";
 	}
 
 	@ConfigSection(

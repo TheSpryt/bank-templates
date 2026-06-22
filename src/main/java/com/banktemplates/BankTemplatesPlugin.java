@@ -77,6 +77,10 @@ public class BankTemplatesPlugin extends Plugin
 
 	private NavigationButton navButton;
 
+	// The layout-change listener registered with the singleton LayoutEditor, stored so it can be removed
+	// on shutDown (otherwise it would accumulate across disable/enable cycles).
+	private Runnable layoutListener;
+
 	@Override
 	protected void startUp()
 	{
@@ -84,11 +88,12 @@ public class BankTemplatesPlugin extends Plugin
 
 		panel.setOnActiveChanged(this::requestBankRebuild);
 		// Editing a layout should redraw the bank and refresh the panel (Edit/Done state, item counts).
-		layoutEditor.addListener(() ->
+		layoutListener = () ->
 		{
 			requestBankRebuild();
 			panel.rebuild();
-		});
+		};
+		layoutEditor.addListener(layoutListener);
 		panel.rebuild();
 
 		final BufferedImage icon = ImageUtil.loadImageResource(BankTemplatesPlugin.class, "/com/banktemplates/icon.png");
@@ -103,6 +108,7 @@ public class BankTemplatesPlugin extends Plugin
 		overlayManager.add(reorgHelperOverlay);
 		overlayManager.add(layoutEditorOverlay);
 		mouseManager.registerMouseListener(layoutEditorOverlay);
+		mouseManager.registerMouseListener(reorgHelperOverlay);
 
 		repositoryClient.setIdentity(client.getAccountHash());
 		requestBankRebuild();
@@ -115,7 +121,13 @@ public class BankTemplatesPlugin extends Plugin
 		{
 			layoutEditor.finish();
 		}
+		if (layoutListener != null)
+		{
+			layoutEditor.removeListener(layoutListener);
+			layoutListener = null;
+		}
 		mouseManager.unregisterMouseListener(layoutEditorOverlay);
+		mouseManager.unregisterMouseListener(reorgHelperOverlay);
 		overlayManager.remove(layoutEditorOverlay);
 		overlayManager.remove(reorgHelperOverlay);
 		clientToolbar.removeNavigation(navButton);
@@ -161,6 +173,7 @@ public class BankTemplatesPlugin extends Plugin
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event)
 	{
+		renderer.handleRelease(event);
 		renderer.remapWithdraw(event);
 	}
 

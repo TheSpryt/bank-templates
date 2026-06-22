@@ -34,6 +34,12 @@ final class Changelog
 		return all.isEmpty() ? null : all.get(0);
 	}
 
+	/** All changelog entries, newest first (full update history). */
+	static List<Entry> all(Gson gson)
+	{
+		return load(gson);
+	}
+
 	private static List<Entry> load(Gson gson)
 	{
 		try (InputStream in = Changelog.class.getResourceAsStream("/com/banktemplates/changelog.json"))
