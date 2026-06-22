@@ -102,7 +102,10 @@ public class BankTemplate
 		this.columns = columns;
 	}
 
-	public List<TabLayout> getTabs()
+	// Several accessors below are synchronized on this template instance. The layout editor mutates the
+	// per-tab lists (from the Swing thread and the client thread) while the renderer reads them on the
+	// client thread, so editing and reading take the same lock to stay consistent.
+	public synchronized List<TabLayout> getTabs()
 	{
 		normalize();
 		return tabs;
@@ -122,15 +125,98 @@ public class BankTemplate
 		}
 	}
 
-	public void putTab(int tab, List<Integer> tabLayout)
+	public synchronized void putTab(int tab, List<Integer> tabLayout)
 	{
 		normalize();
 		tabs.removeIf(t -> t.getTab() == tab);
 		tabs.add(new TabLayout(tab, tabLayout));
 	}
 
+	/**
+	 * The live, mutable slot list for a tab, creating an empty one if the template doesn't define it
+	 * yet. Used by the layout editor to add/move/remove slots in place.
+	 */
+	public synchronized List<Integer> editableTab(int tab)
+	{
+		normalize();
+		for (TabLayout t : tabs)
+		{
+			if (t.getTab() == tab)
+			{
+				return t.getLayout();
+			}
+		}
+		final TabLayout created = new TabLayout(tab, new ArrayList<>());
+		tabs.add(created);
+		return created.getLayout();
+	}
+
+	/** A safe, independent copy of a tab's slots for display (e.g. the editor grid). */
+	public synchronized List<Integer> copyTab(int tab)
+	{
+		return new ArrayList<>(editableTab(tab));
+	}
+
+	/** Drops a tab whose layout has become empty so it doesn't linger as a blank tab. */
+	public synchronized void pruneTab(int tab)
+	{
+		normalize();
+		tabs.removeIf(t -> t.getTab() == tab && t.getLayout().isEmpty());
+	}
+
+	/** Tabs this template defines, ascending, with the main view (0) sorting first for the editor. */
+	public synchronized List<Integer> definedTabs()
+	{
+		normalize();
+		final List<Integer> result = new ArrayList<>();
+		for (TabLayout t : tabs)
+		{
+			result.add(t.getTab());
+		}
+		result.sort((a, b) -> editorOrder(a) - editorOrder(b));
+		return result;
+	}
+
+	private static int editorOrder(int tab)
+	{
+		// Main/untabbed (0) sorts first in the editor (it's the "all items" view); numbered tabs follow.
+		return tab == MAIN_TAB ? -1 : tab;
+	}
+
+	/** A deep, independent copy - used to snapshot a template before editing so edits can be reverted. */
+	public synchronized BankTemplate copy()
+	{
+		normalize();
+		final BankTemplate c = new BankTemplate();
+		c.name = name;
+		c.description = description;
+		c.columns = columns;
+		c.repoId = repoId;
+		c.owned = owned;
+		c.preset = preset;
+		c.tabs = new ArrayList<>();
+		for (TabLayout t : tabs)
+		{
+			c.tabs.add(new TabLayout(t.getTab(), new ArrayList<>(t.getLayout())));
+		}
+		return c;
+	}
+
+	/** Replaces this template's tab layouts with those of {@code other} (used when reverting edits). */
+	public synchronized void restoreTabsFrom(BankTemplate other)
+	{
+		normalize();
+		other.normalize();
+		tabs.clear();
+		for (TabLayout t : other.tabs)
+		{
+			tabs.add(new TabLayout(t.getTab(), new ArrayList<>(t.getLayout())));
+		}
+		columns = other.columns;
+	}
+
 	/** Layout for a native tab as a primitive array, or {@code null} if this template doesn't define it. */
-	public int[] tabLayout(int tab)
+	public synchronized int[] tabLayout(int tab)
 	{
 		normalize();
 		for (TabLayout t : tabs)
@@ -147,7 +233,7 @@ public class BankTemplate
 	 * Every tab concatenated in bank order (numbered tabs 1-9 ascending, then the main/untabbed area
 	 * last) - i.e. the order the "view all items" tab shows them in. Used when that view is active.
 	 */
-	public int[] fullLayout()
+	public synchronized int[] fullLayout()
 	{
 		normalize();
 		final List<TabLayout> sorted = new ArrayList<>(tabs);
@@ -167,7 +253,7 @@ public class BankTemplate
 	}
 
 	/** Total real items across all tabs (excludes empty and filler slots). */
-	public int itemCount()
+	public synchronized int itemCount()
 	{
 		normalize();
 		int n = 0;
@@ -184,7 +270,7 @@ public class BankTemplate
 		return n;
 	}
 
-	public int tabCount()
+	public synchronized int tabCount()
 	{
 		normalize();
 		return tabs.size();
