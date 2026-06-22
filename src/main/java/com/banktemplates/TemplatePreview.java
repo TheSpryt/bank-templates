@@ -101,6 +101,24 @@ final class TemplatePreview
 		return root;
 	}
 
+	// Display name for a slot's item (filler reads as "Bank filler"). Falls back to the id if unknown.
+	static String itemName(ItemManager itemManager, int id)
+	{
+		try
+		{
+			final String name = itemManager.getItemComposition(id).getName();
+			if (name != null && !name.isEmpty() && !"null".equals(name))
+			{
+				return name;
+			}
+		}
+		catch (RuntimeException ignored)
+		{
+			// Unknown id (hand-edited template, or item this client version lacks) - fall through.
+		}
+		return "Item " + id;
+	}
+
 	// Fallback tab icon: the first real item in the tab.
 	private static int firstItem(List<Integer> layout)
 	{
@@ -132,6 +150,8 @@ final class TemplatePreview
 			{
 				final AsyncBufferedImage img = itemManager.getImage(id);
 				img.addTo(cell);
+				// Name on hover, so you can identify items in the preview without owning them.
+				cell.setToolTipText(itemName(itemManager, id));
 			}
 			grid.add(cell);
 		}

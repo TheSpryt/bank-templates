@@ -3,9 +3,12 @@ package com.banktemplates;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
+import java.awt.Point;
+import java.awt.Window;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
@@ -20,11 +23,14 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
+import javax.swing.WindowConstants;
 import javax.swing.border.Border;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
@@ -61,6 +67,7 @@ public class BankTemplatesPanel extends PluginPanel
 	private final ClientThread clientThread;
 	private final ConfigManager configManager;
 	private final BankTemplatesConfig config;
+	private final LayoutEditor layoutEditor;
 
 	private final JPanel listContainer = new JPanel();
 	private final IconTextField searchBar = new IconTextField();
@@ -82,7 +89,8 @@ public class BankTemplatesPanel extends PluginPanel
 
 	@Inject
 	BankTemplatesPanel(TemplateManager templateManager, ItemManager itemManager, TemplateRepositoryClient repositoryClient,
-		Client client, ClientThread clientThread, ConfigManager configManager, BankTemplatesConfig config)
+		Client client, ClientThread clientThread, ConfigManager configManager, BankTemplatesConfig config,
+		LayoutEditor layoutEditor)
 	{
 		this.templateManager = templateManager;
 		this.itemManager = itemManager;
@@ -91,6 +99,7 @@ public class BankTemplatesPanel extends PluginPanel
 		this.clientThread = clientThread;
 		this.configManager = configManager;
 		this.config = config;
+		this.layoutEditor = layoutEditor;
 
 		setLayout(new BorderLayout());
 		setBorder(BorderFactory.createEmptyBorder(10, 8, 8, 8));
@@ -274,6 +283,14 @@ public class BankTemplatesPanel extends PluginPanel
 		captureButton.addActionListener(e -> captureCurrentBank());
 		listContainer.add(captureButton);
 
+		listContainer.add(Box.createVerticalStrut(4));
+		final JButton newButton = styledButton("New empty layout");
+		newButton.setAlignmentX(Component.LEFT_ALIGNMENT);
+		newButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		newButton.setToolTipText("Build a layout from scratch - add items you don't own as placeholders");
+		newButton.addActionListener(e -> createNewLayout());
+		listContainer.add(newButton);
+
 		listContainer.add(Box.createVerticalStrut(8));
 		final JPanel reorgRow = new JPanel(new BorderLayout(6, 0));
 		reorgRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -362,6 +379,13 @@ public class BankTemplatesPanel extends PluginPanel
 		final JPanel buttons = buttonRow();
 		buttons.add(activeOrUse(active, () -> select(template)));
 		buttons.add(iconButton("View", "Preview this template", () -> showPreview(template)));
+		if (!template.isPreset())
+		{
+			final boolean editingThis = layoutEditor.isEditing(template);
+			buttons.add(iconButton(editingThis ? "Done" : "Edit",
+				editingThis ? "Finish editing this layout" : "Add, move and arrange items (no need to own them)",
+				() -> editTemplate(template)));
+		}
 		if (!template.isPreset() && repositoryClient.isEnabled())
 		{
 			final boolean update = template.isOwned() && template.getRepoId() != null;
@@ -977,11 +1001,48 @@ public class BankTemplatesPanel extends PluginPanel
 		onActiveChanged.run();
 	}
 
+	private void editTemplate(BankTemplate template)
+	{
+		if (layoutEditor.isEditing(template))
+		{
+			layoutEditor.finish();
+		}
+		else
+		{
+			TemplateEditor.open(this, itemManager, layoutEditor, template);
+		}
+		rebuildOnEdt();
+	}
+
+	private void createNewLayout()
+	{
+		final String input = JOptionPane.showInputDialog(this,
+			"Name for the new layout (max " + MAX_NAME_LENGTH + " chars):", "New layout");
+		if (input == null || input.trim().isEmpty())
+		{
+			return;
+		}
+		final BankTemplate t = new BankTemplate();
+		t.setName(uniqueName(capName(input)));
+		t.setColumns(BankTemplatesPlugin.ITEMS_PER_ROW);
+		t.putTab(BankTemplate.MAIN_TAB, new ArrayList<>());
+		if (templateManager.saveUserTemplate(t))
+		{
+			rebuildOnEdt();
+			TemplateEditor.open(this, itemManager, layoutEditor, t);
+		}
+		else
+		{
+			JOptionPane.showMessageDialog(this, "Could not create that layout.", "New layout failed", JOptionPane.ERROR_MESSAGE);
+		}
+	}
+
 	private void showPreview(BankTemplate template)
 	{
 		final JPanel content = new JPanel();
 		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 		content.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		content.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
 		if (template.getDescription() != null && !template.getDescription().isEmpty())
 		{
@@ -993,7 +1054,39 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		content.add(TemplatePreview.build(itemManager, template));
 
-		JOptionPane.showMessageDialog(this, content, "Preview: " + template.getName(), JOptionPane.PLAIN_MESSAGE);
+		showSideDialog("Preview: " + template.getName(), content);
+	}
+
+	/**
+	 * Shows {@code content} in a non-modal window placed beside the client, so the game stays clickable
+	 * while it's open (the old modal dialog blocked the whole client). Falls back to screen-centre when
+	 * the owner window can't be located.
+	 */
+	private void showSideDialog(String title, JComponent content)
+	{
+		final Window owner = SwingUtilities.getWindowAncestor(this);
+		final JDialog dialog = new JDialog(owner, title, Dialog.ModalityType.MODELESS);
+		dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+		dialog.getContentPane().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		dialog.setContentPane(content);
+		dialog.pack();
+
+		if (owner != null)
+		{
+			final Point loc = owner.getLocationOnScreen();
+			// Prefer the left of the client; if there's no room, drop it to the right edge instead.
+			int x = loc.x - dialog.getWidth() - 8;
+			if (x < 0)
+			{
+				x = loc.x + owner.getWidth() + 8;
+			}
+			dialog.setLocation(Math.max(0, x), Math.max(0, loc.y));
+		}
+		else
+		{
+			dialog.setLocationRelativeTo(null);
+		}
+		dialog.setVisible(true);
 	}
 
 	private static String escape(String s)

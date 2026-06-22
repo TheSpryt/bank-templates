@@ -15,6 +15,7 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.input.MouseManager;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -63,6 +64,15 @@ public class BankTemplatesPlugin extends Plugin
 	private ReorgHelperOverlay reorgHelperOverlay;
 
 	@Inject
+	private LayoutEditor layoutEditor;
+
+	@Inject
+	private LayoutEditorOverlay layoutEditorOverlay;
+
+	@Inject
+	private MouseManager mouseManager;
+
+	@Inject
 	private BankTemplatesPanel panel;
 
 	private NavigationButton navButton;
@@ -73,6 +83,12 @@ public class BankTemplatesPlugin extends Plugin
 		templateManager.load();
 
 		panel.setOnActiveChanged(this::requestBankRebuild);
+		// Editing a layout should redraw the bank and refresh the panel (Edit/Done state, item counts).
+		layoutEditor.addListener(() ->
+		{
+			requestBankRebuild();
+			panel.rebuild();
+		});
 		panel.rebuild();
 
 		final BufferedImage icon = ImageUtil.loadImageResource(BankTemplatesPlugin.class, "/com/banktemplates/icon.png");
@@ -85,6 +101,8 @@ public class BankTemplatesPlugin extends Plugin
 		clientToolbar.addNavigation(navButton);
 
 		overlayManager.add(reorgHelperOverlay);
+		overlayManager.add(layoutEditorOverlay);
+		mouseManager.registerMouseListener(layoutEditorOverlay);
 
 		repositoryClient.setIdentity(client.getAccountHash());
 		requestBankRebuild();
@@ -93,6 +111,12 @@ public class BankTemplatesPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
+		if (layoutEditor.isEditing())
+		{
+			layoutEditor.finish();
+		}
+		mouseManager.unregisterMouseListener(layoutEditorOverlay);
+		overlayManager.remove(layoutEditorOverlay);
 		overlayManager.remove(reorgHelperOverlay);
 		clientToolbar.removeNavigation(navButton);
 		navButton = null;
