@@ -11,6 +11,9 @@ class RemoteTemplate
 	String name;
 	String description;
 	String author;
+	// Set by the server when the uploader chose to share anonymously: clients show "Anonymous" instead
+	// of the author's name (the server still keeps the real name privately for moderation).
+	boolean anonymous;
 	int downloads;
 	int reports;
 	int columns;

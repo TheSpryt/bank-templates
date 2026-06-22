@@ -88,7 +88,9 @@ it in settings.
 - **Import** - saves a copy to *My templates*.
 - **Share** - uploads your template, credited to your RuneScape name. Re-sharing one you own
   **updates it in place** (the button reads **Update**). Editing an *imported* template and sharing it
-  creates a **new** entry - it never overwrites the original author's.
+  creates a **new** entry - it never overwrites the original author's. Tick **Share anonymously** in the
+  dialog to be shown to other players as **"Anonymous"** (the repository still records your name
+  privately for moderation; the choice is remembered for updates).
 - **Report** - flags a template for moderation (one per account per template).
 - Limits: you must be logged in to share/report/delete; max 10 shared templates per account; uploads
   are rate-limited.
@@ -115,7 +117,9 @@ The **Reorganise helper** toggle lives in the side panel (under *My templates*),
 The community repository feature is opt-in. When enabled, browsing/sharing sends your IP address to
 the configured server (the required RuneLite notice is shown). Sharing/reporting also sends a **salted
 hash of your account id** (not the raw account hash, not your username) so the server can attribute
-ownership and enforce limits. Nothing is sent while the feature is disabled.
+ownership and enforce limits. Sharing sends your RuneScape name so it can credit the template; choose
+**Share anonymously** and other players see **"Anonymous"** instead (your name is still stored privately
+on the server for moderation). Nothing is sent while the feature is disabled.
 
 ## Backend
 
