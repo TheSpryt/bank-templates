@@ -7,10 +7,13 @@ import com.google.gson.reflect.TypeToken;
 import java.io.IOException;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.function.Consumer;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +47,11 @@ public class TemplateRepositoryClient
 	private static final String SALT = "bank-templates-v1:";
 	// The community repository endpoint. Not a user setting (the plugin has to call it regardless).
 	private static final String REPO_URL = "https://bank-templates-repo.spryt.workers.dev";
+	// Obfuscation only: this key ships in the open-source plugin, so it cannot authenticate requests. It
+	// just signs write requests (X-BT-TS / X-BT-Sig = HMAC of "<ts>.<body>") to deter casual non-plugin
+	// calls. The Worker checks it only when its REQUIRE_SIG flag is on, and its SIG_SECRET env must equal
+	// this value.
+	private static final String SIG_KEY = "bt-sig-2f9c1a7e4b6d8035c1e9";
 
 	private final OkHttpClient okHttpClient;
 	private final Gson gson;
@@ -98,6 +106,36 @@ public class TemplateRepositoryClient
 		{
 			// SHA-256 is guaranteed to exist on every JVM.
 			throw new IllegalStateException(e);
+		}
+	}
+
+	// Signs a write request: X-BT-TS = now, X-BT-Sig = HMAC-SHA256(SIG_KEY, "<ts>.<body>"). Obfuscation
+	// only (see SIG_KEY); the Worker enforces it only when REQUIRE_SIG is enabled.
+	private void addSig(Request.Builder builder, String body)
+	{
+		final long ts = System.currentTimeMillis();
+		builder.header("X-BT-TS", Long.toString(ts));
+		builder.header("X-BT-Sig", hmacHex(SIG_KEY, ts + "." + body));
+	}
+
+	private static String hmacHex(String key, String msg)
+	{
+		try
+		{
+			final Mac mac = Mac.getInstance("HmacSHA256");
+			mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+			final byte[] digest = mac.doFinal(msg.getBytes(StandardCharsets.UTF_8));
+			final StringBuilder sb = new StringBuilder(digest.length * 2);
+			for (byte b : digest)
+			{
+				sb.append(Character.forDigit((b >> 4) & 0xf, 16)).append(Character.forDigit(b & 0xf, 16));
+			}
+			return sb.toString();
+		}
+		catch (GeneralSecurityException e)
+		{
+			// HmacSHA256 is guaranteed present on every JVM; if signing somehow fails, send no signature.
+			return "";
 		}
 	}
 
@@ -165,11 +203,12 @@ public class TemplateRepositoryClient
 	/** Creates a new shared template. {@code onSuccess} receives the new repo id. */
 	void create(BankTemplate template, String author, boolean anonymous, Consumer<Long> onSuccess, Consumer<String> onError)
 	{
-		final Request request = new Request.Builder()
+		final String bodyJson = gson.toJson(payload(template, author, anonymous));
+		final Request.Builder rb = new Request.Builder()
 			.url(baseUrl() + "/api/templates")
-			.post(RequestBody.create(JSON, gson.toJson(payload(template, author, anonymous))))
-			.build();
-		send(request, body ->
+			.post(RequestBody.create(JSON, bodyJson));
+		addSig(rb, bodyJson);
+		send(rb.build(), body ->
 		{
 			final JsonObject o = gson.fromJson(body, JsonObject.class);
 			onSuccess.accept(o != null && o.has("id") ? o.get("id").getAsLong() : null);
@@ -179,11 +218,12 @@ public class TemplateRepositoryClient
 	/** Updates a template the user owns, in place. */
 	void update(long repoId, BankTemplate template, String author, boolean anonymous, Runnable onSuccess, Consumer<String> onError)
 	{
-		final Request request = new Request.Builder()
+		final String bodyJson = gson.toJson(payload(template, author, anonymous));
+		final Request.Builder rb = new Request.Builder()
 			.url(baseUrl() + "/api/templates/" + repoId)
-			.put(RequestBody.create(JSON, gson.toJson(payload(template, author, anonymous))))
-			.build();
-		send(request, body -> onSuccess.run(), onError);
+			.put(RequestBody.create(JSON, bodyJson));
+		addSig(rb, bodyJson);
+		send(rb.build(), body -> onSuccess.run(), onError);
 	}
 
 	void delete(long repoId, Runnable onSuccess, Consumer<String> onError)
@@ -217,10 +257,12 @@ public class TemplateRepositoryClient
 		}
 		final JsonObject body = new JsonObject();
 		body.addProperty("clientId", clientId());
-		final Request request = new Request.Builder()
+		final String bodyJson = gson.toJson(body);
+		final Request.Builder rb = new Request.Builder()
 			.url(baseUrl() + "/api/templates/" + repoId + "/" + subPath)
-			.post(RequestBody.create(JSON, gson.toJson(body)))
-			.build();
+			.post(RequestBody.create(JSON, bodyJson));
+		addSig(rb, bodyJson);
+		final Request request = rb.build();
 		okHttpClient.newCall(request).enqueue(new Callback()
 		{
 			@Override
@@ -248,11 +290,12 @@ public class TemplateRepositoryClient
 	{
 		final JsonObject body = new JsonObject();
 		body.addProperty("clientId", clientId());
-		final Request request = new Request.Builder()
+		final String bodyJson = gson.toJson(body);
+		final Request.Builder rb = new Request.Builder()
 			.url(baseUrl() + "/api/templates/" + repoId + "/report")
-			.post(RequestBody.create(JSON, gson.toJson(body)))
-			.build();
-		send(request, b -> onSuccess.run(), onError);
+			.post(RequestBody.create(JSON, bodyJson));
+		addSig(rb, bodyJson);
+		send(rb.build(), b -> onSuccess.run(), onError);
 	}
 
 	private JsonObject payload(BankTemplate template, String author, boolean anonymous)
@@ -264,9 +307,11 @@ public class TemplateRepositoryClient
 		// Public display name: blanked when sharing anonymously so other clients can never show it, even
 		// against a server that doesn't yet understand the "anonymous" flag.
 		payload.addProperty("author", anonymous ? "" : name);
-		// The real RuneScape name, always sent so the server can keep it privately for dedup/moderation
-		// even when the template is shared anonymously.
-		payload.addProperty("rsn", name);
+		// The real RuneScape name. Only sent when NOT sharing anonymously (where it equals the public
+		// author anyway). Moderation - bans, ownership, the per-account limit and duplicate-import/report
+		// guards - all key off clientId (a salted account hash that is always sent), so withholding the
+		// name when anonymous costs nothing and keeps anonymous shares truly anonymous.
+		payload.addProperty("rsn", anonymous ? "" : name);
 		payload.addProperty("anonymous", anonymous);
 		payload.addProperty("columns", template.getColumns());
 		payload.addProperty("clientId", clientId());
@@ -344,5 +389,8 @@ public class TemplateRepositoryClient
 	{
 		List<RemoteTemplate> templates;
 		boolean hasMore;
+		// Total number of templates matching the current search/filter (across all pages), for the
+		// "Count: N" label and "Page X of N" pager. Older servers omit it, so it defaults to 0.
+		int total;
 	}
 }
