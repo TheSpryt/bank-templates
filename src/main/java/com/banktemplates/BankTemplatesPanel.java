@@ -111,12 +111,14 @@ public class BankTemplatesPanel extends PluginPanel
 		listContainer.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		add(listContainer, BorderLayout.CENTER);
 
-		// PluginPanel wraps us in a JScrollPane but leaves its default border, which shows as a thin
-		// light outline around the panel. Clear it.
+		// PluginPanel wraps us in a JScrollPane but leaves its default border (a thin light outline) and
+		// the chunky default scrollbar. Clear the border and apply our thin scrollbar.
 		final Component ancestor = SwingUtilities.getAncestorOfClass(JScrollPane.class, this);
 		if (ancestor instanceof JScrollPane)
 		{
-			((JScrollPane) ancestor).setBorder(BorderFactory.createEmptyBorder());
+			final JScrollPane wrapper = (JScrollPane) ancestor;
+			wrapper.setBorder(BorderFactory.createEmptyBorder());
+			ThinScrollBarUI.style(wrapper);
 		}
 	}
 
@@ -1026,7 +1028,7 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		else
 		{
-			TemplateEditor.open(this, itemManager, layoutEditor, template);
+			TemplateEditor.open(this, itemManager, clientThread, layoutEditor, template);
 		}
 		rebuildOnEdt();
 	}
@@ -1046,7 +1048,7 @@ public class BankTemplatesPanel extends PluginPanel
 		if (templateManager.saveUserTemplate(t))
 		{
 			rebuildOnEdt();
-			TemplateEditor.open(this, itemManager, layoutEditor, t);
+			TemplateEditor.open(this, itemManager, clientThread, layoutEditor, t);
 		}
 		else
 		{
@@ -1069,7 +1071,7 @@ public class BankTemplatesPanel extends PluginPanel
 			desc.setBorder(BorderFactory.createEmptyBorder(0, 0, 8, 0));
 			content.add(desc);
 		}
-		content.add(TemplatePreview.build(itemManager, template));
+		content.add(TemplatePreview.build(itemManager, clientThread, template));
 
 		showSideDialog("Preview: " + template.getName(), content);
 	}
