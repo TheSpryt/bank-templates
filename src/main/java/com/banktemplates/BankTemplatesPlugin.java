@@ -8,6 +8,7 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.MenuOptionClicked;
+import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.ScriptPreFired;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
@@ -137,6 +138,12 @@ public class BankTemplatesPlugin extends Plugin
 	public void onMenuOptionClicked(MenuOptionClicked event)
 	{
 		renderer.remapWithdraw(event);
+	}
+
+	@Subscribe
+	public void onScriptPostFired(ScriptPostFired event)
+	{
+		renderer.onScriptPostFired(event);
 	}
 
 	@Subscribe

@@ -19,7 +19,6 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -276,19 +275,47 @@ public class BankTemplatesPanel extends PluginPanel
 		listContainer.add(captureButton);
 
 		listContainer.add(Box.createVerticalStrut(8));
-		final JCheckBox reorg = new JCheckBox("Reorganise helper");
-		reorg.setSelected(config.showReorgHelper());
-		reorg.setFocusPainted(false);
-		reorg.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		reorg.setForeground(Color.WHITE);
-		reorg.setAlignmentX(Component.LEFT_ALIGNMENT);
-		reorg.setToolTipText("Show your real bank with a step-by-step guide for dragging it into the active template's order");
-		reorg.addActionListener(e ->
+		final JPanel reorgRow = new JPanel(new BorderLayout(6, 0));
+		reorgRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		reorgRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		reorgRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+		final JLabel reorgLabel = new JLabel("Reorganise");
+		reorgLabel.setForeground(Color.WHITE);
+		reorgLabel.setToolTipText("Guide for rearranging your real bank to match the active template");
+		reorgRow.add(reorgLabel, BorderLayout.WEST);
+
+		final String off = "Off";
+		final JComboBox<String> reorgMode = new JComboBox<>();
+		reorgMode.addItem(off);
+		for (BankTemplatesConfig.ReorgDisplay d : BankTemplatesConfig.ReorgDisplay.values())
 		{
-			configManager.setConfiguration(BankTemplatesConfig.GROUP, "showReorgHelper", reorg.isSelected());
+			reorgMode.addItem(d.toString());
+		}
+		reorgMode.setSelectedItem(config.showReorgHelper() ? config.reorgDisplay().toString() : off);
+		reorgMode.setFocusable(false);
+		reorgMode.addActionListener(e ->
+		{
+			final String sel = (String) reorgMode.getSelectedItem();
+			if (off.equals(sel))
+			{
+				configManager.setConfiguration(BankTemplatesConfig.GROUP, "showReorgHelper", false);
+			}
+			else
+			{
+				for (BankTemplatesConfig.ReorgDisplay d : BankTemplatesConfig.ReorgDisplay.values())
+				{
+					if (d.toString().equals(sel))
+					{
+						configManager.setConfiguration(BankTemplatesConfig.GROUP, "reorgDisplay", d);
+						break;
+					}
+				}
+				configManager.setConfiguration(BankTemplatesConfig.GROUP, "showReorgHelper", true);
+			}
 			onActiveChanged.run();
 		});
-		listContainer.add(reorg);
+		reorgRow.add(reorgMode, BorderLayout.CENTER);
+		listContainer.add(reorgRow);
 	}
 
 	private void addLocalSection(String name, List<BankTemplate> templates)
@@ -456,7 +483,7 @@ public class BankTemplatesPanel extends PluginPanel
 		final JPanel buttons = buttonRow();
 		buttons.add(iconButton("View", "Preview this template", () -> showPreview(rt.toTemplate())));
 		buttons.add(iconButton("Import", "Save a copy to My Templates", () -> importRemote(rt)));
-		buttons.add(iconButton("Report", "Report this template", () -> reportRepo(rt.id)));
+		buttons.add(iconButton("Report", "Report this template", () -> reportRepo(rt.id, this::loadBrowse)));
 		if (ownsRemote(rt.id))
 		{
 			buttons.add(iconButton("Del", "Delete your shared template", () -> deleteRemote(rt.id)));
@@ -515,6 +542,9 @@ public class BankTemplatesPanel extends PluginPanel
 		t.setName(uniqueName(capName(t.getName())));
 		if (templateManager.saveUserTemplate(t))
 		{
+			// Record the import, then refresh the Browse list so the count reflects the server's
+			// (deduped) truth rather than an optimistic guess.
+			repositoryClient.recordImport(rt.id, () -> SwingUtilities.invokeLater(this::loadBrowse));
 			JOptionPane.showMessageDialog(this, "Imported \"" + t.getName() + "\" to My Templates.", "Imported", JOptionPane.INFORMATION_MESSAGE);
 		}
 		else
@@ -537,6 +567,11 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private void reportRepo(long repoId)
 	{
+		reportRepo(repoId, null);
+	}
+
+	private void reportRepo(long repoId, Runnable onReported)
+	{
 		if (!requireLogin())
 		{
 			return;
@@ -548,7 +583,14 @@ public class BankTemplatesPanel extends PluginPanel
 			return;
 		}
 		repositoryClient.report(repoId,
-			() -> SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Reported. Thanks.", "Reported", JOptionPane.INFORMATION_MESSAGE)),
+			() -> SwingUtilities.invokeLater(() ->
+			{
+				if (onReported != null)
+				{
+					onReported.run();
+				}
+				JOptionPane.showMessageDialog(this, "Reported. Thanks.", "Reported", JOptionPane.INFORMATION_MESSAGE);
+			}),
 			error -> SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, error, "Report failed", JOptionPane.WARNING_MESSAGE)));
 	}
 
@@ -711,6 +753,11 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		else
 		{
+			// Deleting an imported copy: tell the repo so its import count drops back.
+			if (!template.isOwned() && template.getRepoId() != null && repositoryClient.isEnabled())
+			{
+				repositoryClient.unimport(template.getRepoId());
+			}
 			templateManager.deleteUserTemplate(template);
 			rebuildOnEdt();
 			onActiveChanged.run();
