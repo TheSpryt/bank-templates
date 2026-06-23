@@ -15,7 +15,7 @@
       "Reorganise helper: guides you to open the tab an item is in before dragging it, to create extra tabs when the template has more than you do, and to move spare bank fillers into the tabs that still need them.",
       "Reorganise helper: when a Bank Tags tag tab is open it points you back to the main bank, sorts each tab on its own (no more looping), and packs items into place even when some slots couldn't be reserved.",
       "Sharing: you can add a description (up to 500 characters) when sharing a template, shown to other players in Browse and the preview.",
-      "Side panel: the Updates tab is now pinned to the bottom of the panel and shows your full version history, newest first. The search box is cleaner and easier to read.",
+      "Side panel: the Updates tab is now pinned to the bottom of the panel and shows the full version history, newest first. The search box is cleaner and easier to read.",
       "Community repository: Browse now shows how many templates match your search (Count: N) under the sort, and the pager reads Page X of N.",
       "Sharing: sharing anonymously now sends nothing that identifies you. Your RuneScape name is no longer sent at all when anonymous (ownership, the per-account limit, bans and duplicate-vote guards all rely only on your account, never your name)."
     ],
