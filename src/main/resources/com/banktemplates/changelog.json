@@ -19,7 +19,9 @@
       "Community repository: Browse now shows how many templates match your search (Count: N) under the sort, and the pager reads Page X of N.",
       "Sharing: sharing anonymously now sends nothing that identifies you. Your RuneScape name is no longer sent at all when anonymous (ownership, the per-account limit, bans and duplicate-vote guards all rely only on your account, never your name)."
     ],
-    "knownIssues": []
+    "knownIssues": [
+      "Reorganise helper: items with kit or ornament variants (such as ornament kits or cosmetic overrides) can be matched or placed incorrectly while reorganising. A fix is planned for a future update."
+    ]
   },
   {
     "version": "1.1",
