@@ -505,18 +505,17 @@ final class TemplateEditor
 			return false;
 		}
 		final JPopupMenu menu = new JPopupMenu();
-		// Only real items can be "replaced"; filler/empty slots use Set filler / Set empty below.
+		// Only real items can be "replaced"; empty/filler slots have nothing to swap out.
 		final int current = index < cellIds.length ? cellIds[index] : BankTemplate.EMPTY;
 		if (current > 0)
 		{
-			menu.add(item("Replace item…", () -> openReplace(e.getComponent(), index)));
-			menu.addSeparator();
+			menu.add(item("Replace", () -> openReplace(e.getComponent(), index)));
 		}
-		menu.add(item("Set filler", () -> editor.setSlot(tab, index, BankTemplate.FILLER)));
-		menu.add(item("Set empty", () -> editor.setSlot(tab, index, BankTemplate.EMPTY)));
-		menu.add(item("Insert empty before", () -> editor.insertEmpty(tab, index)));
 		// "Release" matches the in-bank right-click wording: removeSlot shifts the rest up to fill the gap.
 		menu.add(item("Release", () -> editor.removeSlot(tab, index)));
+		menu.add(item("Set Bank Filler", () -> editor.setSlot(tab, index, BankTemplate.FILLER)));
+		menu.add(item("Set empty", () -> editor.setSlot(tab, index, BankTemplate.EMPTY)));
+		menu.add(item("Insert empty before", () -> editor.insertEmpty(tab, index)));
 		menu.show(e.getComponent(), e.getX(), e.getY());
 		return true;
 	}
