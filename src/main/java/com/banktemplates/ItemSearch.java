@@ -58,6 +58,7 @@ final class ItemSearch
 		final net.runelite.client.ui.components.IconTextField field = new net.runelite.client.ui.components.IconTextField();
 		field.setIcon(net.runelite.client.ui.components.IconTextField.Icon.SEARCH);
 		field.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		field.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
 		field.setPreferredSize(new Dimension(100, 30));
 
 		final JPanel results = new JPanel();

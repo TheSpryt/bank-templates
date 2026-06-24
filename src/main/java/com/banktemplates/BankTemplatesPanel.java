@@ -190,8 +190,10 @@ public class BankTemplatesPanel extends PluginPanel
 
 		searchBar.setIcon(IconTextField.Icon.SEARCH);
 		searchBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		searchBar.setPreferredSize(new Dimension(100, 28));
-		searchBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		searchBar.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
+		searchBar.setPreferredSize(new Dimension(100, 30));
+		searchBar.setMinimumSize(new Dimension(0, 30));
+		searchBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
 		searchBar.setAlignmentX(Component.LEFT_ALIGNMENT);
 		searchBar.addKeyListener(new KeyAdapter()
 		{
