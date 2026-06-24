@@ -7,7 +7,6 @@ import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Font;
 import java.awt.Point;
 import java.awt.Window;
 import java.awt.event.KeyAdapter;
@@ -1096,8 +1095,8 @@ public class BankTemplatesPanel extends PluginPanel
 		final JPanel votes = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
 		votes.setOpaque(false);
 		votes.setAlignmentX(Component.LEFT_ALIGNMENT);
-		votes.add(voteLabel("▲ " + rt.downloads, UPVOTE_COLOR));
-		votes.add(voteLabel("▼ " + rt.reports, DOWNVOTE_COLOR));
+		votes.add(voteLabel("<html><span style='font-family:Dialog'>&#9650;</span>&nbsp;" + rt.downloads + "</html>", UPVOTE_COLOR));
+		votes.add(voteLabel("<html><span style='font-family:Dialog'>&#9660;</span>&nbsp;" + rt.reports + "</html>", DOWNVOTE_COLOR));
 
 		final String by = rt.anonymous || rt.author == null || rt.author.isEmpty() ? "Anonymous" : rt.author;
 		final JLabel author = new JLabel("by " + by);
@@ -1109,15 +1108,14 @@ public class BankTemplatesPanel extends PluginPanel
 		return text;
 	}
 
-	private JLabel voteLabel(String s, Color color)
+	private JLabel voteLabel(String html, Color color)
 	{
-		final JLabel label = new JLabel(s);
+		// The count keeps the panel's RuneScape pixel font (its cmap has the digits, so they render on every
+		// platform). The caller wraps only the ▲/▼ arrow in an HTML logical-font span: the RuneScape font has
+		// no ▲/▼ glyph, and a logical font gets composite glyph fallback everywhere (incl. macOS), so the
+		// arrow renders while the count keeps the RuneScape look.
+		final JLabel label = new JLabel(html);
 		label.setForeground(color);
-		// Use an explicit logical font, NOT label.getFont().deriveFont(...): the RuneLite LAF sets the default
-		// UI font to the physical RuneScape font (which has no ▲/▼ glyphs), and deriveFont keeps that family,
-		// so on macOS the arrows render as .notdef boxes. A logical font gets composite glyph fallback on every
-		// platform, so ▲/▼ render.
-		label.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
 		return label;
 	}
 
