@@ -59,6 +59,8 @@ final class TemplateEditor
 	private final JPanel gridHolder = new JPanel(new BorderLayout());
 	private final JPanel tabBar = new JPanel(new WrapLayout(FlowLayout.LEFT, 3, 2));
 	private final List<JLabel> cells = new ArrayList<>();
+	// The item id currently shown in each cell, so an edit can refresh only the cells that actually changed.
+	private int[] cellIds = new int[0];
 
 	private int tab;
 	private int selected = -1;
@@ -329,12 +331,36 @@ final class TemplateEditor
 
 	private void rebuildGrid()
 	{
-		cells.clear();
 		final List<Integer> slots = template.copyTab(tab);
 		final int columns = template.getColumns();
 		// Pad to a full last row so there are obvious empty drop targets.
 		final int rows = Math.max(1, (slots.size() + columns) / columns);
 		final int total = rows * columns;
+
+		// If the grid shape hasn't changed (e.g. a swap or a move), update the existing cells in place
+		// instead of tearing the whole grid down and rebuilding it - that teardown is what made every
+		// icon visibly reload. Only cells whose item actually changed get their icon/tooltip refreshed;
+		// the rest just get their selection highlight re-applied.
+		if (cells.size() == total && cellIds.length == total)
+		{
+			for (int i = 0; i < total; i++)
+			{
+				final int id = i < slots.size() ? slots.get(i) : BankTemplate.EMPTY;
+				if (cellIds[i] != id)
+				{
+					setCellContent(cells.get(i), i, id);
+					cellIds[i] = id;
+				}
+				else
+				{
+					styleCell(cells.get(i), i == selected);
+				}
+			}
+			return;
+		}
+
+		cells.clear();
+		cellIds = new int[total];
 
 		final JPanel grid = new JPanel(new GridLayout(rows, columns, 1, 1));
 		grid.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -345,6 +371,7 @@ final class TemplateEditor
 			final int id = i < slots.size() ? slots.get(i) : BankTemplate.EMPTY;
 			final JLabel cell = makeCell(i, id, grid);
 			cells.add(cell);
+			cellIds[i] = id;
 			grid.add(cell);
 		}
 
@@ -360,14 +387,13 @@ final class TemplateEditor
 		cell.setBorder(isSelected ? SELECTED_BORDER : CELL_BORDER);
 	}
 
-	private JLabel makeCell(int index, int id, JPanel grid)
+	// Sets the highlight, icon and tooltip for a cell. Used both when building a cell and when refreshing
+	// one in place after an edit, so a swap only touches the cells whose item actually changed.
+	private void setCellContent(JLabel cell, int index, int id)
 	{
-		final JLabel cell = new JLabel();
-		cell.setOpaque(true);
 		styleCell(cell, index == selected);
-		cell.setPreferredSize(new Dimension(CELL, CELL));
-		cell.setHorizontalAlignment(JLabel.CENTER);
-
+		cell.setIcon(null);
+		cell.setToolTipText(null);
 		if (id > 0 || id == BankTemplate.FILLER)
 		{
 			final AsyncBufferedImage img = itemManager.getImage(id);
@@ -377,6 +403,15 @@ final class TemplateEditor
 			}
 			TemplatePreview.setItemTooltip(cell, itemManager, clientThread, id);
 		}
+	}
+
+	private JLabel makeCell(int index, int id, JPanel grid)
+	{
+		final JLabel cell = new JLabel();
+		cell.setOpaque(true);
+		cell.setPreferredSize(new Dimension(CELL, CELL));
+		cell.setHorizontalAlignment(JLabel.CENTER);
+		setCellContent(cell, index, id);
 
 		cell.addMouseListener(new MouseAdapter()
 		{
