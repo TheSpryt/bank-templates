@@ -41,6 +41,7 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.ui.components.IconTextField;
 
 @Slf4j
 @Singleton
@@ -72,7 +73,7 @@ public class BankTemplatesPanel extends PluginPanel
 	private final ItemIndex itemIndex;
 
 	private final JPanel listContainer = new JPanel();
-	private final javax.swing.JTextField searchBar = new javax.swing.JTextField();
+	private final IconTextField searchBar = new IconTextField();
 	private final JPanel tabsPanel = new JPanel();
 	private final JButton localTab = new JButton("My Templates");
 	private final JButton browseTab = new JButton("Browse");
@@ -187,13 +188,8 @@ public class BankTemplatesPanel extends PluginPanel
 
 		header.add(Box.createVerticalStrut(8));
 
+		searchBar.setIcon(IconTextField.Icon.SEARCH);
 		searchBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		searchBar.setForeground(Color.WHITE);
-		searchBar.setCaretColor(Color.WHITE);
-		searchBar.setToolTipText("Search templates");
-		searchBar.setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR),
-			BorderFactory.createEmptyBorder(4, 6, 4, 6)));
 		searchBar.setPreferredSize(new Dimension(100, 28));
 		searchBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		searchBar.setAlignmentX(Component.LEFT_ALIGNMENT);
