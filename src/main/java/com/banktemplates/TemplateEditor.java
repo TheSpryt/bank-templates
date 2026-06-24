@@ -10,6 +10,7 @@ import java.awt.Graphics;
 import java.awt.GridLayout;
 import java.awt.Image;
 import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -164,13 +165,18 @@ final class TemplateEditor
 		dialog.pack();
 		if (owner != null)
 		{
+			final Rectangle screen = owner.getGraphicsConfiguration().getBounds();
 			final Point loc = owner.getLocationOnScreen();
 			int x = loc.x - dialog.getWidth() - 8;
-			if (x < 0)
+			if (x < screen.x)
 			{
 				x = loc.x + owner.getWidth() + 8;
 			}
-			dialog.setLocation(Math.max(0, x), Math.max(0, loc.y));
+			// Keep the whole window on the client's screen, so a maximised/fullscreen client can't push it
+			// off-screen where it looks like nothing opened.
+			x = Math.max(screen.x, Math.min(x, screen.x + screen.width - dialog.getWidth()));
+			final int y = Math.max(screen.y, Math.min(loc.y, screen.y + screen.height - dialog.getHeight()));
+			dialog.setLocation(x, y);
 		}
 		else
 		{
