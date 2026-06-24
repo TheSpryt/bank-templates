@@ -8,6 +8,7 @@ import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.HierarchyEvent;
 import java.awt.event.KeyAdapter;
@@ -1365,14 +1366,19 @@ public class BankTemplatesPanel extends PluginPanel
 
 		if (owner != null)
 		{
+			final Rectangle screen = owner.getGraphicsConfiguration().getBounds();
 			final Point loc = owner.getLocationOnScreen();
-			// Prefer the left of the client; if there's no room, drop it to the right edge instead.
+			// Prefer the left of the client; if there's no room there, the right.
 			int x = loc.x - dialog.getWidth() - 8;
-			if (x < 0)
+			if (x < screen.x)
 			{
 				x = loc.x + owner.getWidth() + 8;
 			}
-			dialog.setLocation(Math.max(0, x), Math.max(0, loc.y));
+			// Keep the whole window on the client's screen. A maximised/fullscreen client leaves no room
+			// beside it, which used to push the window off-screen so "View" looked like it did nothing.
+			x = Math.max(screen.x, Math.min(x, screen.x + screen.width - dialog.getWidth()));
+			final int y = Math.max(screen.y, Math.min(loc.y, screen.y + screen.height - dialog.getHeight()));
+			dialog.setLocation(x, y);
 		}
 		else
 		{
