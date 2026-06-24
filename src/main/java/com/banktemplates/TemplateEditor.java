@@ -48,7 +48,6 @@ final class TemplateEditor
 {
 	private static final int CELL = 38;
 	private static final Border CELL_BORDER = BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR);
-	private static final Border SELECTED_BORDER = BorderFactory.createLineBorder(ColorScheme.BRAND_ORANGE, 2);
 
 	private final ItemManager itemManager;
 	private final ItemIndex itemIndex;
@@ -63,7 +62,6 @@ final class TemplateEditor
 	private int[] cellIds = new int[0];
 
 	private int tab;
-	private int selected = -1;
 	private boolean swapMode = false;
 	private Runnable listener;
 	private JDialog dialog;
@@ -219,7 +217,6 @@ final class TemplateEditor
 
 		bar.add(button("Add item", () -> ItemSearch.open(parent, itemIndex, id ->
 		{
-			selected = -1;
 			clientThread.invoke(() -> editor.addItemOrReport(tab, id, msg ->
 				SwingUtilities.invokeLater(() ->
 					JOptionPane.showMessageDialog(dialog, msg, "Already in layout", JOptionPane.INFORMATION_MESSAGE))));
@@ -297,7 +294,6 @@ final class TemplateEditor
 		b.addActionListener(e ->
 		{
 			tab = t;
-			selected = -1;
 			rebuildTabs();
 			rebuildGrid();
 		});
@@ -348,12 +344,8 @@ final class TemplateEditor
 				final int id = i < slots.size() ? slots.get(i) : BankTemplate.EMPTY;
 				if (cellIds[i] != id)
 				{
-					setCellContent(cells.get(i), i, id);
+					setCellContent(cells.get(i), id);
 					cellIds[i] = id;
-				}
-				else
-				{
-					styleCell(cells.get(i), i == selected);
 				}
 			}
 			return;
@@ -381,17 +373,17 @@ final class TemplateEditor
 		gridHolder.repaint();
 	}
 
-	private void styleCell(JLabel cell, boolean isSelected)
+	private void styleCell(JLabel cell)
 	{
-		cell.setBackground(isSelected ? ColorScheme.DARK_GRAY_HOVER_COLOR : ColorScheme.DARKER_GRAY_COLOR);
-		cell.setBorder(isSelected ? SELECTED_BORDER : CELL_BORDER);
+		cell.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		cell.setBorder(CELL_BORDER);
 	}
 
-	// Sets the highlight, icon and tooltip for a cell. Used both when building a cell and when refreshing
+	// Sets the styling, icon and tooltip for a cell. Used both when building a cell and when refreshing
 	// one in place after an edit, so a swap only touches the cells whose item actually changed.
-	private void setCellContent(JLabel cell, int index, int id)
+	private void setCellContent(JLabel cell, int id)
 	{
-		styleCell(cell, index == selected);
+		styleCell(cell);
 		cell.setIcon(null);
 		cell.setToolTipText(null);
 		if (id > 0 || id == BankTemplate.FILLER)
@@ -411,7 +403,7 @@ final class TemplateEditor
 		cell.setOpaque(true);
 		cell.setPreferredSize(new Dimension(CELL, CELL));
 		cell.setHorizontalAlignment(JLabel.CENTER);
-		setCellContent(cell, index, id);
+		setCellContent(cell, id);
 
 		cell.addMouseListener(new MouseAdapter()
 		{
@@ -434,31 +426,6 @@ final class TemplateEditor
 				if (target >= 0 && target != index)
 				{
 					apply(index, target);
-				}
-			}
-
-			@Override
-			public void mouseClicked(MouseEvent e)
-			{
-				if (!SwingUtilities.isLeftMouseButton(e))
-				{
-					return;
-				}
-				// Click select, then click again elsewhere to move/swap into that slot.
-				if (selected < 0)
-				{
-					// Highlight just this cell rather than rebuilding (and re-fetching every icon in) the grid.
-					selected = index;
-					styleCell(cells.get(index), true);
-				}
-				else if (selected == index)
-				{
-					styleCell(cells.get(index), false);
-					selected = -1;
-				}
-				else
-				{
-					apply(selected, index);
 				}
 			}
 		});
@@ -551,7 +518,6 @@ final class TemplateEditor
 		final JMenuItem mi = new JMenuItem(text);
 		mi.addActionListener(e ->
 		{
-			selected = -1;
 			action.run();
 		});
 		return mi;
@@ -567,7 +533,6 @@ final class TemplateEditor
 		{
 			editor.moveSlot(tab, from, to);
 		}
-		selected = -1;
 	}
 
 	// Slot index of the grid cell under a point (in grid coordinates), or -1.
