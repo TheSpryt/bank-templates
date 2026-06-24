@@ -148,6 +148,23 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			}
 		}
 
+		// Past filler setup (skipped, or none needed) but the bank settings / fillers screen is still open -
+		// it hides the item list, so guide the user back to the bank before the sort steps can run.
+		if (steps)
+		{
+			final Widget menu = client.getWidget(InterfaceID.Bankmain.MENU_CONTAINER);
+			if (menu != null && !menu.isHidden() && menu.getBounds().width > 0)
+			{
+				setBankTitle("Close bank settings to return to the bank", Color.WHITE, null, false);
+				final Widget spanner = client.getWidget(InterfaceID.Bankmain.MENU_BUTTON);
+				if (spanner != null && !spanner.isHidden())
+				{
+					pulseRect(graphics, spanner.getBounds(), config.reorgHighlightColor());
+				}
+				return null;
+			}
+		}
+
 		final Widget itemContainer = client.getWidget(InterfaceID.Bankmain.ITEMS);
 		if (itemContainer == null || itemContainer.isHidden())
 		{
