@@ -505,12 +505,30 @@ final class TemplateEditor
 			return false;
 		}
 		final JPopupMenu menu = new JPopupMenu();
+		// Only real items can be "replaced"; filler/empty slots use Set filler / Set empty below.
+		final int current = index < cellIds.length ? cellIds[index] : BankTemplate.EMPTY;
+		if (current > 0)
+		{
+			menu.add(item("Replace item…", () -> openReplace(e.getComponent(), index)));
+			menu.addSeparator();
+		}
 		menu.add(item("Set filler", () -> editor.setSlot(tab, index, BankTemplate.FILLER)));
 		menu.add(item("Set empty", () -> editor.setSlot(tab, index, BankTemplate.EMPTY)));
 		menu.add(item("Insert empty before", () -> editor.insertEmpty(tab, index)));
 		menu.add(item("Remove slot", () -> editor.removeSlot(tab, index)));
 		menu.show(e.getComponent(), e.getX(), e.getY());
 		return true;
+	}
+
+	// Bring up the Add-item search box and swap the chosen item into this slot. The picker closes after
+	// the pick, and a duplicate (the item is already elsewhere in the layout) is reported, not applied.
+	private void openReplace(Component near, int index)
+	{
+		ItemSearch.open(near, itemIndex, id ->
+			clientThread.invoke(() -> editor.replaceItemOrReport(tab, index, id, msg ->
+				SwingUtilities.invokeLater(() ->
+					JOptionPane.showMessageDialog(dialog, msg, "Already in layout", JOptionPane.INFORMATION_MESSAGE)))),
+			true);
 	}
 
 	private JMenuItem item(String text, Runnable action)
