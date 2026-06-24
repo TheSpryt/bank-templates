@@ -3,7 +3,7 @@
     "version": "1.3",
     "notes": [
       "Layout editor: the Add-item search now finds every item, including untradeable ones such as Barrows gloves, Arclight and Emberlight. It previously searched only tradeable (Grand Exchange) items.",
-      "Layout editor: right-click a slot and choose 'Replace item…' to pick a new item from the search box and swap it into that slot.",
+      "Layout editor: right-click a slot and choose 'Replace' to pick a new item from the search box and swap it into that slot.",
       "Layout editor: the slot right-click menu now uses 'Release' (shifting the rest up to fill the gap), matching the wording you already see when right-clicking a slot over the bank.",
       "A new plugin icon (a bank-grid design), shown on the side-panel button and in the Plugin Hub.",
       "Reorganise helper: pressing Skip while the bank settings (Bank Fillers) screen is open now guides you back to the bank, instead of leaving you with no prompt.",
