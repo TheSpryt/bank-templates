@@ -118,7 +118,18 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		// widget bounds sit over the bank's bottom buttons - only show/hit-test it when it's actually
 		// inside the visible bank area.
 		final Rectangle container = itemContainer.getBounds();
-		final Widget addChild = renderer.slotWidgetAt(len);
+		Widget addChild = renderer.slotWidgetAt(len);
+		// If another plugin (e.g. Inventory Setups) rearranged the bank so the slot after the layout now holds
+		// a real item, move the "+" to the first genuinely-empty slot so it never covers - and blocks the
+		// withdrawal of - an item.
+		if (addChild == null || addChild.getItemId() > 0)
+		{
+			final Widget empty = renderer.firstEmptySlot();
+			if (empty != null)
+			{
+				addChild = empty;
+			}
+		}
 		Rectangle add = addChild != null ? addChild.getBounds() : null;
 		if (add != null && (container == null || !container.contains(add)))
 		{
