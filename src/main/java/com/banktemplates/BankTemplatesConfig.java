@@ -16,10 +16,14 @@ public interface BankTemplatesConfig extends Config
 	// by the side panel instead. Empty/absent means "None".
 	String ACTIVE_TEMPLATE_KEY = "activeTemplate";
 
+	// Last changelog version whose notes the user has already seen. Hidden; managed by the side panel.
+	// Used to decide whether the panel should open on the Updates tab.
+	String LAST_SEEN_UPDATE_KEY = "lastSeenUpdate";
+
 	@ConfigItem(
 		keyName = "alertUpdates",
 		name = "Notify me about updates",
-		description = "Show an Updates tab in the side panel with the latest patch notes. The panel opens on it.",
+		description = "Show an Updates tab in the side panel with the latest patch notes. The panel opens on it once after each update, until you have seen the notes.",
 		position = 0
 	)
 	default boolean alertUpdates()
