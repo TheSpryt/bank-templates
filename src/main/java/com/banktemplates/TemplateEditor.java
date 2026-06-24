@@ -354,12 +354,17 @@ final class TemplateEditor
 		gridHolder.repaint();
 	}
 
+	private void styleCell(JLabel cell, boolean isSelected)
+	{
+		cell.setBackground(isSelected ? ColorScheme.DARK_GRAY_HOVER_COLOR : ColorScheme.DARKER_GRAY_COLOR);
+		cell.setBorder(isSelected ? SELECTED_BORDER : CELL_BORDER);
+	}
+
 	private JLabel makeCell(int index, int id, JPanel grid)
 	{
 		final JLabel cell = new JLabel();
 		cell.setOpaque(true);
-		cell.setBackground(index == selected ? ColorScheme.DARK_GRAY_HOVER_COLOR : ColorScheme.DARKER_GRAY_COLOR);
-		cell.setBorder(index == selected ? SELECTED_BORDER : CELL_BORDER);
+		styleCell(cell, index == selected);
 		cell.setPreferredSize(new Dimension(CELL, CELL));
 		cell.setHorizontalAlignment(JLabel.CENTER);
 
@@ -407,13 +412,14 @@ final class TemplateEditor
 				// Click select, then click again elsewhere to move/swap into that slot.
 				if (selected < 0)
 				{
+					// Highlight just this cell rather than rebuilding (and re-fetching every icon in) the grid.
 					selected = index;
-					rebuildGrid();
+					styleCell(cells.get(index), true);
 				}
 				else if (selected == index)
 				{
+					styleCell(cells.get(index), false);
 					selected = -1;
-					rebuildGrid();
 				}
 				else
 				{

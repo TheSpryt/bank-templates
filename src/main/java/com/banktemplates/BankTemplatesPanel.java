@@ -166,14 +166,6 @@ public class BankTemplatesPanel extends PluginPanel
 		header.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		header.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
 
-		final JLabel title = new JLabel("Bank Templates");
-		title.setFont(FontManager.getRunescapeBoldFont());
-		title.setForeground(Color.WHITE);
-		title.setAlignmentX(Component.LEFT_ALIGNMENT);
-		header.add(title);
-
-		header.add(Box.createVerticalStrut(8));
-
 		tabsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		tabsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
 		localTab.setFocusPainted(false);
@@ -221,6 +213,8 @@ public class BankTemplatesPanel extends PluginPanel
 				newSearch();
 			}
 		});
+		// No search box on the Updates/changelog view - there's nothing to search there.
+		searchBar.setVisible(!UPDATES.equals(mode));
 		header.add(searchBar);
 
 		return header;
@@ -233,6 +227,7 @@ public class BankTemplatesPanel extends PluginPanel
 			return;
 		}
 		mode = newMode;
+		searchBar.setVisible(!UPDATES.equals(mode));
 		styleTabs();
 		if (BROWSE.equals(mode))
 		{
