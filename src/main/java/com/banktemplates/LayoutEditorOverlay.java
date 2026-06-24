@@ -18,7 +18,6 @@ import net.runelite.api.gameval.SpriteID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
-import net.runelite.client.game.ItemManager;
 import net.runelite.client.input.MouseListener;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -39,7 +38,7 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	private static final int DRAG_THRESHOLD = 5;
 
 	private final Client client;
-	private final ItemManager itemManager;
+	private final ItemIndex itemIndex;
 	private final LayoutEditor layoutEditor;
 	private final ClientThread clientThread;
 	private final BankTemplatesConfig config;
@@ -66,11 +65,11 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	private volatile java.awt.Point pressPoint;
 
 	@Inject
-	LayoutEditorOverlay(Client client, ItemManager itemManager, LayoutEditor layoutEditor, ClientThread clientThread,
+	LayoutEditorOverlay(Client client, ItemIndex itemIndex, LayoutEditor layoutEditor, ClientThread clientThread,
 		BankTemplatesConfig config, BankLayoutRenderer renderer)
 	{
 		this.client = client;
-		this.itemManager = itemManager;
+		this.itemIndex = itemIndex;
 		this.layoutEditor = layoutEditor;
 		this.clientThread = clientThread;
 		this.config = config;
@@ -392,7 +391,7 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	{
 		final int tab = currentTab;
 		javax.swing.SwingUtilities.invokeLater(() ->
-			ItemSearch.open(client.getCanvas(), itemManager, id ->
+			ItemSearch.open(client.getCanvas(), itemIndex, id ->
 				clientThread.invoke(() -> layoutEditor.addItemOrReport(tab, id, msg ->
 					javax.swing.SwingUtilities.invokeLater(() -> javax.swing.JOptionPane.showMessageDialog(
 						null, msg, "Already in layout", javax.swing.JOptionPane.INFORMATION_MESSAGE))))));

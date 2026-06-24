@@ -51,6 +51,7 @@ final class TemplateEditor
 	private static final Border SELECTED_BORDER = BorderFactory.createLineBorder(ColorScheme.BRAND_ORANGE, 2);
 
 	private final ItemManager itemManager;
+	private final ItemIndex itemIndex;
 	private final ClientThread clientThread;
 	private final LayoutEditor editor;
 	private final BankTemplate template;
@@ -66,9 +67,10 @@ final class TemplateEditor
 	private JDialog dialog;
 	private final DragGlass glass = new DragGlass();
 
-	private TemplateEditor(ItemManager itemManager, ClientThread clientThread, LayoutEditor editor, BankTemplate template)
+	private TemplateEditor(ItemManager itemManager, ItemIndex itemIndex, ClientThread clientThread, LayoutEditor editor, BankTemplate template)
 	{
 		this.itemManager = itemManager;
+		this.itemIndex = itemIndex;
 		this.clientThread = clientThread;
 		this.editor = editor;
 		this.template = template;
@@ -79,13 +81,13 @@ final class TemplateEditor
 	 * Starts an edit session on {@code template} (if not already) and opens the editor window beside
 	 * {@code parent}.
 	 */
-	static void open(Component parent, ItemManager itemManager, ClientThread clientThread, LayoutEditor editor, BankTemplate template)
+	static void open(Component parent, ItemManager itemManager, ItemIndex itemIndex, ClientThread clientThread, LayoutEditor editor, BankTemplate template)
 	{
 		if (!editor.isEditing(template) && !editor.start(template))
 		{
 			return;
 		}
-		new TemplateEditor(itemManager, clientThread, editor, template).show(parent);
+		new TemplateEditor(itemManager, itemIndex, clientThread, editor, template).show(parent);
 	}
 
 	private void show(Component parent)
@@ -213,7 +215,7 @@ final class TemplateEditor
 		bar.add(apply);
 		bar.add(button("Cancel", this::attemptClose));
 
-		bar.add(button("Add item", () -> ItemSearch.open(parent, itemManager, id ->
+		bar.add(button("Add item", () -> ItemSearch.open(parent, itemIndex, id ->
 		{
 			selected = -1;
 			clientThread.invoke(() -> editor.addItemOrReport(tab, id, msg ->
