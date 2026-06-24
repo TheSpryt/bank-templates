@@ -515,7 +515,8 @@ final class TemplateEditor
 		menu.add(item("Set filler", () -> editor.setSlot(tab, index, BankTemplate.FILLER)));
 		menu.add(item("Set empty", () -> editor.setSlot(tab, index, BankTemplate.EMPTY)));
 		menu.add(item("Insert empty before", () -> editor.insertEmpty(tab, index)));
-		menu.add(item("Remove slot", () -> editor.removeSlot(tab, index)));
+		// "Release" matches the in-bank right-click wording: removeSlot shifts the rest up to fill the gap.
+		menu.add(item("Release", () -> editor.removeSlot(tab, index)));
 		menu.show(e.getComponent(), e.getX(), e.getY());
 		return true;
 	}
