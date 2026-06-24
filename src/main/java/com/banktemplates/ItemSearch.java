@@ -20,19 +20,18 @@ import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
-import lombok.extern.slf4j.Slf4j;
-import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.util.AsyncBufferedImage;
-import net.runelite.http.api.item.ItemPrice;
 
 /**
  * A small non-modal "Add item" picker: type a name, click a result to add that item to the layout. It
  * stays open after each pick so several items can be added in a row. Adding an item never requires you
  * to own it - the editor places it as a faded placeholder.
+ * <p>
+ * Searches the full {@link ItemIndex} (every item by name, including untradeables), not just GE-priced
+ * items, so things like Barrows gloves, Arclight and Emberlight can be added.
  */
-@Slf4j
 final class ItemSearch
 {
 	private static final int MAX_RESULTS = 40;
@@ -45,7 +44,7 @@ final class ItemSearch
 	 * Opens the picker beside {@code parent}. {@code onPick} is called (on the EDT) with each chosen
 	 * item id.
 	 */
-	static void open(Component parent, ItemManager itemManager, IntConsumer onPick)
+	static void open(Component parent, ItemIndex itemIndex, IntConsumer onPick)
 	{
 		final Window owner = SwingUtilities.getWindowAncestor(parent);
 		final JDialog dialog = new JDialog(owner, "Add item", Dialog.ModalityType.MODELESS);
@@ -72,12 +71,13 @@ final class ItemSearch
 		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
 		scroll.getVerticalScrollBar().setUnitIncrement(16);
 
+		final Runnable doSearch = () -> populate(itemIndex, field.getText(), results, scroll, onPick);
 		field.addKeyListener(new KeyAdapter()
 		{
 			@Override
 			public void keyReleased(KeyEvent e)
 			{
-				search(itemManager, field.getText(), results, scroll, onPick);
+				doSearch.run();
 			}
 		});
 
@@ -91,45 +91,38 @@ final class ItemSearch
 
 		dialog.setContentPane(root);
 		dialog.pack();
-		if (owner != null)
-		{
-			dialog.setLocationRelativeTo(owner);
-		}
-		else
-		{
-			dialog.setLocationRelativeTo(null);
-		}
+		dialog.setLocationRelativeTo(owner);
 		dialog.setVisible(true);
 		field.requestFocusInWindow();
+
+		// Kick off the (lazy, one-time) item index build and refresh results once it's ready.
+		itemIndex.ensureBuilt(doSearch);
 	}
 
-	private static void search(ItemManager itemManager, String query, JPanel results, JScrollPane scroll, IntConsumer onPick)
+	private static void populate(ItemIndex itemIndex, String query, JPanel results, JScrollPane scroll, IntConsumer onPick)
 	{
 		results.removeAll();
 		final String q = query == null ? "" : query.trim();
 		if (q.length() >= 1)
 		{
-			try
+			if (!itemIndex.isReady())
 			{
-				final List<ItemPrice> matches = itemManager.search(q);
-				int shown = 0;
-				for (ItemPrice price : matches)
-				{
-					if (shown++ >= MAX_RESULTS)
-					{
-						break;
-					}
-					results.add(resultRow(itemManager, price.getId(), price.getName(), onPick));
-				}
+				results.add(message("Loading items..."));
+			}
+			else
+			{
+				final List<ItemIndex.Entry> matches = itemIndex.search(q, MAX_RESULTS);
 				if (matches.isEmpty())
 				{
 					results.add(message("No items found."));
 				}
-			}
-			catch (RuntimeException e)
-			{
-				log.warn("Item search failed for '{}'", q, e);
-				results.add(message("Search failed."));
+				else
+				{
+					for (ItemIndex.Entry e : matches)
+					{
+						results.add(resultRow(itemIndex, e.getId(), e.getName(), onPick));
+					}
+				}
 			}
 		}
 		results.revalidate();
@@ -137,7 +130,7 @@ final class ItemSearch
 		scroll.getVerticalScrollBar().setValue(0);
 	}
 
-	private static JButton resultRow(ItemManager itemManager, int id, String name, IntConsumer onPick)
+	private static JButton resultRow(ItemIndex itemIndex, int id, String name, IntConsumer onPick)
 	{
 		final JButton row = new JButton(name);
 		row.setHorizontalAlignment(JButton.LEFT);
@@ -149,7 +142,7 @@ final class ItemSearch
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		row.setToolTipText(name);
 
-		final AsyncBufferedImage img = itemManager.getImage(id);
+		final AsyncBufferedImage img = itemIndex.getImage(id);
 		if (img != null)
 		{
 			img.addTo(row);
