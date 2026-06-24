@@ -7,6 +7,7 @@
       "Layout editor: the slot right-click menu now uses 'Release' (shifting the rest up to fill the gap), matching the wording you already see when right-clicking a slot over the bank.",
       "A new plugin icon (a bank-grid design), shown on the side-panel button and in the Plugin Hub.",
       "Bank view: fixed the green + add button covering a bank item (and blocking its withdrawal) while the bank showed an Inventory Setups view. The template now stays out of the way there, and the + always sits in an empty slot.",
+      "Community repository: fixed View (Preview) appearing to do nothing - the preview window could open off-screen when the client was maximised or fullscreen. Preview and editor windows now always open on the client's screen.",
       "Reorganise helper: pressing Skip while the bank settings (Bank Fillers) screen is open now guides you back to the bank, instead of leaving you with no prompt.",
       "Reorganise helper (step-by-step): the Skip button now shows on any single move step, so you can skip a move you cannot or do not want to make and the next step appears.",
       "Reorganise helper (step-by-step): in an Inventory Setups, tag tab or search bank view it now guides you back to the normal bank view before the move steps.",
