@@ -9,6 +9,7 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Point;
 import java.awt.Window;
+import java.awt.event.HierarchyEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
@@ -117,11 +118,21 @@ public class BankTemplatesPanel extends PluginPanel
 		this.latestUpdate = Changelog.latest(gson);
 		this.allUpdates = Changelog.all(gson);
 
-		// Open straight onto the Updates tab when update notes are enabled.
-		if (updatesTabShown())
+		// Open onto the Updates tab the first time after an update, but only until the user has seen these
+		// notes - after that, default to My Templates.
+		if (updatesTabShown() && !updateAlreadySeen())
 		{
 			mode = UPDATES;
 		}
+
+		// Mark the version as seen once the panel is actually shown sitting on the Updates tab.
+		addHierarchyListener(e ->
+		{
+			if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && isShowing() && UPDATES.equals(mode))
+			{
+				markUpdateSeen();
+			}
+		});
 
 		setLayout(new BorderLayout());
 		setBorder(BorderFactory.createEmptyBorder(10, 8, 8, 8));
@@ -227,6 +238,10 @@ public class BankTemplatesPanel extends PluginPanel
 			return;
 		}
 		mode = newMode;
+		if (UPDATES.equals(mode))
+		{
+			markUpdateSeen();
+		}
 		searchBar.setVisible(!UPDATES.equals(mode));
 		styleTabs();
 		if (BROWSE.equals(mode))
@@ -276,6 +291,26 @@ public class BankTemplatesPanel extends PluginPanel
 	private boolean updatesTabShown()
 	{
 		return config.alertUpdates() && latestUpdate != null && latestUpdate.version != null;
+	}
+
+	// True if the latest changelog version matches the one the user has already seen.
+	private boolean updateAlreadySeen()
+	{
+		final String seen = configManager.getConfiguration(BankTemplatesConfig.GROUP, BankTemplatesConfig.LAST_SEEN_UPDATE_KEY);
+		return latestUpdate != null && latestUpdate.version != null && latestUpdate.version.equals(seen);
+	}
+
+	private void markUpdateSeen()
+	{
+		if (latestUpdate == null || latestUpdate.version == null)
+		{
+			return;
+		}
+		final String seen = configManager.getConfiguration(BankTemplatesConfig.GROUP, BankTemplatesConfig.LAST_SEEN_UPDATE_KEY);
+		if (!latestUpdate.version.equals(seen))
+		{
+			configManager.setConfiguration(BankTemplatesConfig.GROUP, BankTemplatesConfig.LAST_SEEN_UPDATE_KEY, latestUpdate.version);
+		}
 	}
 
 	void rebuild()
