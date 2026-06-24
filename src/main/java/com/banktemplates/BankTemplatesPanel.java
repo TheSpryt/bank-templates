@@ -41,7 +41,6 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
-import net.runelite.client.ui.components.IconTextField;
 
 @Slf4j
 @Singleton
@@ -73,7 +72,7 @@ public class BankTemplatesPanel extends PluginPanel
 	private final ItemIndex itemIndex;
 
 	private final JPanel listContainer = new JPanel();
-	private final IconTextField searchBar = new IconTextField();
+	private final SearchBar searchBar = new SearchBar();
 	private final JPanel tabsPanel = new JPanel();
 	private final JButton localTab = new JButton("My Templates");
 	private final JButton browseTab = new JButton("Browse");
@@ -188,11 +187,7 @@ public class BankTemplatesPanel extends PluginPanel
 
 		header.add(Box.createVerticalStrut(8));
 
-		searchBar.setIcon(IconTextField.Icon.SEARCH);
-		searchBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		searchBar.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
 		searchBar.setPreferredSize(new Dimension(100, 30));
-		searchBar.setMinimumSize(new Dimension(0, 30));
 		searchBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
 		searchBar.setAlignmentX(Component.LEFT_ALIGNMENT);
 		searchBar.addKeyListener(new KeyAdapter()
@@ -210,6 +205,18 @@ public class BankTemplatesPanel extends PluginPanel
 		searchBar.addActionListener(e ->
 		{
 			if (BROWSE.equals(mode))
+			{
+				newSearch();
+			}
+		});
+		searchBar.addClearListener(() ->
+		{
+			query = "";
+			if (LOCAL.equals(mode))
+			{
+				rebuildOnEdt();
+			}
+			else
 			{
 				newSearch();
 			}
