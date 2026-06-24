@@ -69,6 +69,7 @@ public class BankTemplatesPanel extends PluginPanel
 	private final ConfigManager configManager;
 	private final BankTemplatesConfig config;
 	private final LayoutEditor layoutEditor;
+	private final ItemIndex itemIndex;
 
 	private final JPanel listContainer = new JPanel();
 	private final javax.swing.JTextField searchBar = new javax.swing.JTextField();
@@ -99,7 +100,7 @@ public class BankTemplatesPanel extends PluginPanel
 	@Inject
 	BankTemplatesPanel(TemplateManager templateManager, ItemManager itemManager, TemplateRepositoryClient repositoryClient,
 		Client client, ClientThread clientThread, ConfigManager configManager, BankTemplatesConfig config,
-		LayoutEditor layoutEditor, Gson gson)
+		LayoutEditor layoutEditor, ItemIndex itemIndex, Gson gson)
 	{
 		// Don't let PluginPanel wrap us in its own scrollpane - we manage our own so the Updates bar can
 		// stay pinned to the bottom while only the template list scrolls.
@@ -112,6 +113,7 @@ public class BankTemplatesPanel extends PluginPanel
 		this.configManager = configManager;
 		this.config = config;
 		this.layoutEditor = layoutEditor;
+		this.itemIndex = itemIndex;
 		this.latestUpdate = Changelog.latest(gson);
 		this.allUpdates = Changelog.all(gson);
 
@@ -1264,7 +1266,7 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		else
 		{
-			TemplateEditor.open(this, itemManager, clientThread, layoutEditor, template);
+			TemplateEditor.open(this, itemManager, itemIndex, clientThread, layoutEditor, template);
 		}
 		rebuildOnEdt();
 	}
@@ -1284,7 +1286,7 @@ public class BankTemplatesPanel extends PluginPanel
 		if (templateManager.saveUserTemplate(t))
 		{
 			rebuildOnEdt();
-			TemplateEditor.open(this, itemManager, clientThread, layoutEditor, t);
+			TemplateEditor.open(this, itemManager, itemIndex, clientThread, layoutEditor, t);
 		}
 		else
 		{
