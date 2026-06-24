@@ -204,6 +204,45 @@ public class LayoutEditor
 		edit(tab, slots -> slots.add(itemId));
 	}
 
+	/**
+	 * Replaces the slot at {@code pos} in {@code tab} with a real item, or - if that item is already
+	 * elsewhere in the layout - reports where via {@code onDup} (with a user-facing message) and changes
+	 * nothing. Fillers replace unconditionally. Must run on the client thread (it reads the item name).
+	 * {@code onDup} is invoked on the client thread.
+	 */
+	void replaceItemOrReport(int tab, int pos, int itemId, Consumer<String> onDup)
+	{
+		if (pos < 0)
+		{
+			return;
+		}
+		if (itemId == BankTemplate.FILLER)
+		{
+			setSlot(tab, pos, itemId);
+			return;
+		}
+		if (itemId <= 0)
+		{
+			return;
+		}
+		final BankTemplate t = liveTemplate();
+		if (t == null)
+		{
+			return;
+		}
+		final int[] loc = locate(t, itemId);
+		// Picking the item that's already in this same slot is a no-op, not a duplicate.
+		if (loc != null && !(loc[0] == tab && loc[1] == pos))
+		{
+			if (onDup != null)
+			{
+				onDup.accept(itemName(itemId) + " is already in " + describe(t, loc[0], loc[1]) + ".");
+			}
+			return;
+		}
+		setSlot(tab, pos, itemId);
+	}
+
 	// The {tab, index} of itemId in the template, or null if absent.
 	private int[] locate(BankTemplate t, int itemId)
 	{
