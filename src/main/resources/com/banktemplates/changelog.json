@@ -4,7 +4,8 @@
     "notes": [
       "Layout editor: the Add-item search now finds every item, including untradeable ones such as Barrows gloves, Arclight and Emberlight. It previously searched only tradeable (Grand Exchange) items.",
       "A new plugin icon (a bank-grid design), shown on the side-panel button and in the Plugin Hub.",
-      "Reorganise helper: pressing Skip while the bank settings (Bank Fillers) screen is open now guides you back to the bank, instead of leaving you with no prompt."
+      "Reorganise helper: pressing Skip while the bank settings (Bank Fillers) screen is open now guides you back to the bank, instead of leaving you with no prompt.",
+      "Browse: the search box now shows a magnifying-glass icon, matching the rest of the client."
     ],
     "knownIssues": [
       "Reorganise helper: items with kit or ornament variants (such as ornament kits or cosmetic overrides) can be matched or placed incorrectly while reorganising. A fix is planned for a future update."
