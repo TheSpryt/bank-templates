@@ -179,6 +179,10 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			return null;
 		}
 
+		// Which exact variants you own separately must stay distinct while sorting (see reorgId). Rebuilt
+		// each frame so it tracks the live template and bank.
+		exactShared = sharedExactIds(template);
+
 		// Current tab's items in slot order, with widgets for bounds.
 		final List<Widget> widgets = new ArrayList<>();
 		final List<Integer> current = new ArrayList<>();
@@ -190,7 +194,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				if (c != null && !c.isSelfHidden() && c.getItemId() > 0 && c.getItemId() != ItemID.BLANKOBJECT)
 				{
 					widgets.add(c);
-					current.add(functionalId(c.getItemId()));
+					current.add(reorgId(c.getItemId()));
 				}
 			}
 		}
@@ -215,7 +219,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				{
 					continue;
 				}
-				final int canon = functionalId(v);
+				final int canon = reorgId(v);
 				if (!owned.contains(canon) || !seen.add(canon))
 				{
 					continue;
@@ -267,7 +271,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				{
 					continue;
 				}
-				if (v == BankTemplate.FILLER || !owned.contains(functionalId(v)))
+				if (v == BankTemplate.FILLER || !owned.contains(reorgId(v)))
 				{
 					n++;
 				}
@@ -358,7 +362,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				{
 					continue;
 				}
-				if (v == BankTemplate.FILLER || !owned.contains(functionalId(v)))
+				if (v == BankTemplate.FILLER || !owned.contains(reorgId(v)))
 				{
 					need[tab]++;
 				}
@@ -690,7 +694,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		// Filler-balancing phase: once items are in their tabs, move SURPLUS bank fillers (a tab holding
 		// more than its template needs) into tabs that still need them. We only ever take a filler from a
 		// tab with more than it needs, so a filler that's already filling a needed slot is never pulled.
-		final int fillerCanon = functionalId(BankTemplate.FILLER);
+		final int fillerCanon = reorgId(BankTemplate.FILLER);
 		final int[] need = fillersNeededPerTab(template, owned);
 		final int[] have = fillersPerTab();
 		int deficitTab = -1;
@@ -767,7 +771,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		//
 		// This must stay a permutation of `current` (same items, same multiplicity) or the position maths
 		// below drifts - so every slot consumes from `remaining`, and anything left over is appended.
-		final int fillerCanon = functionalId(BankTemplate.FILLER);
+		final int fillerCanon = reorgId(BankTemplate.FILLER);
 		final Map<Integer, Integer> remaining = new HashMap<>();
 		for (int canon : current)
 		{
@@ -781,8 +785,8 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				continue;
 			}
 			// What this slot wants: the item itself if owned/available, else a filler to reserve it.
-			final int want = id != BankTemplate.FILLER && remaining.getOrDefault(functionalId(id), 0) > 0
-				? functionalId(id)
+			final int want = id != BankTemplate.FILLER && remaining.getOrDefault(reorgId(id), 0) > 0
+				? reorgId(id)
 				: fillerCanon;
 			final int count = remaining.getOrDefault(want, 0);
 			if (count > 0)
@@ -877,16 +881,22 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		}
 	}
 
+	// Canonical ids present in BOTH the active template and your bank, rebuilt each frame. reorgId uses this
+	// to keep exact variants you own separately (an item and its ornamented version) distinct while sorting.
+	private Set<Integer> exactShared = java.util.Collections.emptySet();
+
 	/**
-	 * A stable id for "this item, ignoring functionally-identical variants". Canonicalises placeholders
-	 * to the real item, then maps the result onto its variation base ({@link ItemVariationMapping}) so
-	 * item kits and alternate versions (charged/uncharged, degraded, recoloured, …) collapse to one id.
-	 * This matches how the virtual renderer pairs template items to bank items, so the reorganise helper
-	 * no longer flags a slot as "wrong" when you hold a functionally-identical version of the item.
+	 * A stable id for matching a template item to a bank item. Canonicalises placeholders to the real item,
+	 * then: if that exact item is in both the template and your bank, returns its own id, so two different
+	 * variants of one base that you own separately (e.g. an item and its ornamented version) stay distinct
+	 * and sort into their own slots; otherwise it collapses to the variation base, so a single owned variant
+	 * still satisfies a template slot asking for a different variant. Bases are negated so an exact base item
+	 * can never collide with its own group's collapsed id.
 	 */
-	private int functionalId(int id)
+	private int reorgId(int id)
 	{
-		return ItemVariationMapping.map(itemManager.canonicalize(id));
+		final int canon = itemManager.canonicalize(id);
+		return exactShared.contains(canon) ? canon : -(ItemVariationMapping.map(canon) + 1);
 	}
 
 	// Canonical ids of everything in the bank (what the player owns).
@@ -900,11 +910,44 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			{
 				if (it.getId() > 0)
 				{
-					owned.add(functionalId(it.getId()));
+					owned.add(reorgId(it.getId()));
 				}
 			}
 		}
 		return owned;
+	}
+
+	// Canonical ids present in BOTH the template and the bank - the exact variants reorgId keeps distinct.
+	private Set<Integer> sharedExactIds(BankTemplate template)
+	{
+		final Set<Integer> bankCanon = new HashSet<>();
+		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank != null)
+		{
+			for (Item it : bank.getItems())
+			{
+				if (it.getId() > 0)
+				{
+					bankCanon.add(itemManager.canonicalize(it.getId()));
+				}
+			}
+		}
+		final Set<Integer> shared = new HashSet<>();
+		for (TabLayout tl : template.getTabs())
+		{
+			for (Integer v : tl.getLayout())
+			{
+				if (v != null && v > 0)
+				{
+					final int canon = itemManager.canonicalize(v);
+					if (bankCanon.contains(canon))
+					{
+						shared.add(canon);
+					}
+				}
+			}
+		}
+		return shared;
 	}
 
 	// The native tab each visible item currently sits in: the viewed tab, or - in the all-items view -
