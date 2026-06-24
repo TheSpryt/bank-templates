@@ -42,13 +42,30 @@ final class ItemSearch
 
 	/**
 	 * Opens the picker beside {@code parent}. {@code onPick} is called (on the EDT) with each chosen
-	 * item id.
+	 * item id, and the picker stays open so several items can be added in a row.
 	 */
 	static void open(Component parent, ItemIndex itemIndex, IntConsumer onPick)
 	{
+		open(parent, itemIndex, onPick, false);
+	}
+
+	/**
+	 * Opens the picker beside {@code parent}. {@code onPick} is called (on the EDT) with each chosen
+	 * item id. When {@code closeOnPick} is true the picker closes after the first pick (used for
+	 * replacing a single slot); otherwise it stays open for adding several items in a row.
+	 */
+	static void open(Component parent, ItemIndex itemIndex, IntConsumer onPick, boolean closeOnPick)
+	{
 		final Window owner = SwingUtilities.getWindowAncestor(parent);
-		final JDialog dialog = new JDialog(owner, "Add item", Dialog.ModalityType.MODELESS);
+		final JDialog dialog = new JDialog(owner, closeOnPick ? "Replace item" : "Add item", Dialog.ModalityType.MODELESS);
 		dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+
+		// When replacing, dispose the picker after the chosen item is handed off.
+		final IntConsumer pick = closeOnPick ? id ->
+		{
+			onPick.accept(id);
+			dialog.dispose();
+		} : onPick;
 
 		final JPanel root = new JPanel(new BorderLayout(0, 6));
 		root.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -69,7 +86,7 @@ final class ItemSearch
 		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
 		scroll.getVerticalScrollBar().setUnitIncrement(16);
 
-		final Runnable doSearch = () -> populate(itemIndex, field.getText(), results, scroll, onPick);
+		final Runnable doSearch = () -> populate(itemIndex, field.getText(), results, scroll, pick);
 		field.addKeyListener(new KeyAdapter()
 		{
 			@Override
@@ -83,7 +100,9 @@ final class ItemSearch
 		root.add(field, BorderLayout.NORTH);
 		root.add(scroll, BorderLayout.CENTER);
 
-		final JLabel hint = new JLabel("Type a name, then click an item to add it.");
+		final JLabel hint = new JLabel(closeOnPick
+			? "Type a name, then click an item to replace this slot."
+			: "Type a name, then click an item to add it.");
 		hint.setFont(FontManager.getRunescapeSmallFont());
 		hint.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		root.add(hint, BorderLayout.SOUTH);
