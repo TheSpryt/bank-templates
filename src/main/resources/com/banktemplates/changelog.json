@@ -6,6 +6,7 @@
       "Layout editor: right-click a slot and choose 'Replace' to pick a new item from the search box and swap it into that slot.",
       "Layout editor: the slot right-click menu now uses 'Release' (shifting the rest up to fill the gap), matching the wording you already see when right-clicking a slot over the bank.",
       "A new plugin icon (a bank-grid design), shown on the side-panel button and in the Plugin Hub.",
+      "Bank view: fixed the green + add button covering a bank item (and blocking its withdrawal) while the bank showed an Inventory Setups view. The template now stays out of the way there, and the + always sits in an empty slot.",
       "Reorganise helper: pressing Skip while the bank settings (Bank Fillers) screen is open now guides you back to the bank, instead of leaving you with no prompt.",
       "Browse: the search box now shows a magnifying-glass icon, matching the rest of the client.",
       "Side panel: removed the redundant title heading, and the search box is hidden on the Updates tab (nothing to search there).",

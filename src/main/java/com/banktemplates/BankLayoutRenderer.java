@@ -115,6 +115,25 @@ public class BankLayoutRenderer
 		return w != null && pos >= 0 && pos < w.length ? w[pos] : null;
 	}
 
+	// The first rendered slot holding no item (an empty/gap slot we placed), or null if there's none.
+	// Hosts the "+" add button so it can never land on - and block the withdrawal of - a real item.
+	Widget firstEmptySlot()
+	{
+		final Widget[] w = slotWidgets;
+		if (w == null)
+		{
+			return null;
+		}
+		for (final Widget s : w)
+		{
+			if (s != null && !s.isHidden() && s.getItemId() <= 0)
+			{
+				return s;
+			}
+		}
+		return null;
+	}
+
 	// A free widget for a slot that isn't an owned item (empty, filler, or unowned placeholder): an empty
 	// bank-slot widget if one's left, otherwise a created virtual widget.
 	private Widget takeSpare(java.util.Deque<Widget> spares, Widget container, int[] virt)
@@ -131,7 +150,10 @@ public class BankLayoutRenderer
 			return false;
 		}
 		final String t = Text.removeTags(title.getText()).toLowerCase();
-		return t.contains("tag tab") || t.startsWith("showing");
+		// "tag tab"/"showing" = a Bank Tags tag tab or a search. "inventory setup" = the Inventory Setups
+		// bank view, which overrides the bank title to "Inventory Setup <name>". In all of these the bank is
+		// showing a filtered/foreign layout, so we must not apply ours over the top of it.
+		return t.contains("tag tab") || t.startsWith("showing") || t.startsWith("inventory setup");
 	}
 
 	void onScriptPreFired(ScriptPreFired event)
