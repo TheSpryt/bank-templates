@@ -55,10 +55,7 @@ final class ItemSearch
 		root.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 		root.setPreferredSize(new Dimension(260, 360));
 
-		final net.runelite.client.ui.components.IconTextField field = new net.runelite.client.ui.components.IconTextField();
-		field.setIcon(net.runelite.client.ui.components.IconTextField.Icon.SEARCH);
-		field.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		field.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
+		final SearchBar field = new SearchBar();
 		field.setPreferredSize(new Dimension(100, 30));
 
 		final JPanel results = new JPanel();
@@ -81,6 +78,7 @@ final class ItemSearch
 				doSearch.run();
 			}
 		});
+		field.addClearListener(doSearch);
 
 		root.add(field, BorderLayout.NORTH);
 		root.add(scroll, BorderLayout.CENTER);
