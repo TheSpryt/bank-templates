@@ -197,8 +197,8 @@ final class TemplateEditor
 
 	private JLabel buildHint()
 	{
-		final JLabel hint = new JLabel("<html>Click to select, click again to move here. Drag to "
-			+ "rearrange. Right-click a slot for more. Apply to save; closing discards changes.</html>");
+		final JLabel hint = new JLabel("<html>Drag an item onto another slot to swap or insert. Right-click a "
+			+ "slot for more. Apply to save; closing discards changes.</html>");
 		hint.setFont(FontManager.getRunescapeSmallFont());
 		hint.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		return hint;
