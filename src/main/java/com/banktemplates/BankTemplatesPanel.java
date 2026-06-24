@@ -7,6 +7,7 @@ import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.Point;
 import java.awt.Window;
 import java.awt.event.KeyAdapter;
@@ -395,7 +396,10 @@ public class BankTemplatesPanel extends PluginPanel
 	// A wrapped bullet-point label sized for the side panel.
 	private JLabel bulletLabel(String text, Color color)
 	{
-		final JLabel b = new JLabel("<html><body style='width:160px'>&#8226;&nbsp;" + escape(text) + "</body></html>");
+		// U+00B7 (middle dot), not U+2022 (bullet): the label inherits the RuneScape UI font, whose cmap has
+		// no glyph for U+2022, so on macOS (no font substitution for a physical font) it renders as a .notdef
+		// box that overstrikes the first letter. U+00B7 is in the RuneScape cmap, so it renders everywhere.
+		final JLabel b = new JLabel("<html><body style='width:160px'>&#183;&nbsp;" + escape(text) + "</body></html>");
 		b.setForeground(color);
 		b.setAlignmentX(Component.LEFT_ALIGNMENT);
 		b.setBorder(BorderFactory.createEmptyBorder(0, 2, 7, 0));
@@ -653,12 +657,12 @@ public class BankTemplatesPanel extends PluginPanel
 			browseOffset = 0;
 			loadBrowse();
 		}));
-		nav.add(pagerButton("‹ Prev", "Previous page", hasPrev, () ->
+		nav.add(pagerButton("< Prev", "Previous page", hasPrev, () ->
 		{
 			browseOffset = Math.max(0, browseOffset - PAGE_SIZE);
 			loadBrowse();
 		}));
-		nav.add(pagerButton("Next ›", "Next page", browseHasMore, () ->
+		nav.add(pagerButton("Next >", "Next page", browseHasMore, () ->
 		{
 			browseOffset += PAGE_SIZE;
 			loadBrowse();
@@ -1109,8 +1113,11 @@ public class BankTemplatesPanel extends PluginPanel
 	{
 		final JLabel label = new JLabel(s);
 		label.setForeground(color);
-		// Default font (not the bitmap RuneScape font) so the ▲/▼ glyphs render.
-		label.setFont(label.getFont().deriveFont(11f));
+		// Use an explicit logical font, NOT label.getFont().deriveFont(...): the RuneLite LAF sets the default
+		// UI font to the physical RuneScape font (which has no ▲/▼ glyphs), and deriveFont keeps that family,
+		// so on macOS the arrows render as .notdef boxes. A logical font gets composite glyph fallback on every
+		// platform, so ▲/▼ render.
+		label.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
 		return label;
 	}
 
