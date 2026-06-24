@@ -8,6 +8,8 @@
       "A new plugin icon (a bank-grid design), shown on the side-panel button and in the Plugin Hub.",
       "Bank view: fixed the green + add button covering a bank item (and blocking its withdrawal) while the bank showed an Inventory Setups view. The template now stays out of the way there, and the + always sits in an empty slot.",
       "Reorganise helper: pressing Skip while the bank settings (Bank Fillers) screen is open now guides you back to the bank, instead of leaving you with no prompt.",
+      "Reorganise helper (step-by-step): the Skip button now shows on any single move step, so you can skip a move you cannot or do not want to make and the next step appears.",
+      "Reorganise helper (step-by-step): in an Inventory Setups, tag tab or search bank view it now guides you back to the normal bank view before the move steps.",
       "Browse: the search box now shows a magnifying-glass icon, matching the rest of the client.",
       "Side panel: removed the redundant title heading, and the search box is hidden on the Updates tab (nothing to search there).",
       "Side panel: it only opens on the Updates tab the first time after an update. Once you have seen a version's notes, it opens on My Templates.",
