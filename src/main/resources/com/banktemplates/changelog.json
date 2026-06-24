@@ -7,7 +7,8 @@
       "Reorganise helper: pressing Skip while the bank settings (Bank Fillers) screen is open now guides you back to the bank, instead of leaving you with no prompt.",
       "Browse: the search box now shows a magnifying-glass icon, matching the rest of the client.",
       "Side panel: removed the redundant title heading, and the search box is hidden on the Updates tab (nothing to search there).",
-      "Layout editor: selecting, swapping and moving slots no longer rebuilds (and visibly reloads every icon in) the whole grid - only the slots that actually changed are refreshed, so editing is much snappier."
+      "Layout editor: swap or insert items by dragging them, just like the real bank - clicking a slot no longer selects it to swap.",
+      "Layout editor: dragging to swap or move an item now refreshes only the slots that changed, instead of reloading every icon in the grid, so editing is much snappier."
     ],
     "knownIssues": [
       "Reorganise helper: items with kit or ornament variants (such as ornament kits or cosmetic overrides) can be matched or placed incorrectly while reorganising. A fix is planned for a future update."
