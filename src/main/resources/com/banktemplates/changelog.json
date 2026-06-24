@@ -11,7 +11,7 @@
       "Reorganise helper: pressing Skip while the bank settings (Bank Fillers) screen is open now guides you back to the bank, instead of leaving you with no prompt.",
       "Reorganise helper (step-by-step): the Skip button now shows on any single move step, so you can skip a move you cannot or do not want to make and the next step appears.",
       "Reorganise helper (step-by-step): in an Inventory Setups, tag tab or search bank view it now guides you back to the normal bank view before the move steps.",
-      "Browse: the search box now shows a magnifying-glass icon, matching the rest of the client.",
+      "Search boxes (Browse and Add-item) now have a magnifying-glass icon, clearer easy-to-read text, and a red clear button, matching the rest of the client.",
       "Side panel: removed the redundant title heading, and the search box is hidden on the Updates tab (nothing to search there).",
       "Side panel: it only opens on the Updates tab the first time after an update. Once you have seen a version's notes, it opens on My Templates.",
       "Layout editor: swap or insert items by dragging them, just like the real bank - clicking a slot no longer selects it to swap.",
