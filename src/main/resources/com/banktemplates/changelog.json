@@ -20,7 +20,8 @@
       "Sharing: sharing anonymously now sends nothing that identifies you. Your RuneScape name is no longer sent at all when anonymous (ownership, the per-account limit, bans and duplicate-vote guards all rely only on your account, never your name)."
     ],
     "knownIssues": [
-      "Reorganise helper: items with kit or ornament variants (such as ornament kits or cosmetic overrides) can be matched or placed incorrectly while reorganising. A fix is planned for a future update."
+      "Reorganise helper: items with kit or ornament variants (such as ornament kits or cosmetic overrides) can be matched or placed incorrectly while reorganising. A fix is planned for a future update.",
+      "Layout editor: a few items (for example Barrows gloves and Emberlight) can't yet be added to a template from the item search box. A fix is planned for a future update."
     ]
   },
   {
