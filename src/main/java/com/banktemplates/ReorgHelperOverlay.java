@@ -58,6 +58,12 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 	private volatile boolean skipFillers;
 	// Screen bounds of the title-bar "Skip" button (set while the filler-setup step is shown).
 	private volatile Rectangle skipButtonRect;
+	// Single move steps the user has skipped this session (by signature), so each is bypassed and the next
+	// step is shown instead. Cleared when the reorg helper is closed.
+	private final java.util.Set<String> skippedSteps = java.util.concurrent.ConcurrentHashMap.newKeySet();
+	// Signature of the move step currently shown (null during the filler step or when nothing is shown). The
+	// title-bar Skip button adds this to skippedSteps.
+	private volatile String currentStepSig;
 
 	private static final Color SOURCE_COLOR = new Color(255, 165, 0);   // orange: item to move
 	private static final Color DONE_COLOR = new Color(110, 200, 110);
@@ -100,9 +106,11 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		{
 			skipFillers = false;
 			skipButtonRect = null;
+			skippedSteps.clear();
 			return null;
 		}
 		skipButtonRect = null;
+		currentStepSig = null;
 
 		final BankTemplate template = templateManager.getActive();
 		if (template == null)
@@ -114,14 +122,14 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		final boolean labels = mode == BankTemplatesConfig.ReorgDisplay.LABELS || mode == BankTemplatesConfig.ReorgDisplay.BOTH;
 		final boolean steps = mode == BankTemplatesConfig.ReorgDisplay.STEP_BY_STEP || mode == BankTemplatesConfig.ReorgDisplay.BOTH;
 
-		// In a Bank Tags tag tab / search the bank is filtered and can't be reorganised - guide the user
-		// back to the main bank view (the all-items tab) first.
+		// In a Bank Tags tag tab, a search, or an Inventory Setups bank view the bank is filtered and can't be
+		// reorganised - guide the user back to the normal bank view (the all-items tab) first.
 		if (renderer.isBankFilteredNow())
 		{
 			final Widget items = client.getWidget(InterfaceID.Bankmain.ITEMS);
 			if (steps && items != null)
 			{
-				setBankTitle("Open the main tab to reorganise this template", Color.WHITE, null, false);
+				setBankTitle("Open the main bank tab to reorganise this template", Color.WHITE, null, false);
 				final Widget allItems = tabButtons().get(BankTemplate.MAIN_TAB);
 				if (allItems != null && !allItems.isHidden())
 				{
@@ -236,6 +244,11 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		if (steps)
 		{
 			drawSteps(graphics, itemContainer, template, currentTab, widgets, current, itemTab, targetTab, owned);
+			// Let the user skip whatever single move is currently shown - the next step then appears.
+			if (currentStepSig != null)
+			{
+				drawSkipButton(graphics);
+			}
 		}
 
 		return null;
@@ -457,7 +470,17 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		final Rectangle r = skipButtonRect;
 		if (r != null && r.contains(e.getPoint()))
 		{
-			skipFillers = true;
+			final String sig = currentStepSig;
+			if (sig != null)
+			{
+				// Skip just the move currently shown; the next step appears.
+				skippedSteps.add(sig);
+			}
+			else
+			{
+				// Filler-reservation step: bypass reserving slots entirely.
+				skipFillers = true;
+			}
 			e.consume();
 		}
 		return e;
@@ -594,6 +617,12 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			{
 				continue;
 			}
+			final String sig = "T:" + current.get(k) + ":" + tt;
+			if (skippedSteps.contains(sig))
+			{
+				continue;
+			}
+			currentStepSig = sig;
 			final Widget from = widgets.get(k);
 			final String name = client.getItemDefinition(from.getItemId()).getName();
 
@@ -629,17 +658,26 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		{
 			int bestK = -1;
 			int lowest = Integer.MAX_VALUE;
+			String bestSig = null;
 			for (int k = 0; k < current.size(); k++)
 			{
 				final Integer tt = targetTab.get(current.get(k));
-				if (tt != null && tt != BankTemplate.MAIN_TAB && tt > existingTabs && tt < lowest)
+				if (tt == null || tt == BankTemplate.MAIN_TAB || tt <= existingTabs || tt >= lowest)
 				{
-					lowest = tt;
-					bestK = k;
+					continue;
 				}
+				final String sig = "N:" + current.get(k) + ":" + tt;
+				if (skippedSteps.contains(sig))
+				{
+					continue;
+				}
+				lowest = tt;
+				bestK = k;
+				bestSig = sig;
 			}
 			if (bestK != -1)
 			{
+				currentStepSig = bestSig;
 				final Widget from = widgets.get(bestK);
 				outline(g, from.getBounds(), SOURCE_COLOR);
 				pulseRect(g, addBtn.getBounds(), config.reorgHighlightColor());
@@ -658,7 +696,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		int deficitTab = -1;
 		for (int t = 0; t < need.length; t++)
 		{
-			if (have[t] < need[t])
+			if (have[t] < need[t] && !skippedSteps.contains("F:" + t))
 			{
 				deficitTab = t;
 				break;
@@ -673,6 +711,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				{
 					continue;
 				}
+				currentStepSig = "F:" + deficitTab;
 				final Widget from = widgets.get(k);
 				outline(g, from.getBounds(), SOURCE_COLOR);
 				final Widget tabBtn = tabButtons().get(deficitTab);
@@ -763,10 +802,17 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			}
 		}
 
+		// Advance over slots that already match, and over any the user chose to skip, so the move shown is the
+		// first slot that's both wrong and not skipped.
 		int i = 0;
-		while (i < current.size() && i < target.size() && current.get(i).equals(target.get(i)))
+		while (i < current.size() && i < target.size())
 		{
-			i++;
+			if (current.get(i).equals(target.get(i)) || skippedSteps.contains("P:" + currentTab + ":" + i))
+			{
+				i++;
+				continue;
+			}
+			break;
 		}
 
 		final Shape oldClip = graphics.getClip();
@@ -774,7 +820,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 
 		if (i >= target.size() || i >= current.size())
 		{
-			setBankTitle("Bank matches the template", DONE_COLOR, null, false);
+			setBankTitle(skippedSteps.isEmpty() ? "Bank matches the template" : "Done (some steps skipped)", DONE_COLOR, null, false);
 			graphics.setClip(oldClip);
 			planTab = -1;
 			return;
@@ -791,6 +837,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			graphics.setClip(oldClip);
 			return;
 		}
+		currentStepSig = "P:" + currentTab + ":" + i;
 
 		// Pick ONE mode for the whole tab so the user only toggles swap/insert once: whichever sorts this
 		// tab in fewer drags. The same drag (move the wanted item into slot i) works in either mode.
