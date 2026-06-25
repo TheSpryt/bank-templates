@@ -134,7 +134,7 @@ public interface BankTemplatesConfig extends Config
 	enum ReorgDisplay
 	{
 		STEP_BY_STEP("Step-by-step",
-			"Sorts items into the right tabs first, then guides each one into its exact slot, one move at a time - choosing swap or insert to keep the number of drags down."),
+			"Sorts items into the right tabs first, then guides each one into its exact slot, one move at a time - choosing swap or insert to keep the number of drags down. Items in the wrong tab are tinted with their destination tab's colour."),
 		LABELS("Labels",
 			"Tags every out-of-place item with where it belongs: first its destination tab, then its row and column within that tab."),
 		BOTH("Labels + step-by-step",
