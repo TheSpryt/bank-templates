@@ -736,14 +736,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			final Rectangle b = widgets.get(k).getBounds();
 			if (b.width > 0)
 			{
-				if (tt == BankTemplate.MAIN_TAB)
-				{
-					drawInfinityTag(g, b, config.reorgHighlightColor());
-				}
-				else
-				{
-					drawTag(g, b, String.valueOf(tt), config.reorgHighlightColor());
-				}
+				drawTag(g, b, tt == BankTemplate.MAIN_TAB ? "∞" : String.valueOf(tt), config.reorgHighlightColor());
 			}
 		}
 		// Items the template doesn't include at all (and aren't bank fillers) get a red cross, so you can see
@@ -1464,31 +1457,6 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		final int y = b.y + b.height - fm.getDescent() - 1;
 		g.setColor(color);
 		g.drawString(text, x, y);
-	}
-
-	// The all-items / main tab's label: an infinity glyph drawn as a true lemniscate - two cubic loops that
-	// cross in the middle - in the slot's bottom-right. Drawn rather than using the "∞" character so it renders
-	// identically on every platform regardless of which fonts are installed (macOS included).
-	private void drawInfinityTag(Graphics2D g, Rectangle b, Color color)
-	{
-		final float ox = 9f;          // how far each loop's control points spread out horizontally (loop width)
-		final float oy = 4.5f;        // and vertically (loop height)
-		final float cx = b.x + b.width - 8.5f;
-		final float cy = b.y + b.height - 5f;
-		final GeneralPath p = new GeneralPath();
-		p.moveTo(cx, cy);
-		p.curveTo(cx - ox, cy - oy, cx - ox, cy + oy, cx, cy);   // left loop, crossing back through the centre
-		p.curveTo(cx + ox, cy - oy, cx + ox, cy + oy, cx, cy);   // right loop
-
-		final Object aa = g.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
-		final Stroke old = g.getStroke();
-		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-		g.setStroke(new BasicStroke(1.4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-		g.setColor(color);
-		g.draw(p);
-		g.setStroke(old);
-		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-			aa != null ? aa : RenderingHints.VALUE_ANTIALIAS_DEFAULT);
 	}
 
 	// A small green tick in the slot's bottom-right, confirming an item is already in its correct slot.
