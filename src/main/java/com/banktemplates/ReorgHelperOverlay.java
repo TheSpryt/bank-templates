@@ -740,43 +740,6 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			return;
 		}
 
-		// Pass 2: the template has more tabs than you do - guide creating the next one by dragging an item
-		// onto the "+" (new tab) button. Pick the item for the lowest missing tab so tabs are made in order.
-		final Widget addBtn = addTabButton();
-		if (addBtn != null)
-		{
-			int bestK = -1;
-			int lowest = Integer.MAX_VALUE;
-			String bestSig = null;
-			for (int k = 0; k < current.size(); k++)
-			{
-				final Integer tt = targetTab.get(current.get(k));
-				if (tt == null || tt == BankTemplate.MAIN_TAB || tt <= existingTabs || tt >= lowest)
-				{
-					continue;
-				}
-				final String sig = "N:" + current.get(k) + ":" + tt;
-				if (skippedSteps.contains(sig))
-				{
-					continue;
-				}
-				lowest = tt;
-				bestK = k;
-				bestSig = sig;
-			}
-			if (bestK != -1)
-			{
-				currentStepSig = bestSig;
-				final Widget from = widgets.get(bestK);
-				outlineInContainer(g, itemContainer, from.getBounds(), SOURCE_COLOR);
-				final Color addColor = hintColor(lowest);
-				pulseRect(g, addBtn.getBounds(), addColor != null ? addColor : config.reorgHighlightColor());
-				final String name = client.getItemDefinition(from.getItemId()).getName();
-				setBankTitle("Drag " + name + " to a new tab (the + button)", Color.WHITE, null, false);
-				return;
-			}
-		}
-
 		// Filler-balancing phase: once items are in their tabs, move SURPLUS bank fillers (a tab holding
 		// more than its template needs) into tabs that still need them. We only ever take a filler from a
 		// tab with more than it needs, so a filler that's already filling a needed slot is never pulled.
@@ -868,6 +831,73 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			final String srcName = itemTab[k] == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + itemTab[k];
 			setBankTitle("Open " + srcName + " to move " + name, Color.WHITE, null, false);
 			return;
+		}
+
+		// Create-tab phase, done LAST (after every existing tab is populated) and lowest-first: the template
+		// needs a tab you don't have yet, so guide creating it by dragging one of its items onto the +.
+		final Widget addBtn = addTabButton();
+		if (addBtn != null && !addBtn.isHidden())
+		{
+			int lowestMissing = Integer.MAX_VALUE;
+			for (int k = 0; k < current.size(); k++)
+			{
+				final Integer tt = targetTab.get(current.get(k));
+				if (tt != null && tt != BankTemplate.MAIN_TAB && tt > existingTabs && tt < lowestMissing)
+				{
+					lowestMissing = tt;
+				}
+			}
+			if (lowestMissing != Integer.MAX_VALUE)
+			{
+				final Color addColor = hintColor(lowestMissing);
+				// An item for the new tab sitting in the view you're in - drag it onto + to create the tab.
+				for (int k = 0; k < current.size(); k++)
+				{
+					final Integer tt = targetTab.get(current.get(k));
+					if (tt == null || tt != lowestMissing || itemTab[k] != currentTab)
+					{
+						continue;
+					}
+					final String sig = "N:" + current.get(k) + ":" + tt;
+					if (skippedSteps.contains(sig))
+					{
+						continue;
+					}
+					currentStepSig = sig;
+					final Widget from = widgets.get(k);
+					outlineInContainer(g, itemContainer, from.getBounds(), SOURCE_COLOR);
+					pulseRect(g, addBtn.getBounds(), addColor != null ? addColor : config.reorgHighlightColor());
+					final String name = client.getItemDefinition(from.getItemId()).getName();
+					setBankTitle("Drag " + name + " onto the + button to create tab " + lowestMissing, Color.WHITE, null, false);
+					return;
+				}
+				// Otherwise the new tab's items are in another tab - guide opening it first.
+				for (int k = 0; k < current.size(); k++)
+				{
+					final Integer tt = targetTab.get(current.get(k));
+					if (tt == null || tt != lowestMissing || itemTab[k] == currentTab)
+					{
+						continue;
+					}
+					final String sig = "N:" + current.get(k) + ":" + tt;
+					if (skippedSteps.contains(sig))
+					{
+						continue;
+					}
+					currentStepSig = sig;
+					final Widget from = widgets.get(k);
+					final Widget srcBtn = buttons.get(itemTab[k]);
+					if (srcBtn != null)
+					{
+						pulseRect(g, srcBtn.getBounds(), addColor != null ? addColor : config.reorgHighlightColor());
+					}
+					outlineInContainer(g, itemContainer, from.getBounds(), SOURCE_COLOR);
+					final String srcName = itemTab[k] == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + itemTab[k];
+					final String name = client.getItemDefinition(from.getItemId()).getName();
+					setBankTitle("Open " + srcName + " to move " + name + " to new tab " + lowestMissing, Color.WHITE, null, false);
+					return;
+				}
+			}
 		}
 
 		// Nothing left to move into tabs and the current view is ordered.
