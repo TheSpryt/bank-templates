@@ -752,73 +752,9 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			return;
 		}
 
-		// Filler-balancing phase: once items are in their tabs, move SURPLUS bank fillers (a tab holding
-		// more than its template needs) into tabs that still need them. We only ever take a filler from a
-		// tab with more than it needs, so a filler that's already filling a needed slot is never pulled.
-		final int fillerCanon = reorgId(BankTemplate.FILLER);
-		final int[] need = fillersNeededPerTab(template, owned);
-		final int[] have = fillersPerTab();
-		int deficitTab = -1;
-		for (int t = 0; t < need.length; t++)
-		{
-			if (have[t] < need[t] && !skippedSteps.contains("F:" + t))
-			{
-				deficitTab = t;
-				break;
-			}
-		}
-		if (deficitTab != -1)
-		{
-			for (int k = 0; k < current.size(); k++)
-			{
-				final int src = itemTab[k];
-				if (current.get(k) != fillerCanon || src == deficitTab || have[src] <= need[src])
-				{
-					continue;
-				}
-				currentStepSig = "F:" + deficitTab;
-				final Widget from = widgets.get(k);
-				markSource(g, itemContainer, from.getBounds());
-				final Widget tabBtn = tabButtons().get(deficitTab);
-				final String tabName = deficitTab == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + deficitTab;
-				if (tabBtn != null)
-				{
-					pulseRect(g, tabBtn.getBounds(), config.reorgHighlightColor());
-				}
-				setBankTitle("Drag the bank filler to " + tabName, Color.WHITE, null, false);
-				return;
-			}
-		}
-
-		// Position phase: order items WITHIN the current tab. In the all-items view we order only the main
-		// (untabbed) items here; each numbered tab is ordered in its own view. (Cross-tab moves can't be
-		// honoured by the packed real bank and made the guidance loop.) If it shows a move, stop here.
-		final boolean shownPos;
-		if (currentTab == BankTemplate.MAIN_TAB)
-		{
-			final List<Widget> mainWidgets = new ArrayList<>();
-			final List<Integer> mainCurrent = new ArrayList<>();
-			for (int k = 0; k < current.size(); k++)
-			{
-				if (itemTab[k] == BankTemplate.MAIN_TAB)
-				{
-					mainWidgets.add(widgets.get(k));
-					mainCurrent.add(current.get(k));
-				}
-			}
-			shownPos = drawPositionStep(g, itemContainer, template, BankTemplate.MAIN_TAB, mainWidgets, mainCurrent);
-		}
-		else
-		{
-			shownPos = drawPositionStep(g, itemContainer, template, currentTab, widgets, current);
-		}
-		if (shownPos)
-		{
-			return;
-		}
-
-		// Pass 1b: the current view is now fully sorted - handle wrong-tab items stuck in OTHER tabs by
-		// guiding you to open that tab (you can only drag an item to a tab from the tab it's sitting in).
+		// Pass 1b: wrong-tab items stuck in OTHER tabs - send the user to that tab to move them (you can only
+		// drag an item to a tab from the tab it's sitting in). Routing happens across every tab before any
+		// ordering, so all items reach their tabs first.
 		for (int k = 0; k < current.size(); k++)
 		{
 			final Integer tt = targetTab.get(current.get(k));
@@ -912,8 +848,178 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			}
 		}
 
-		// Nothing left to move into tabs and the current view is ordered.
+		// Filler-balancing: every item is in its tab now - move SURPLUS bank fillers (a tab holding more than
+		// its template needs) into tabs that still need them.
+		final int fillerCanon = reorgId(BankTemplate.FILLER);
+		final int[] need = fillersNeededPerTab(template, owned);
+		final int[] have = fillersPerTab();
+		int deficitTab = -1;
+		for (int t = 0; t < need.length; t++)
+		{
+			if (have[t] < need[t] && !skippedSteps.contains("F:" + t))
+			{
+				deficitTab = t;
+				break;
+			}
+		}
+		if (deficitTab != -1)
+		{
+			for (int k = 0; k < current.size(); k++)
+			{
+				final int src = itemTab[k];
+				if (current.get(k) != fillerCanon || src == deficitTab || have[src] <= need[src])
+				{
+					continue;
+				}
+				currentStepSig = "F:" + deficitTab;
+				final Widget from = widgets.get(k);
+				markSource(g, itemContainer, from.getBounds());
+				final Widget tabBtn = buttons.get(deficitTab);
+				final String tabName = deficitTab == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + deficitTab;
+				if (tabBtn != null)
+				{
+					pulseRect(g, tabBtn.getBounds(), config.reorgHighlightColor());
+				}
+				setBankTitle("Drag the bank filler to " + tabName, Color.WHITE, null, false);
+				return;
+			}
+		}
+
+		// Ordering phase: every item is now in its tab. Order each tab's slots, lowest tab first - the current
+		// view directly, and for any other tab still out of order, send the user there to sort it.
+		for (int t = BankTemplate.MAIN_TAB; t <= 9; t++)
+		{
+			final int[] layout = template.tabLayout(t);
+			if (layout == null || layout.length == 0)
+			{
+				continue;
+			}
+			if (t == currentTab)
+			{
+				final boolean shownPos;
+				if (currentTab == BankTemplate.MAIN_TAB)
+				{
+					final List<Widget> mainWidgets = new ArrayList<>();
+					final List<Integer> mainCurrent = new ArrayList<>();
+					for (int k = 0; k < current.size(); k++)
+					{
+						if (itemTab[k] == BankTemplate.MAIN_TAB)
+						{
+							mainWidgets.add(widgets.get(k));
+							mainCurrent.add(current.get(k));
+						}
+					}
+					shownPos = drawPositionStep(g, itemContainer, template, BankTemplate.MAIN_TAB, mainWidgets, mainCurrent);
+				}
+				else
+				{
+					shownPos = drawPositionStep(g, itemContainer, template, currentTab, widgets, current);
+				}
+				if (shownPos)
+				{
+					return;
+				}
+			}
+			else if (!tabSorted(template, t))
+			{
+				final Widget tabBtn = buttons.get(t);
+				if (tabBtn != null)
+				{
+					pulseRect(g, tabBtn.getBounds(), config.reorgHighlightColor());
+				}
+				setBankTitle((t == BankTemplate.MAIN_TAB ? "Open the main tab" : "Open tab " + t) + " to sort it", Color.WHITE, null, false);
+				return;
+			}
+		}
+
+		// Everything is in its tab and ordered.
 		setBankTitle(skippedSteps.isEmpty() ? "Bank matches the template" : "Done (some steps skipped)", DONE_COLOR, null, false);
+	}
+
+	// Builds the desired packed order for a tab: each template slot takes the real item if owned, otherwise a
+	// filler; leftovers are appended. Mirrors drawPositionStep so tabSorted agrees with it.
+	private List<Integer> buildTabTarget(int[] desired, List<Integer> current)
+	{
+		final int fillerCanon = reorgId(BankTemplate.FILLER);
+		final Map<Integer, Integer> remaining = new HashMap<>();
+		for (int canon : current)
+		{
+			remaining.merge(canon, 1, Integer::sum);
+		}
+		final List<Integer> target = new ArrayList<>();
+		for (int id : desired)
+		{
+			if (id == BankTemplate.EMPTY)
+			{
+				continue;
+			}
+			final int want = id != BankTemplate.FILLER && remaining.getOrDefault(reorgId(id), 0) > 0
+				? reorgId(id)
+				: fillerCanon;
+			final int count = remaining.getOrDefault(want, 0);
+			if (count > 0)
+			{
+				target.add(want);
+				remaining.put(want, count - 1);
+			}
+		}
+		for (int canon : current)
+		{
+			final Integer count = remaining.get(canon);
+			if (count != null && count > 0)
+			{
+				target.add(canon);
+				remaining.put(canon, count - 1);
+			}
+		}
+		return target;
+	}
+
+	// Canonical ids currently in a tab, in bank order (main = the untabbed items after all numbered tabs).
+	private List<Integer> tabItemsCanonical(int tab)
+	{
+		final List<Integer> out = new ArrayList<>();
+		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank == null)
+		{
+			return out;
+		}
+		final Item[] items = bank.getItems();
+		int idx = 0;
+		for (int t = 1; t < (tab == BankTemplate.MAIN_TAB ? 10 : tab); t++)
+		{
+			idx += client.getVarbitValue(TAB_COUNT_VARBITS[t - 1]);
+		}
+		final int count = tab == BankTemplate.MAIN_TAB ? items.length - idx : client.getVarbitValue(TAB_COUNT_VARBITS[tab - 1]);
+		for (int k = 0; k < count && idx < items.length; k++, idx++)
+		{
+			if (items[idx] != null && items[idx].getId() > 0)
+			{
+				out.add(reorgId(items[idx].getId()));
+			}
+		}
+		return out;
+	}
+
+	// Whether a tab's items are already in their template order (ignoring slots the user chose to skip).
+	private boolean tabSorted(BankTemplate template, int tab)
+	{
+		final int[] desired = template.tabLayout(tab);
+		if (desired == null || desired.length == 0)
+		{
+			return true;
+		}
+		final List<Integer> cur = tabItemsCanonical(tab);
+		final List<Integer> target = buildTabTarget(desired, cur);
+		final int n = Math.min(cur.size(), target.size());
+		for (int i = 0; i < n; i++)
+		{
+			if (!cur.get(i).equals(target.get(i)) && !skippedSteps.contains("P:" + tab + ":" + i))
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 
 	// Orders items within the current tab. Returns true if it showed a move (or a mode-switch prompt), false
