@@ -713,11 +713,12 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			}
 		}
 
-		// Pass 1: move items that belong in a tab that already exists.
+		// Pass 1a: wrong-tab items sitting in the tab you're VIEWING - drag them straight to their tab. Done
+		// before anything that sends you elsewhere, so the current view (e.g. all-items) is sorted first.
 		for (int k = 0; k < current.size(); k++)
 		{
 			final Integer tt = targetTab.get(current.get(k));
-			if (tt == null || itemTab[k] == tt || (tt != BankTemplate.MAIN_TAB && tt > existingTabs))
+			if (tt == null || itemTab[k] == tt || (tt != BankTemplate.MAIN_TAB && tt > existingTabs) || itemTab[k] != currentTab)
 			{
 				continue;
 			}
@@ -729,22 +730,6 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			currentStepSig = sig;
 			final Widget from = widgets.get(k);
 			final String name = client.getItemDefinition(from.getItemId()).getName();
-
-			// If we aren't viewing the tab the item is currently in (e.g. in the all-items view), guide the
-			// user to open that tab first - you can only drag an item to a tab from the tab it's sitting in.
-			if (itemTab[k] != currentTab)
-			{
-				final Widget srcBtn = buttons.get(itemTab[k]);
-				if (srcBtn != null)
-				{
-					pulseRect(g, srcBtn.getBounds(), config.reorgHighlightColor());
-				}
-				outline(g, from.getBounds(), SOURCE_COLOR);
-				final String srcName = itemTab[k] == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + itemTab[k];
-				setBankTitle("Open " + srcName + " to move " + name, Color.WHITE, null, false);
-				return;
-			}
-
 			outline(g, from.getBounds(), SOURCE_COLOR);
 			final Widget tabBtn = buttons.get(tt);
 			if (tabBtn != null)
@@ -830,10 +815,10 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			}
 		}
 
-		// Position phase: order items WITHIN a single tab, never across the whole bank. In the all-items
-		// view we order only the main (untabbed) items here; each numbered tab is ordered in its own view.
-		// A move that crossed a tab boundary couldn't be honoured by the packed real bank and made the
-		// guidance loop (insert pushes the item into the next tab -> tab phase moves it back -> repeat).
+		// Position phase: order items WITHIN the current tab. In the all-items view we order only the main
+		// (untabbed) items here; each numbered tab is ordered in its own view. (Cross-tab moves can't be
+		// honoured by the packed real bank and made the guidance loop.) If it shows a move, stop here.
+		final boolean shownPos;
 		if (currentTab == BankTemplate.MAIN_TAB)
 		{
 			final List<Widget> mainWidgets = new ArrayList<>();
@@ -846,22 +831,59 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 					mainCurrent.add(current.get(k));
 				}
 			}
-			drawPositionStep(g, itemContainer, template, BankTemplate.MAIN_TAB, mainWidgets, mainCurrent);
+			shownPos = drawPositionStep(g, itemContainer, template, BankTemplate.MAIN_TAB, mainWidgets, mainCurrent);
 		}
 		else
 		{
-			drawPositionStep(g, itemContainer, template, currentTab, widgets, current);
+			shownPos = drawPositionStep(g, itemContainer, template, currentTab, widgets, current);
 		}
+		if (shownPos)
+		{
+			return;
+		}
+
+		// Pass 1b: the current view is now fully sorted - handle wrong-tab items stuck in OTHER tabs by
+		// guiding you to open that tab (you can only drag an item to a tab from the tab it's sitting in).
+		for (int k = 0; k < current.size(); k++)
+		{
+			final Integer tt = targetTab.get(current.get(k));
+			if (tt == null || itemTab[k] == tt || (tt != BankTemplate.MAIN_TAB && tt > existingTabs) || itemTab[k] == currentTab)
+			{
+				continue;
+			}
+			final String sig = "T:" + current.get(k) + ":" + tt;
+			if (skippedSteps.contains(sig))
+			{
+				continue;
+			}
+			currentStepSig = sig;
+			final Widget from = widgets.get(k);
+			final String name = client.getItemDefinition(from.getItemId()).getName();
+			final Widget srcBtn = buttons.get(itemTab[k]);
+			if (srcBtn != null)
+			{
+				pulseRect(g, srcBtn.getBounds(), config.reorgHighlightColor());
+			}
+			outline(g, from.getBounds(), SOURCE_COLOR);
+			final String srcName = itemTab[k] == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + itemTab[k];
+			setBankTitle("Open " + srcName + " to move " + name, Color.WHITE, null, false);
+			return;
+		}
+
+		// Nothing left to move into tabs and the current view is ordered.
+		setBankTitle(skippedSteps.isEmpty() ? "Bank matches the template" : "Done (some steps skipped)", DONE_COLOR, null, false);
 	}
 
-	private void drawPositionStep(Graphics2D graphics, Widget itemContainer, BankTemplate template, int currentTab,
+	// Orders items within the current tab. Returns true if it showed a move (or a mode-switch prompt), false
+	// if the current tab is already fully ordered.
+	private boolean drawPositionStep(Graphics2D graphics, Widget itemContainer, BankTemplate template, int currentTab,
 		List<Widget> widgets, List<Integer> current)
 	{
 		// Always order against this single tab's layout (the main view orders only its untabbed items).
 		final int[] desired = template.tabLayout(currentTab);
 		if (desired == null || desired.length == 0)
 		{
-			return;
+			return false;
 		}
 
 		// Desired order = the template tab walked slot by slot, packed into what you actually have. Each
@@ -925,10 +947,9 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 
 		if (i >= target.size() || i >= current.size())
 		{
-			setBankTitle(skippedSteps.isEmpty() ? "Bank matches the template" : "Done (some steps skipped)", DONE_COLOR, null, false);
 			graphics.setClip(oldClip);
 			planTab = -1;
-			return;
+			return false;
 		}
 
 		final int wantCanon = target.get(i);
@@ -940,7 +961,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		if (j >= current.size())
 		{
 			graphics.setClip(oldClip);
-			return;
+			return false;
 		}
 		currentStepSig = "P:" + currentTab + ":" + i;
 
@@ -980,6 +1001,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		{
 			highlightToggle(graphics);
 		}
+		return true;
 	}
 
 	// Canonical ids present in BOTH the active template and your bank, rebuilt each frame. reorgId uses this
