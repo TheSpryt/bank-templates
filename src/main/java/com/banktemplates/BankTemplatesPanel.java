@@ -1432,6 +1432,8 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			rebuildOnEdt();
 			TemplateEditor.open(this, itemManager, itemIndex, clientThread, layoutEditor, t);
+			// A brand-new layout auto-applies, so you can build it live over the bank straight away.
+			select(t);
 		}
 		else
 		{
