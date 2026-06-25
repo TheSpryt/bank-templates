@@ -94,8 +94,8 @@ public class BankTemplatesPanel extends PluginPanel
 	private String mode = LOCAL;
 	private String query = "";
 	// Variant-collapsed ids the player owns in their bank (qty > 0), for the "x / y items" card meta.
-	// Recomputed when the local view is built; null until the bank has loaded.
-	private Set<Integer> ownedCanon;
+	// Computed on the client thread (reading client state isn't EDT-safe); null until the bank has loaded.
+	private volatile Set<Integer> ownedCanon;
 
 	private final List<RemoteTemplate> browseResults = new ArrayList<>();
 	private String browseStatus;
@@ -457,7 +457,7 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private void buildLocalView()
 	{
-		ownedCanon = ownedBankCanonical();
+		refreshOwnedCanon();
 		if (query.isEmpty())
 		{
 			final boolean hasActive = templateManager.getActive() != null;
@@ -1322,8 +1322,23 @@ public class BankTemplatesPanel extends PluginPanel
 		return kind + " · " + items + (tabs > 1 ? " · " + tabs + " tabs" : "");
 	}
 
+	// Recompute the owned-items set on the client thread (reading client state isn't EDT-safe), then
+	// refresh the cards if it changed. Triggered when the local view is built.
+	private void refreshOwnedCanon()
+	{
+		clientThread.invoke(() ->
+		{
+			final Set<Integer> owned = ownedBankCanonical();
+			if (!java.util.Objects.equals(owned, ownedCanon))
+			{
+				ownedCanon = owned;
+				rebuild();
+			}
+		});
+	}
+
 	// Variant-collapsed ids the player owns (qty > 0). Bank placeholders (qty 0) are excluded, so they
-	// correctly don't count as owned. Returns null if the bank container hasn't loaded yet.
+	// correctly don't count as owned. Returns null if the bank container hasn't loaded yet. Client thread only.
 	private Set<Integer> ownedBankCanonical()
 	{
 		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
