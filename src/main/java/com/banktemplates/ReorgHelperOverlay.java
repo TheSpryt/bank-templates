@@ -9,6 +9,7 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.Stroke;
 import java.awt.image.BufferedImage;
@@ -725,7 +726,14 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			final Rectangle b = widgets.get(k).getBounds();
 			if (b.width > 0)
 			{
-				drawTag(g, b, tt == BankTemplate.MAIN_TAB ? "∞" : String.valueOf(tt), config.reorgHighlightColor());
+				if (tt == BankTemplate.MAIN_TAB)
+				{
+					drawInfinityTag(g, b, config.reorgHighlightColor());
+				}
+				else
+				{
+					drawTag(g, b, String.valueOf(tt), config.reorgHighlightColor());
+				}
 			}
 		}
 	}
@@ -1431,6 +1439,27 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		final int y = b.y + b.height - fm.getDescent() - 1;
 		g.setColor(color);
 		g.drawString(text, x, y);
+	}
+
+	// The all-items / main tab's label: an infinity glyph drawn as two small overlapping loops (a vector
+	// figure-eight) in the slot's bottom-right - drawn rather than the "∞" character so it renders identically
+	// on every platform regardless of which fonts are installed (macOS included).
+	private void drawInfinityTag(Graphics2D g, Rectangle b, Color color)
+	{
+		final int d = 6;              // loop diameter
+		final int w = d * 2 - 2;      // two loops overlapping in the middle
+		final int x = b.x + b.width - w - 2;
+		final int y = b.y + b.height - d - 1;
+		final Object aa = g.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
+		final Stroke old = g.getStroke();
+		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		g.setStroke(new BasicStroke(1.5f));
+		g.setColor(color);
+		g.drawOval(x, y, d, d);
+		g.drawOval(x + d - 2, y, d, d);
+		g.setStroke(old);
+		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+			aa != null ? aa : RenderingHints.VALUE_ANTIALIAS_DEFAULT);
 	}
 
 	// Pulse the bank's Swap/Insert toggle button.
