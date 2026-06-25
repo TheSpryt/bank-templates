@@ -1443,21 +1443,11 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private void showPreview(BankTemplate template)
 	{
-		final JPanel content = new JPanel();
-		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+		final JPanel content = new JPanel(new BorderLayout());
 		content.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		content.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-
-		if (template.getDescription() != null && !template.getDescription().isEmpty())
-		{
-			final JLabel desc = new JLabel("<html><body style='width:320px'>" + escape(template.getDescription()) + "</body></html>");
-			desc.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-			desc.setAlignmentX(Component.LEFT_ALIGNMENT);
-			desc.setBorder(BorderFactory.createEmptyBorder(0, 0, 8, 0));
-			content.add(desc);
-		}
-		content.add(TemplatePreview.build(itemManager, clientThread, template));
-
+		// The preview builds its own description (so the window is a consistent width either way).
+		content.add(TemplatePreview.build(itemManager, clientThread, template, template.getDescription()), BorderLayout.CENTER);
 		showSideDialog("Preview: " + template.getName(), content);
 	}
 
