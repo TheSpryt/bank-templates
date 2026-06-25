@@ -762,12 +762,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			{
 				continue;
 			}
-			final String sig = "T:" + current.get(k) + ":" + tt;
-			if (skippedSteps.contains(sig))
-			{
-				continue;
-			}
-			currentStepSig = sig;
+			// Opening a tab to reach an item is navigation, not a move - it isn't skippable.
 			final Widget from = widgets.get(k);
 			final String name = client.getItemDefinition(from.getItemId()).getName();
 			final Widget srcBtn = buttons.get(itemTab[k]);
@@ -883,6 +878,19 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				setBankTitle("Drag the bank filler to " + tabName, Color.WHITE, null, false);
 				return;
 			}
+		}
+
+		// Don't start ordering until every item is in its tab GLOBALLY. From a numbered tab you can't see the
+		// other tabs, so if routing isn't finished, head back to the all-items view to complete it first.
+		if (currentTab != BankTemplate.MAIN_TAB && !allRouted(targetTab))
+		{
+			final Widget allBtn = buttons.get(BankTemplate.MAIN_TAB);
+			if (allBtn != null)
+			{
+				pulseRect(g, allBtn.getBounds(), config.reorgHighlightColor());
+			}
+			setBankTitle("Open the main bank tab to finish moving items into their tabs", Color.WHITE, null, false);
+			return;
 		}
 
 		// Ordering phase: every item is now in its tab. Order each tab's slots, lowest tab first - the current
@@ -1003,6 +1011,29 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			}
 		}
 		return out;
+	}
+
+	// True when every item is already in its target tab, so routing is globally complete and ordering can
+	// begin. Reads the bank directly, so it's correct even from a numbered tab where you can't see the rest.
+	private boolean allRouted(Map<Integer, Integer> targetTab)
+	{
+		final int fillerCanon = reorgId(BankTemplate.FILLER);
+		for (int t = BankTemplate.MAIN_TAB; t <= 9; t++)
+		{
+			for (int canon : tabItemsCanonical(t))
+			{
+				if (canon == fillerCanon)
+				{
+					continue;
+				}
+				final Integer tt = targetTab.get(canon);
+				if (tt != null && tt != t)
+				{
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	// Whether a tab's items are already in their template order (ignoring slots the user chose to skip).
