@@ -46,9 +46,17 @@ public interface BankTemplatesConfig extends Config
 	String reorgSection = "reorg";
 
 	@ConfigSection(
+		name = "Reorganise tab colours",
+		description = "Colours the reorganise helper's colour-coding mode uses for each bank tab.",
+		position = 2,
+		closedByDefault = true
+	)
+	String reorgColorSection = "reorgColors";
+
+	@ConfigSection(
 		name = "Community repository",
 		description = "Browse, import and share templates from the community repository.",
-		position = 2,
+		position = 3,
 		closedByDefault = true
 	)
 	String repositorySection = "repository";
@@ -217,5 +225,67 @@ public interface BankTemplatesConfig extends Config
 	default Color reorgHighlightColor()
 	{
 		return new Color(0xCD00FFFF, true);
+	}
+
+	// Per-tab identity colours for the colour-coding display. Defaults match the built-in palette. The
+	// reorganise helper uses each colour's RGB at a fixed faint alpha, so the picker is opaque (no @Alpha).
+	@ConfigItem(keyName = "reorgTabColorMain", name = "Main tab", description = "Colour for items belonging in the main (all-items) tab.", position = 0, section = reorgColorSection)
+	default Color reorgTabColorMain()
+	{
+		return new Color(170, 200, 225);
+	}
+
+	@ConfigItem(keyName = "reorgTabColor1", name = "Tab 1", description = "Colour for items belonging in tab 1.", position = 1, section = reorgColorSection)
+	default Color reorgTabColor1()
+	{
+		return new Color(205, 80, 80);
+	}
+
+	@ConfigItem(keyName = "reorgTabColor2", name = "Tab 2", description = "Colour for items belonging in tab 2.", position = 2, section = reorgColorSection)
+	default Color reorgTabColor2()
+	{
+		return new Color(210, 145, 60);
+	}
+
+	@ConfigItem(keyName = "reorgTabColor3", name = "Tab 3", description = "Colour for items belonging in tab 3.", position = 3, section = reorgColorSection)
+	default Color reorgTabColor3()
+	{
+		return new Color(200, 190, 80);
+	}
+
+	@ConfigItem(keyName = "reorgTabColor4", name = "Tab 4", description = "Colour for items belonging in tab 4.", position = 4, section = reorgColorSection)
+	default Color reorgTabColor4()
+	{
+		return new Color(95, 175, 95);
+	}
+
+	@ConfigItem(keyName = "reorgTabColor5", name = "Tab 5", description = "Colour for items belonging in tab 5.", position = 5, section = reorgColorSection)
+	default Color reorgTabColor5()
+	{
+		return new Color(85, 135, 205);
+	}
+
+	@ConfigItem(keyName = "reorgTabColor6", name = "Tab 6", description = "Colour for items belonging in tab 6.", position = 6, section = reorgColorSection)
+	default Color reorgTabColor6()
+	{
+		return new Color(155, 110, 200);
+	}
+
+	@ConfigItem(keyName = "reorgTabColor7", name = "Tab 7", description = "Colour for items belonging in tab 7.", position = 7, section = reorgColorSection)
+	default Color reorgTabColor7()
+	{
+		return new Color(205, 120, 170);
+	}
+
+	@ConfigItem(keyName = "reorgTabColor8", name = "Tab 8", description = "Colour for items belonging in tab 8.", position = 8, section = reorgColorSection)
+	default Color reorgTabColor8()
+	{
+		return new Color(85, 190, 180);
+	}
+
+	@ConfigItem(keyName = "reorgTabColor9", name = "Tab 9", description = "Colour for items belonging in tab 9.", position = 9, section = reorgColorSection)
+	default Color reorgTabColor9()
+	{
+		return new Color(180, 180, 185);
 	}
 }
