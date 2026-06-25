@@ -133,21 +133,44 @@ public interface BankTemplatesConfig extends Config
 
 	enum ReorgDisplay
 	{
-		STEP_BY_STEP("Step-by-step"),
-		LABELS("Labels"),
-		BOTH("Labels + step-by-step");
+		STEP_BY_STEP("Step-by-step",
+			"Sorts items into the right tabs first, then guides each one into its exact slot, a move at a time - choosing swap or insert to keep the number of drags down."),
+		LABELS("Labels",
+			"Tags every out-of-place item with where it belongs: first its destination tab, then its row and column within that tab."),
+		BOTH("Labels + step-by-step",
+			"Shows the destination tags on every item and the step-by-step guidance at the same time.");
 
 		private final String label;
+		private final String description;
 
-		ReorgDisplay(String label)
+		ReorgDisplay(String label, String description)
 		{
 			this.label = label;
+			this.description = description;
+		}
+
+		public String getDescription()
+		{
+			return description;
 		}
 
 		@Override
 		public String toString()
 		{
 			return label;
+		}
+
+		// Reverse lookup from the dropdown label (toString()); valueOf() only matches the constant name.
+		public static ReorgDisplay fromLabel(String label)
+		{
+			for (ReorgDisplay d : values())
+			{
+				if (d.label.equals(label))
+				{
+					return d;
+				}
+			}
+			return null;
 		}
 	}
 
