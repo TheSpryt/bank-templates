@@ -726,16 +726,46 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		}
 		final int fillerCanon = reorgId(BankTemplate.FILLER);
 
-		// Pass 1a: wrong-tab items sitting in the tab you're VIEWING - drag them straight to their tab. Done
-		// before anything that sends you elsewhere, so the current view (e.g. all-items) is sorted first.
+		// The + button for creating a new tab, and the lowest template tab you don't have yet. Tabs can only be
+		// created in sequence, so that lowest missing tab is the only new one you can make next - higher ones
+		// must wait until it exists. A new tab routes exactly like an existing destination, except its items are
+		// dragged onto + (which creates the tab) instead of onto a tab header.
+		final Widget addBtn = addTabButton();
+		final boolean canCreateTab = addBtn != null && !addBtn.isHidden();
+		int lowestMissing = Integer.MAX_VALUE;
+		if (canCreateTab)
+		{
+			for (int t = BankTemplate.MAIN_TAB; t <= 9; t++)
+			{
+				for (int canon : tabItemsCanonical(t))
+				{
+					final Integer tt = targetTab.get(canon);
+					if (tt != null && tt != BankTemplate.MAIN_TAB && tt > existingTabs && tt < lowestMissing
+						&& !skippedSteps.contains("N:" + canon + ":" + tt))
+					{
+						lowestMissing = tt;
+					}
+				}
+			}
+		}
+
+		// Pass 1a: wrong-tab items sitting in the tab you're VIEWING - drag them straight to their destination.
+		// A destination is reachable if it already exists, or it's the next tab you can create (drag onto + to
+		// make it); a higher not-yet-creatable new tab is left until its lower tabs exist. Done before anything
+		// that sends you elsewhere, so the current view (e.g. all-items) is handled first.
 		for (int k = 0; k < current.size(); k++)
 		{
 			final Integer tt = targetTab.get(current.get(k));
-			if (tt == null || itemTab[k] == tt || (tt != BankTemplate.MAIN_TAB && tt > existingTabs) || itemTab[k] != currentTab)
+			if (tt == null || itemTab[k] == tt || itemTab[k] != currentTab)
 			{
 				continue;
 			}
-			final String sig = "T:" + current.get(k) + ":" + tt;
+			final boolean isNew = tt != BankTemplate.MAIN_TAB && tt > existingTabs;
+			if (isNew && tt != lowestMissing)
+			{
+				continue;
+			}
+			final String sig = (isNew ? "N:" : "T:") + current.get(k) + ":" + tt;
 			if (skippedSteps.contains(sig))
 			{
 				continue;
@@ -744,20 +774,30 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			final Widget from = widgets.get(k);
 			final String name = client.getItemDefinition(from.getItemId()).getName();
 			markSource(g, itemContainer, from.getBounds());
-			final Widget tabBtn = buttons.get(tt);
-			if (tabBtn != null)
+			if (isNew)
 			{
-				pulseRect(g, tabBtn.getBounds(), config.reorgHighlightColor());
+				final Color addColor = hintColor(tt);
+				pulseRect(g, addBtn.getBounds(), addColor != null ? addColor : config.reorgHighlightColor());
+				setBankTitle("Drag " + name + " onto the + button to create tab " + tt, Color.WHITE, null, false);
 			}
-			setBankTitle("Drag " + name + " to " + (tt == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + tt), Color.WHITE, null, false);
+			else
+			{
+				final Widget tabBtn = buttons.get(tt);
+				if (tabBtn != null)
+				{
+					pulseRect(g, tabBtn.getBounds(), config.reorgHighlightColor());
+				}
+				setBankTitle("Drag " + name + " to " + (tt == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + tt), Color.WHITE, null, false);
+			}
 			return;
 		}
 
 		// Pass 1b: wrong-tab items stuck in OTHER tabs - send the user straight to that tab to move them (you can
 		// only drag an item to a tab from the tab it's sitting in). Reads the bank directly (not just the view
-		// you're in), so from any tab it points at the next tab still holding misplaced items - no detouring
-		// back through all-items. Routing finishes across every tab before any ordering begins. Items the user
-		// chose to skip don't count, so a skipped move can't pin routing as "unfinished" forever.
+		// you're in), so from any tab it points at the next tab still holding misplaced items - including items
+		// destined for the next new tab to be created - with no detour through all-items. Routing finishes
+		// across every tab before any ordering begins; skipped moves don't count, so a skipped move can't pin
+		// routing as "unfinished" forever.
 		for (int t = BankTemplate.MAIN_TAB; t <= 9; t++)
 		{
 			if (t == currentTab)
@@ -772,8 +812,14 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 					continue;
 				}
 				final Integer tt = targetTab.get(canon);
-				if (tt != null && tt != t && (tt == BankTemplate.MAIN_TAB || tt <= existingTabs)
-					&& !skippedSteps.contains("T:" + canon + ":" + tt))
+				if (tt == null || tt == t)
+				{
+					continue;
+				}
+				final boolean reachable = tt == BankTemplate.MAIN_TAB || tt <= existingTabs || tt == lowestMissing;
+				if (reachable
+					&& !skippedSteps.contains("T:" + canon + ":" + tt)
+					&& !skippedSteps.contains("N:" + canon + ":" + tt))
 				{
 					misrouted = true;
 					break;
@@ -790,84 +836,6 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				final String open = t == BankTemplate.MAIN_TAB ? "Open the main tab" : "Open tab " + t;
 				setBankTitle(open + " to move its items to their tabs", Color.WHITE, null, false);
 				return;
-			}
-		}
-
-		// Create-tab phase, done LAST (after every existing tab is populated) and lowest-first: the template
-		// needs a tab you don't have yet, so guide creating it by dragging one of its items onto the +. The
-		// missing tab and where its items live are found across the WHOLE bank (not just the current view), so
-		// from any tab the helper points straight at the next step instead of detouring through all-items and
-		// firing the ordering phase prematurely.
-		final Widget addBtn = addTabButton();
-		if (addBtn != null && !addBtn.isHidden())
-		{
-			int lowestMissing = Integer.MAX_VALUE;
-			for (int t = BankTemplate.MAIN_TAB; t <= 9; t++)
-			{
-				for (int canon : tabItemsCanonical(t))
-				{
-					final Integer tt = targetTab.get(canon);
-					if (tt != null && tt != BankTemplate.MAIN_TAB && tt > existingTabs && tt < lowestMissing
-						&& !skippedSteps.contains("N:" + canon + ":" + tt))
-					{
-						lowestMissing = tt;
-					}
-				}
-			}
-			if (lowestMissing != Integer.MAX_VALUE)
-			{
-				final Color addColor = hintColor(lowestMissing);
-				// An item for the new tab sitting in the view you're in - drag it onto + to create the tab.
-				for (int k = 0; k < current.size(); k++)
-				{
-					final Integer tt = targetTab.get(current.get(k));
-					if (tt == null || tt != lowestMissing || itemTab[k] != currentTab)
-					{
-						continue;
-					}
-					final String sig = "N:" + current.get(k) + ":" + tt;
-					if (skippedSteps.contains(sig))
-					{
-						continue;
-					}
-					currentStepSig = sig;
-					final Widget from = widgets.get(k);
-					markSource(g, itemContainer, from.getBounds());
-					pulseRect(g, addBtn.getBounds(), addColor != null ? addColor : config.reorgHighlightColor());
-					final String name = client.getItemDefinition(from.getItemId()).getName();
-					setBankTitle("Drag " + name + " onto the + button to create tab " + lowestMissing, Color.WHITE, null, false);
-					return;
-				}
-				// Otherwise the new tab's items are in another tab - send the user straight there (reads the bank
-				// directly, so it works from any view). Opening a tab is navigation, not a move - not skippable.
-				for (int t = BankTemplate.MAIN_TAB; t <= 9; t++)
-				{
-					if (t == currentTab)
-					{
-						continue;
-					}
-					boolean holdsNewTabItem = false;
-					for (int canon : tabItemsCanonical(t))
-					{
-						final Integer tt = targetTab.get(canon);
-						if (tt != null && tt == lowestMissing && !skippedSteps.contains("N:" + canon + ":" + tt))
-						{
-							holdsNewTabItem = true;
-							break;
-						}
-					}
-					if (holdsNewTabItem)
-					{
-						final Widget srcBtn = buttons.get(t);
-						if (srcBtn != null)
-						{
-							pulseRect(g, srcBtn.getBounds(), addColor != null ? addColor : config.reorgHighlightColor());
-						}
-						final String srcName = t == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + t;
-						setBankTitle("Open " + srcName + " to move its items to new tab " + lowestMissing, Color.WHITE, null, false);
-						return;
-					}
-				}
 			}
 		}
 
