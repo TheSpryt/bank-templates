@@ -724,6 +724,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				existingTabs = key;
 			}
 		}
+		final int fillerCanon = reorgId(BankTemplate.FILLER);
 
 		// Pass 1a: wrong-tab items sitting in the tab you're VIEWING - drag them straight to their tab. Done
 		// before anything that sends you elsewhere, so the current view (e.g. all-items) is sorted first.
@@ -752,28 +753,44 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			return;
 		}
 
-		// Pass 1b: wrong-tab items stuck in OTHER tabs - send the user to that tab to move them (you can only
-		// drag an item to a tab from the tab it's sitting in). Routing happens across every tab before any
-		// ordering, so all items reach their tabs first.
-		for (int k = 0; k < current.size(); k++)
+		// Pass 1b: wrong-tab items stuck in OTHER tabs - send the user straight to that tab to move them (you can
+		// only drag an item to a tab from the tab it's sitting in). Reads the bank directly (not just the view
+		// you're in), so from any tab it points at the next tab still holding misplaced items - no detouring
+		// back through all-items. Routing finishes across every tab before any ordering begins. Items the user
+		// chose to skip don't count, so a skipped move can't pin routing as "unfinished" forever.
+		for (int t = BankTemplate.MAIN_TAB; t <= 9; t++)
 		{
-			final Integer tt = targetTab.get(current.get(k));
-			if (tt == null || itemTab[k] == tt || (tt != BankTemplate.MAIN_TAB && tt > existingTabs) || itemTab[k] == currentTab)
+			if (t == currentTab)
 			{
 				continue;
 			}
-			// Opening a tab to reach an item is navigation, not a move - it isn't skippable.
-			final Widget from = widgets.get(k);
-			final String name = client.getItemDefinition(from.getItemId()).getName();
-			final Widget srcBtn = buttons.get(itemTab[k]);
-			if (srcBtn != null)
+			boolean misrouted = false;
+			for (int canon : tabItemsCanonical(t))
 			{
-				pulseRect(g, srcBtn.getBounds(), config.reorgHighlightColor());
+				if (canon == fillerCanon)
+				{
+					continue;
+				}
+				final Integer tt = targetTab.get(canon);
+				if (tt != null && tt != t && (tt == BankTemplate.MAIN_TAB || tt <= existingTabs)
+					&& !skippedSteps.contains("T:" + canon + ":" + tt))
+				{
+					misrouted = true;
+					break;
+				}
 			}
-			markSource(g, itemContainer, from.getBounds());
-			final String srcName = itemTab[k] == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + itemTab[k];
-			setBankTitle("Open " + srcName + " to move " + name, Color.WHITE, null, false);
-			return;
+			if (misrouted)
+			{
+				// Opening a tab to reach an item is navigation, not a move - it isn't skippable.
+				final Widget tabBtn = buttons.get(t);
+				if (tabBtn != null)
+				{
+					pulseRect(g, tabBtn.getBounds(), config.reorgHighlightColor());
+				}
+				final String open = t == BankTemplate.MAIN_TAB ? "Open the main tab" : "Open tab " + t;
+				setBankTitle(open + " to move its items to their tabs", Color.WHITE, null, false);
+				return;
+			}
 		}
 
 		// Create-tab phase, done LAST (after every existing tab is populated) and lowest-first: the template
@@ -845,7 +862,6 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 
 		// Filler-balancing: every item is in its tab now - move SURPLUS bank fillers (a tab holding more than
 		// its template needs) into tabs that still need them.
-		final int fillerCanon = reorgId(BankTemplate.FILLER);
 		final int[] need = fillersNeededPerTab(template, owned);
 		final int[] have = fillersPerTab();
 		int deficitTab = -1;
@@ -878,19 +894,6 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				setBankTitle("Drag the bank filler to " + tabName, Color.WHITE, null, false);
 				return;
 			}
-		}
-
-		// Don't start ordering until every item is in its tab GLOBALLY. From a numbered tab you can't see the
-		// other tabs, so if routing isn't finished, head back to the all-items view to complete it first.
-		if (currentTab != BankTemplate.MAIN_TAB && !allRouted(targetTab))
-		{
-			final Widget allBtn = buttons.get(BankTemplate.MAIN_TAB);
-			if (allBtn != null)
-			{
-				pulseRect(g, allBtn.getBounds(), config.reorgHighlightColor());
-			}
-			setBankTitle("Open the main bank tab to finish moving items into their tabs", Color.WHITE, null, false);
-			return;
 		}
 
 		// Ordering phase: every item is now in its tab. Order each tab's slots, lowest tab first - the current
@@ -1011,29 +1014,6 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			}
 		}
 		return out;
-	}
-
-	// True when every item is already in its target tab, so routing is globally complete and ordering can
-	// begin. Reads the bank directly, so it's correct even from a numbered tab where you can't see the rest.
-	private boolean allRouted(Map<Integer, Integer> targetTab)
-	{
-		final int fillerCanon = reorgId(BankTemplate.FILLER);
-		for (int t = BankTemplate.MAIN_TAB; t <= 9; t++)
-		{
-			for (int canon : tabItemsCanonical(t))
-			{
-				if (canon == fillerCanon)
-				{
-					continue;
-				}
-				final Integer tt = targetTab.get(canon);
-				if (tt != null && tt != t)
-				{
-					return false;
-				}
-			}
-		}
-		return true;
 	}
 
 	// Whether a tab's items are already in their template order (ignoring slots the user chose to skip).
