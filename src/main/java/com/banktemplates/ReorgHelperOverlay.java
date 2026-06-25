@@ -12,6 +12,7 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.Stroke;
+import java.awt.geom.GeneralPath;
 import java.awt.image.BufferedImage;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -1441,22 +1442,26 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		g.drawString(text, x, y);
 	}
 
-	// The all-items / main tab's label: an infinity glyph drawn as two small overlapping loops (a vector
-	// figure-eight) in the slot's bottom-right - drawn rather than the "∞" character so it renders identically
-	// on every platform regardless of which fonts are installed (macOS included).
+	// The all-items / main tab's label: an infinity glyph drawn as a true lemniscate - two cubic loops that
+	// cross in the middle - in the slot's bottom-right. Drawn rather than using the "∞" character so it renders
+	// identically on every platform regardless of which fonts are installed (macOS included).
 	private void drawInfinityTag(Graphics2D g, Rectangle b, Color color)
 	{
-		final int d = 6;              // loop diameter
-		final int w = d * 2 - 2;      // two loops overlapping in the middle
-		final int x = b.x + b.width - w - 2;
-		final int y = b.y + b.height - d - 1;
+		final float ox = 6.5f;        // how far each loop's control points spread out horizontally
+		final float oy = 4.5f;        // and vertically (loop height)
+		final float cx = b.x + b.width - 7f;
+		final float cy = b.y + b.height - 5f;
+		final GeneralPath p = new GeneralPath();
+		p.moveTo(cx, cy);
+		p.curveTo(cx - ox, cy - oy, cx - ox, cy + oy, cx, cy);   // left loop, crossing back through the centre
+		p.curveTo(cx + ox, cy - oy, cx + ox, cy + oy, cx, cy);   // right loop
+
 		final Object aa = g.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
 		final Stroke old = g.getStroke();
 		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-		g.setStroke(new BasicStroke(1.5f));
+		g.setStroke(new BasicStroke(1.4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 		g.setColor(color);
-		g.drawOval(x, y, d, d);
-		g.drawOval(x + d - 2, y, d, d);
+		g.draw(p);
 		g.setStroke(old);
 		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
 			aa != null ? aa : RenderingHints.VALUE_ANTIALIAS_DEFAULT);
