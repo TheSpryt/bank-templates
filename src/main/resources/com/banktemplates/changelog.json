@@ -2,7 +2,7 @@
   {
     "version": "1.4",
     "notes": [
-      "My Templates: each card now shows how many of its items you already own, as \"x / y items\", and the count fills in and updates live as your bank changes.",
+      "My Templates: each card now shows how many of its items you already own, as \"x / y items\". The count shows from your last bank visit even before you open the bank this session, then updates live as your bank changes.",
       "My Templates: the 'Remove Template' button is now 'Disable Template', and a template card's Use/Active control is an Enable/Disable toggle - click an active template's Disable to switch it off.",
       "My Templates: shorter, tidier cards, with the reorganise mode moved into its own description card.",
       "A new empty layout now applies itself automatically when you create it, and you can Edit a template in My Templates without activating it.",
