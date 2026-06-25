@@ -702,7 +702,7 @@ public class BankTemplatesPanel extends PluginPanel
 		// always reflects the latest bank contents, even on a plain rebuild.
 		if (CLOSEST_SORT.equals(browseSort) && ownedCanon != null)
 		{
-			browseResults.sort((a, b) -> Double.compare(ownershipRatio(b), ownershipRatio(a)));
+			browseResults.sort((a, b) -> Double.compare(ownershipScore(b), ownershipScore(a)));
 		}
 
 		for (RemoteTemplate rt : browseResults)
@@ -1240,8 +1240,10 @@ public class BankTemplatesPanel extends PluginPanel
 		return items + (tabs > 1 ? " · " + tabs + " tabs" : "");
 	}
 
-	// Fraction of a remote template's items the player currently owns (0 when the bank isn't known yet).
-	private double ownershipRatio(RemoteTemplate rt)
+	// Ranking score for the "Items owned" sort. Not a plain percentage: it weights the absolute number of the
+	// template's items you own by the fraction you own (owned^2 / total), so owning more items is preferred and
+	// a near-complete small template doesn't outrank a big one you have a lot of - e.g. 487/936 beats 180/276.
+	private double ownershipScore(RemoteTemplate rt)
 	{
 		if (ownedCanon == null)
 		{
@@ -1249,7 +1251,12 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		final BankTemplate t = rt.toTemplate();
 		final int total = t.itemCount();
-		return total == 0 ? 0 : ownedOfTemplate(t, ownedCanon) / (double) total;
+		if (total == 0)
+		{
+			return 0;
+		}
+		final int owned = ownedOfTemplate(t, ownedCanon);
+		return (double) owned * owned / total;
 	}
 
 	private JLabel voteLabel(String html, Color color)
