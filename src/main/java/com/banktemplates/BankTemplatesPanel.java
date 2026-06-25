@@ -48,10 +48,10 @@ import net.runelite.client.ui.PluginPanel;
 @Singleton
 public class BankTemplatesPanel extends PluginPanel
 {
-	private static final Border CARD_BORDER = BorderFactory.createEmptyBorder(6, 6, 6, 6);
+	private static final Border CARD_BORDER = BorderFactory.createEmptyBorder(4, 6, 4, 6);
 	private static final Border ACTIVE_BORDER = BorderFactory.createCompoundBorder(
 		BorderFactory.createMatteBorder(0, 3, 0, 0, ColorScheme.BRAND_ORANGE),
-		BorderFactory.createEmptyBorder(6, 3, 6, 6));
+		BorderFactory.createEmptyBorder(4, 3, 4, 6));
 
 	private static final String LOCAL = "local";
 	private static final String BROWSE = "browse";
@@ -450,11 +450,11 @@ public class BankTemplatesPanel extends PluginPanel
 		if (query.isEmpty())
 		{
 			final boolean hasActive = templateManager.getActive() != null;
-			final JButton remove = styledButton(hasActive ? "Remove Template" : "No template applied");
+			final JButton remove = styledButton(hasActive ? "Disable Template" : "No template applied");
 			remove.setEnabled(hasActive);
 			remove.setAlignmentX(Component.LEFT_ALIGNMENT);
 			remove.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
-			remove.setToolTipText("Stop applying a template and show your normal bank");
+			remove.setToolTipText("Disable the active template and show your normal bank");
 			if (hasActive)
 			{
 				remove.setBackground(new Color(120, 60, 60));
@@ -488,14 +488,22 @@ public class BankTemplatesPanel extends PluginPanel
 		listContainer.add(newButton);
 
 		listContainer.add(Box.createVerticalStrut(8));
-		final JPanel reorgRow = new JPanel(new BorderLayout(6, 0));
-		reorgRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		reorgRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-		reorgRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+
+		// Reorganise: the mode dropdown and a description of what the selected mode does, in one card.
+		final JPanel reorgCard = new JPanel();
+		reorgCard.setLayout(new BoxLayout(reorgCard, BoxLayout.Y_AXIS));
+		reorgCard.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		reorgCard.setAlignmentX(Component.LEFT_ALIGNMENT);
+		reorgCard.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 3, 0, 0, ColorScheme.BRAND_ORANGE),
+			BorderFactory.createEmptyBorder(6, 6, 6, 6)));
+
 		final JLabel reorgLabel = new JLabel("Reorganise");
 		reorgLabel.setForeground(Color.WHITE);
 		reorgLabel.setToolTipText("Guide for rearranging your real bank to match the active template");
-		reorgRow.add(reorgLabel, BorderLayout.WEST);
+		reorgLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		reorgCard.add(reorgLabel);
+		reorgCard.add(Box.createVerticalStrut(4));
 
 		final String off = "Off";
 		final JComboBox<String> reorgMode = new JComboBox<>();
@@ -504,8 +512,20 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			reorgMode.addItem(d.toString());
 		}
-		reorgMode.setSelectedItem(config.showReorgHelper() ? config.reorgDisplay().toString() : off);
+		final String initialSel = config.showReorgHelper() ? config.reorgDisplay().toString() : off;
+		reorgMode.setSelectedItem(initialSel);
 		reorgMode.setFocusable(false);
+		reorgMode.setAlignmentX(Component.LEFT_ALIGNMENT);
+		reorgMode.setMaximumSize(new Dimension(Integer.MAX_VALUE, reorgMode.getPreferredSize().height));
+		reorgCard.add(reorgMode);
+		reorgCard.add(Box.createVerticalStrut(6));
+
+		final JLabel reorgDesc = new JLabel(reorgDescription(initialSel, off));
+		reorgDesc.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		reorgDesc.setFont(FontManager.getRunescapeSmallFont());
+		reorgDesc.setAlignmentX(Component.LEFT_ALIGNMENT);
+		reorgCard.add(reorgDesc);
+
 		reorgMode.addActionListener(e ->
 		{
 			final String sel = (String) reorgMode.getSelectedItem();
@@ -515,20 +535,36 @@ public class BankTemplatesPanel extends PluginPanel
 			}
 			else
 			{
-				for (BankTemplatesConfig.ReorgDisplay d : BankTemplatesConfig.ReorgDisplay.values())
+				final BankTemplatesConfig.ReorgDisplay d = BankTemplatesConfig.ReorgDisplay.fromLabel(sel);
+				if (d != null)
 				{
-					if (d.toString().equals(sel))
-					{
-						configManager.setConfiguration(BankTemplatesConfig.GROUP, "reorgDisplay", d);
-						break;
-					}
+					configManager.setConfiguration(BankTemplatesConfig.GROUP, "reorgDisplay", d);
 				}
 				configManager.setConfiguration(BankTemplatesConfig.GROUP, "showReorgHelper", true);
 			}
+			reorgDesc.setText(reorgDescription(sel, off));
+			reorgCard.revalidate();
 			onActiveChanged.run();
 		});
-		reorgRow.add(reorgMode, BorderLayout.CENTER);
-		listContainer.add(reorgRow);
+
+		listContainer.add(reorgCard);
+		listContainer.add(Box.createVerticalGlue());
+	}
+
+	// HTML so the text wraps inside the reorganise card. Width is sized to the side panel.
+	private static String reorgDescription(String selectedLabel, String off)
+	{
+		final String text;
+		if (off.equals(selectedLabel))
+		{
+			text = "Reorganise helper is off. Pick a mode to get guidance for rearranging your real bank to match the active template.";
+		}
+		else
+		{
+			final BankTemplatesConfig.ReorgDisplay d = BankTemplatesConfig.ReorgDisplay.fromLabel(selectedLabel);
+			text = d != null ? d.getDescription() : "";
+		}
+		return "<html><body style='width:185px'>" + escape(text) + "</body></html>";
 	}
 
 	private void addLocalSection(String name, List<BankTemplate> templates)
@@ -573,7 +609,7 @@ public class BankTemplatesPanel extends PluginPanel
 			active ? ColorScheme.BRAND_ORANGE : Color.WHITE), BorderLayout.CENTER);
 
 		final JPanel buttons = buttonRow();
-		buttons.add(activeOrUse(active, () -> select(template)));
+		buttons.add(activeOrUse(active, template));
 		// One button does both: presets are read-only (View); your own templates open the editor (which
 		// previews and edits in one window).
 		if (template.isPreset())
@@ -1177,11 +1213,11 @@ public class BankTemplatesPanel extends PluginPanel
 		return text;
 	}
 
-	private JButton activeOrUse(boolean active, Runnable onUse)
+	private JButton activeOrUse(boolean active, BankTemplate template)
 	{
-		final JButton button = styledButton(active ? "Active" : "Use");
-		button.setEnabled(!active);
-		button.addActionListener(e -> onUse.run());
+		final JButton button = styledButton(active ? "Disable" : "Enable");
+		button.setToolTipText(active ? "Stop applying this template" : "Apply this template to your bank view");
+		button.addActionListener(e -> select(active ? null : template));
 		return button;
 	}
 
@@ -1195,10 +1231,10 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private JPanel cardPanel(boolean active)
 	{
-		final JPanel card = new JPanel(new BorderLayout(0, 4));
+		final JPanel card = new JPanel(new BorderLayout(0, 2));
 		card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		card.setBorder(active ? ACTIVE_BORDER : CARD_BORDER);
-		card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 140));
+		card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 110));
 		card.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		if (!active)
