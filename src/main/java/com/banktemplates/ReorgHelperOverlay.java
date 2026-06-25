@@ -794,17 +794,24 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		}
 
 		// Create-tab phase, done LAST (after every existing tab is populated) and lowest-first: the template
-		// needs a tab you don't have yet, so guide creating it by dragging one of its items onto the +.
+		// needs a tab you don't have yet, so guide creating it by dragging one of its items onto the +. The
+		// missing tab and where its items live are found across the WHOLE bank (not just the current view), so
+		// from any tab the helper points straight at the next step instead of detouring through all-items and
+		// firing the ordering phase prematurely.
 		final Widget addBtn = addTabButton();
 		if (addBtn != null && !addBtn.isHidden())
 		{
 			int lowestMissing = Integer.MAX_VALUE;
-			for (int k = 0; k < current.size(); k++)
+			for (int t = BankTemplate.MAIN_TAB; t <= 9; t++)
 			{
-				final Integer tt = targetTab.get(current.get(k));
-				if (tt != null && tt != BankTemplate.MAIN_TAB && tt > existingTabs && tt < lowestMissing)
+				for (int canon : tabItemsCanonical(t))
 				{
-					lowestMissing = tt;
+					final Integer tt = targetTab.get(canon);
+					if (tt != null && tt != BankTemplate.MAIN_TAB && tt > existingTabs && tt < lowestMissing
+						&& !skippedSteps.contains("N:" + canon + ":" + tt))
+					{
+						lowestMissing = tt;
+					}
 				}
 			}
 			if (lowestMissing != Integer.MAX_VALUE)
@@ -831,31 +838,35 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 					setBankTitle("Drag " + name + " onto the + button to create tab " + lowestMissing, Color.WHITE, null, false);
 					return;
 				}
-				// Otherwise the new tab's items are in another tab - guide opening it first.
-				for (int k = 0; k < current.size(); k++)
+				// Otherwise the new tab's items are in another tab - send the user straight there (reads the bank
+				// directly, so it works from any view). Opening a tab is navigation, not a move - not skippable.
+				for (int t = BankTemplate.MAIN_TAB; t <= 9; t++)
 				{
-					final Integer tt = targetTab.get(current.get(k));
-					if (tt == null || tt != lowestMissing || itemTab[k] == currentTab)
+					if (t == currentTab)
 					{
 						continue;
 					}
-					final String sig = "N:" + current.get(k) + ":" + tt;
-					if (skippedSteps.contains(sig))
+					boolean holdsNewTabItem = false;
+					for (int canon : tabItemsCanonical(t))
 					{
-						continue;
+						final Integer tt = targetTab.get(canon);
+						if (tt != null && tt == lowestMissing && !skippedSteps.contains("N:" + canon + ":" + tt))
+						{
+							holdsNewTabItem = true;
+							break;
+						}
 					}
-					currentStepSig = sig;
-					final Widget from = widgets.get(k);
-					final Widget srcBtn = buttons.get(itemTab[k]);
-					if (srcBtn != null)
+					if (holdsNewTabItem)
 					{
-						pulseRect(g, srcBtn.getBounds(), addColor != null ? addColor : config.reorgHighlightColor());
+						final Widget srcBtn = buttons.get(t);
+						if (srcBtn != null)
+						{
+							pulseRect(g, srcBtn.getBounds(), addColor != null ? addColor : config.reorgHighlightColor());
+						}
+						final String srcName = t == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + t;
+						setBankTitle("Open " + srcName + " to move its items to new tab " + lowestMissing, Color.WHITE, null, false);
+						return;
 					}
-					markSource(g, itemContainer, from.getBounds());
-					final String srcName = itemTab[k] == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + itemTab[k];
-					final String name = client.getItemDefinition(from.getItemId()).getName();
-					setBankTitle("Open " + srcName + " to move " + name + " to new tab " + lowestMissing, Color.WHITE, null, false);
-					return;
 				}
 			}
 		}
@@ -1016,7 +1027,9 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		return out;
 	}
 
-	// Whether a tab's items are already in their template order (ignoring slots the user chose to skip).
+	// Whether a tab needs no further ordering move. True in EXACTLY the cases drawPositionStep would find
+	// nothing to do (same target packing, same skip handling, same "wanted item not reachable" give-up), so
+	// the two can never disagree about a tab and bounce the user back and forth between it and another tab.
 	private boolean tabSorted(BankTemplate template, int tab)
 	{
 		final int[] desired = template.tabLayout(tab);
@@ -1026,15 +1039,30 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		}
 		final List<Integer> cur = tabItemsCanonical(tab);
 		final List<Integer> target = buildTabTarget(desired, cur);
-		final int n = Math.min(cur.size(), target.size());
-		for (int i = 0; i < n; i++)
+		// Advance over slots that already match or were skipped, to the first slot that's both wrong and live.
+		int i = 0;
+		while (i < cur.size() && i < target.size())
 		{
-			if (!cur.get(i).equals(target.get(i)) && !skippedSteps.contains("P:" + tab + ":" + i))
+			if (cur.get(i).equals(target.get(i)) || skippedSteps.contains("P:" + tab + ":" + i))
 			{
-				return false;
+				i++;
+				continue;
 			}
+			break;
 		}
-		return true;
+		if (i >= cur.size() || i >= target.size())
+		{
+			return true;
+		}
+		// A move only exists if the item this slot wants is still sitting at/after it. If it isn't (e.g. it was
+		// consumed by an earlier skipped slot), drawPositionStep gives up too - so treat the tab as sorted.
+		final int wantCanon = target.get(i);
+		int j = i;
+		while (j < cur.size() && !cur.get(j).equals(wantCanon))
+		{
+			j++;
+		}
+		return j >= cur.size();
 	}
 
 	// Orders items within the current tab. Returns true if it showed a move (or a mode-switch prompt), false
