@@ -886,7 +886,9 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		}
 
 		// Ordering phase: every item is now in its tab. Order each tab's slots, lowest tab first - the current
-		// view directly, and for any other tab still out of order, send the user there to sort it.
+		// view directly, and for any other tab still out of order, send the user there (skipping tabs that are
+		// already ordered) to sort it.
+		boolean currentOrdered = false;
 		for (int t = BankTemplate.MAIN_TAB; t <= 9; t++)
 		{
 			final int[] layout = template.tabLayout(t);
@@ -919,6 +921,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				{
 					return;
 				}
+				currentOrdered = true;
 			}
 			else if (!tabSorted(template, t))
 			{
@@ -927,7 +930,8 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				{
 					pulseRect(g, tabBtn.getBounds(), config.reorgHighlightColor());
 				}
-				setBankTitle((t == BankTemplate.MAIN_TAB ? "Open the main tab" : "Open tab " + t) + " to sort it", Color.WHITE, null, false);
+				final String open = (t == BankTemplate.MAIN_TAB ? "Open the main tab" : "Open tab " + t) + " to sort it";
+				setBankTitle(currentOrdered ? "Tab organised! " + open + " next" : open, Color.WHITE, null, false);
 				return;
 			}
 		}
@@ -993,7 +997,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		final int count = tab == BankTemplate.MAIN_TAB ? items.length - idx : client.getVarbitValue(TAB_COUNT_VARBITS[tab - 1]);
 		for (int k = 0; k < count && idx < items.length; k++, idx++)
 		{
-			if (items[idx] != null && items[idx].getId() > 0)
+			if (items[idx] != null && items[idx].getId() > 0 && items[idx].getId() != ItemID.BLANKOBJECT)
 			{
 				out.add(reorgId(items[idx].getId()));
 			}
