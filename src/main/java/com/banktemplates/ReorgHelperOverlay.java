@@ -737,6 +737,21 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				}
 			}
 		}
+		// Items the template doesn't include at all (and aren't bank fillers) get a red cross, so you can see
+		// what's left over and not part of the template.
+		final int fillerCanon = reorgId(BankTemplate.FILLER);
+		for (int k = 0; k < current.size(); k++)
+		{
+			if (current.get(k) == fillerCanon || targetTab.containsKey(current.get(k)))
+			{
+				continue;
+			}
+			final Rectangle b = widgets.get(k).getBounds();
+			if (b.width > 0)
+			{
+				drawCrossTag(g, b);
+			}
+		}
 	}
 
 	private void drawSteps(Graphics2D g, Widget itemContainer, BankTemplate template, int currentTab,
@@ -1462,6 +1477,24 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		g.setStroke(new BasicStroke(1.4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 		g.setColor(color);
 		g.draw(p);
+		g.setStroke(old);
+		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+			aa != null ? aa : RenderingHints.VALUE_ANTIALIAS_DEFAULT);
+	}
+
+	// A small red cross in the slot's bottom-right, marking an item the active template doesn't include.
+	private void drawCrossTag(Graphics2D g, Rectangle b)
+	{
+		final int s = 7;
+		final int x = b.x + b.width - s - 2;
+		final int y = b.y + b.height - s - 2;
+		final Object aa = g.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
+		final Stroke old = g.getStroke();
+		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		g.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+		g.setColor(new Color(235, 70, 70));
+		g.drawLine(x, y, x + s, y + s);
+		g.drawLine(x + s, y, x, y + s);
 		g.setStroke(old);
 		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
 			aa != null ? aa : RenderingHints.VALUE_ANTIALIAS_DEFAULT);
