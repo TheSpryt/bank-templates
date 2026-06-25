@@ -30,7 +30,7 @@ import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JScrollPane;
-import javax.swing.JTextField;
+import javax.swing.JTextArea;
 import javax.swing.JToggleButton;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
@@ -69,7 +69,7 @@ final class TemplateEditor
 	private boolean swapMode = false;
 	private Runnable listener;
 	private JDialog dialog;
-	private JTextField descField;
+	private JTextArea descArea;
 	private final DragGlass glass = new DragGlass();
 
 	private TemplateEditor(ItemManager itemManager, ItemIndex itemIndex, ClientThread clientThread, LayoutEditor editor, BankTemplate template)
@@ -128,19 +128,30 @@ final class TemplateEditor
 		top.add(hint);
 		top.add(Box.createVerticalStrut(4));
 
-		// Editable description, saved when Apply is clicked (Cancel/close leaves it unchanged).
-		descField = new JTextField(template.getDescription() == null ? "" : template.getDescription());
-		descField.setToolTipText("Shown to others when you share this template (up to 500 characters). Saved on Apply.");
-		final JPanel descRow = new JPanel(new BorderLayout(4, 0));
-		descRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		descRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-		descRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, descField.getPreferredSize().height));
+		// Editable, multi-line description, saved when Apply is clicked (Cancel/close leaves it unchanged).
 		final JLabel descLabel = new JLabel("Description:");
 		descLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		descLabel.setFont(FontManager.getRunescapeSmallFont());
-		descRow.add(descLabel, BorderLayout.WEST);
-		descRow.add(descField, BorderLayout.CENTER);
-		top.add(descRow);
+		descLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		top.add(descLabel);
+		top.add(Box.createVerticalStrut(2));
+
+		descArea = new JTextArea(template.getDescription() == null ? "" : template.getDescription(), 3, 0);
+		descArea.setLineWrap(true);
+		descArea.setWrapStyleWord(true);
+		descArea.setFont(FontManager.getRunescapeSmallFont());
+		descArea.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		descArea.setForeground(Color.WHITE);
+		descArea.setCaretColor(Color.WHITE);
+		descArea.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+		descArea.setToolTipText("Shown to others when you share this template (up to 500 characters). Saved on Apply.");
+
+		final JScrollPane descScroll = new JScrollPane(descArea,
+			ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+		descScroll.setBorder(BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR));
+		descScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
+		descScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, descScroll.getPreferredSize().height));
+		top.add(descScroll);
 		top.add(Box.createVerticalStrut(4));
 
 		tabBar.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -230,7 +241,7 @@ final class TemplateEditor
 	// Saves the (edited) description, then commits the layout. Cancel or closing leaves the description as it was.
 	private void applyEdits()
 	{
-		String d = descField.getText().trim();
+		String d = descArea.getText().trim();
 		if (d.length() > 500)
 		{
 			d = d.substring(0, 500);
