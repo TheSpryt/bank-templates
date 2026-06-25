@@ -1426,8 +1426,11 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 	{
 		g.setFont(g.getFont().deriveFont(Font.PLAIN, 12f));
 		final FontMetrics fm = g.getFontMetrics();
+		// Bottom-right of the slot, clear of the stack/quantity count the game draws at the top-left.
+		final int x = b.x + b.width - fm.stringWidth(text) - 2;
+		final int y = b.y + b.height - fm.getDescent() - 1;
 		g.setColor(color);
-		g.drawString(text, b.x + 3, b.y + 1 + fm.getAscent() - 1);
+		g.drawString(text, x, y);
 	}
 
 	// Pulse the bank's Swap/Insert toggle button.
