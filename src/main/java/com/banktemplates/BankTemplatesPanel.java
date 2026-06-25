@@ -16,8 +16,10 @@ import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.swing.BorderFactory;
@@ -37,10 +39,14 @@ import javax.swing.WindowConstants;
 import javax.swing.border.Border;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
+import net.runelite.api.Item;
+import net.runelite.api.ItemContainer;
 import net.runelite.api.Player;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.ItemVariationMapping;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
@@ -87,6 +93,9 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private String mode = LOCAL;
 	private String query = "";
+	// Variant-collapsed ids the player owns in their bank (qty > 0), for the "x / y items" card meta.
+	// Recomputed when the local view is built; null until the bank has loaded.
+	private Set<Integer> ownedCanon;
 
 	private final List<RemoteTemplate> browseResults = new ArrayList<>();
 	private String browseStatus;
@@ -448,6 +457,7 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private void buildLocalView()
 	{
+		ownedCanon = ownedBankCanonical();
 		if (query.isEmpty())
 		{
 			final boolean hasActive = templateManager.getActive() != null;
@@ -1302,8 +1312,52 @@ public class BankTemplatesPanel extends PluginPanel
 	private String localMeta(BankTemplate template)
 	{
 		final String kind = template.isPreset() ? "Preset" : template.isOwned() ? "Shared by you" : "Custom";
+		final int total = template.itemCount();
 		final int tabs = template.tabCount();
-		return kind + " · " + template.itemCount() + " items" + (tabs > 1 ? " · " + tabs + " tabs" : "");
+		// "x / y items" when the bank is known (x = how many of the template's items you currently own),
+		// otherwise just "y items" until the bank has loaded.
+		final String items = ownedCanon != null
+			? ownedOfTemplate(template, ownedCanon) + " / " + total + " items"
+			: total + " items";
+		return kind + " · " + items + (tabs > 1 ? " · " + tabs + " tabs" : "");
+	}
+
+	// Variant-collapsed ids the player owns (qty > 0). Bank placeholders (qty 0) are excluded, so they
+	// correctly don't count as owned. Returns null if the bank container hasn't loaded yet.
+	private Set<Integer> ownedBankCanonical()
+	{
+		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank == null)
+		{
+			return null;
+		}
+		final Set<Integer> owned = new HashSet<>();
+		for (Item it : bank.getItems())
+		{
+			if (it.getId() > 0 && it.getQuantity() > 0)
+			{
+				owned.add(ItemVariationMapping.map(it.getId()));
+			}
+		}
+		return owned;
+	}
+
+	// How many of the template's items the player currently has in their bank (variant-aware).
+	private int ownedOfTemplate(BankTemplate template, Set<Integer> owned)
+	{
+		int n = 0;
+		for (TabLayout t : template.getTabs())
+		{
+			for (Integer v : t.getLayout())
+			{
+				if (v != null && v > 0 && v != BankTemplate.FILLER
+					&& owned.contains(ItemVariationMapping.map(v)))
+				{
+					n++;
+				}
+			}
+		}
+		return n;
 	}
 
 	private String capName(String s)
