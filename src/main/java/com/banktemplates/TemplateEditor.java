@@ -198,6 +198,11 @@ final class TemplateEditor
 		rebuildTabs();
 		rebuildGrid();
 
+		// Widen so the tab row fits on one line by default (it still wraps if the window is resized narrower).
+		final int tabsWidth = tabBar.getPreferredSize().width + 16;
+		final int w = Math.max(root.getPreferredSize().width, Math.max(tabsWidth, 320));
+		root.setPreferredSize(new Dimension(w, root.getPreferredSize().height));
+
 		dialog.setContentPane(root);
 		dialog.pack();
 		if (owner != null)

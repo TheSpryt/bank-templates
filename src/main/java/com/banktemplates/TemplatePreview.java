@@ -2,6 +2,7 @@ package com.banktemplates;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
@@ -10,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import javax.swing.BorderFactory;
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -30,12 +32,14 @@ import net.runelite.client.util.AsyncBufferedImage;
 final class TemplatePreview
 {
 	private static final int CELL = 36;
+	// Minimum content width so preview windows are a consistent size regardless of description/columns.
+	private static final int MIN_WIDTH = 320;
 
 	private TemplatePreview()
 	{
 	}
 
-	static JPanel build(ItemManager itemManager, ClientThread clientThread, BankTemplate template)
+	static JPanel build(ItemManager itemManager, ClientThread clientThread, BankTemplate template, String description)
 	{
 		final int columns = template.getColumns();
 		final List<TabLayout> tabs = new ArrayList<>(template.getTabs());
@@ -43,7 +47,6 @@ final class TemplatePreview
 
 		final JPanel root = new JPanel(new BorderLayout(0, 6));
 		root.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		root.setPreferredSize(new Dimension(columns * CELL + 28, 420));
 
 		final JPanel gridHolder = new JPanel(new BorderLayout());
 		gridHolder.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -94,7 +97,28 @@ final class TemplatePreview
 			tabBar.add(b);
 		}
 
-		root.add(tabBar, BorderLayout.NORTH);
+		// Width that fits both the grid and the tab row on one line (so tabs default to one row, and wrap
+		// only if the window is resized narrower), with a minimum so the window size is consistent whether
+		// or not there's a description.
+		final int contentWidth = Math.max(Math.max(columns * CELL + 28, tabBar.getPreferredSize().width + 12), MIN_WIDTH);
+		root.setPreferredSize(new Dimension(contentWidth, 420));
+
+		final JPanel top = new JPanel();
+		top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
+		top.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		if (description != null && !description.isEmpty())
+		{
+			final JLabel desc = new JLabel("<html><body style='width:" + (contentWidth - 24) + "px'>"
+				+ escape(description) + "</body></html>");
+			desc.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			desc.setAlignmentX(Component.LEFT_ALIGNMENT);
+			desc.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
+			top.add(desc);
+		}
+		tabBar.setAlignmentX(Component.LEFT_ALIGNMENT);
+		top.add(tabBar);
+
+		root.add(top, BorderLayout.NORTH);
 		root.add(scroll, BorderLayout.CENTER);
 
 		// Select the first tab.
@@ -107,6 +131,11 @@ final class TemplatePreview
 
 	// Display name for a slot's item. MUST run on the client thread (getItemComposition asserts it);
 	// use setItemTooltip from Swing code. Falls back to the id if unknown.
+	private static String escape(String s)
+	{
+		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+	}
+
 	static String itemName(ItemManager itemManager, int id)
 	{
 		try
