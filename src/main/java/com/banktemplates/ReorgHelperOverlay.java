@@ -67,6 +67,20 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 
 	private static final Color SOURCE_COLOR = new Color(255, 165, 0);   // orange: item to move
 	private static final Color DONE_COLOR = new Color(110, 200, 110);
+	// Subtle, desaturated per-tab identity colours (index = tab number; 0 = main, unused). Step-by-step uses
+	// these to tint out-of-place items with their destination tab's colour and outline the tab buttons.
+	private static final Color[] TAB_HINT = {
+		null,
+		new Color(205, 80, 80),
+		new Color(210, 145, 60),
+		new Color(200, 190, 80),
+		new Color(95, 175, 95),
+		new Color(85, 135, 205),
+		new Color(155, 110, 200),
+		new Color(205, 120, 170),
+		new Color(85, 190, 180),
+		new Color(180, 180, 185),
+	};
 
 	private static final int[] TAB_COUNT_VARBITS = {
 		VarbitID.BANK_TAB_1, VarbitID.BANK_TAB_2, VarbitID.BANK_TAB_3, VarbitID.BANK_TAB_4,
@@ -247,6 +261,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 
 		if (steps)
 		{
+			drawColorHints(graphics, itemContainer, widgets, current, itemTab, targetTab);
 			drawSteps(graphics, itemContainer, template, currentTab, widgets, current, itemTab, targetTab, owned);
 			// Let the user skip whatever single move is currently shown - the next step then appears.
 			if (currentStepSig != null)
@@ -562,6 +577,59 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 	}
 
 	// Draw a destination tag on each out-of-place item: tab number if in the wrong tab, else row-col.
+	// Subtle colour cues layered under the Step-by-step guidance: each numbered tab button gets an identity
+	// colour, and items sitting in the wrong tab are washed with their DESTINATION tab's colour so you can
+	// see where to drag them at a glance. Items already in their correct tab are left clean (look-ahead).
+	private void drawColorHints(Graphics2D g, Widget itemContainer, List<Widget> widgets, List<Integer> current,
+		int[] itemTab, Map<Integer, Integer> targetTab)
+	{
+		final Shape oldClip = g.getClip();
+		final Stroke oldStroke = g.getStroke();
+
+		// Tab button identity outlines (above the item container, so drawn without the item-area clip).
+		for (Map.Entry<Integer, Widget> e : tabButtons().entrySet())
+		{
+			final Color c = hintColor(e.getKey());
+			final Widget btn = e.getValue();
+			if (c == null || btn == null || btn.isHidden())
+			{
+				continue;
+			}
+			final Rectangle r = btn.getBounds();
+			if (r.width > 0)
+			{
+				g.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), 150));
+				g.setStroke(new BasicStroke(2f));
+				g.drawRect(r.x + 1, r.y + 1, r.width - 2, r.height - 2);
+			}
+		}
+		g.setStroke(oldStroke);
+
+		// Wrong-tab items: a faint wash of their destination tab's colour.
+		g.setClip(itemContainer.getBounds());
+		for (int k = 0; k < current.size(); k++)
+		{
+			final Integer tt = targetTab.get(current.get(k));
+			if (tt == null || tt == BankTemplate.MAIN_TAB || itemTab[k] == tt)
+			{
+				continue;
+			}
+			final Color c = hintColor(tt);
+			final Rectangle b = widgets.get(k).getBounds();
+			if (c != null && b.width > 0)
+			{
+				g.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), 60));
+				g.fillRect(b.x, b.y, b.width, b.height);
+			}
+		}
+		g.setClip(oldClip);
+	}
+
+	private static Color hintColor(int tab)
+	{
+		return tab >= 1 && tab < TAB_HINT.length ? TAB_HINT[tab] : null;
+	}
+
 	private void drawLabels(Graphics2D g, List<Widget> widgets, List<Integer> current, int[] itemTab,
 		Map<Integer, Integer> targetTab, Map<Integer, Integer> targetRank, int columns)
 	{
