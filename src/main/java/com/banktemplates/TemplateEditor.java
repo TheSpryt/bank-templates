@@ -20,8 +20,9 @@ import java.awt.event.WindowEvent;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -29,6 +30,8 @@ import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JScrollPane;
+import javax.swing.JTextField;
+import javax.swing.JToggleButton;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
@@ -66,6 +69,7 @@ final class TemplateEditor
 	private boolean swapMode = false;
 	private Runnable listener;
 	private JDialog dialog;
+	private JTextField descField;
 	private final DragGlass glass = new DragGlass();
 
 	private TemplateEditor(ItemManager itemManager, ItemIndex itemIndex, ClientThread clientThread, LayoutEditor editor, BankTemplate template)
@@ -115,10 +119,32 @@ final class TemplateEditor
 		ThinScrollBarUI.style(scroll);
 		scroll.getVerticalScrollBar().setUnitIncrement(16);
 
-		final JPanel top = new JPanel(new BorderLayout(0, 4));
+		final JPanel top = new JPanel();
+		top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
 		top.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		top.add(buildHint(), BorderLayout.NORTH);
-		top.add(tabBar, BorderLayout.CENTER);
+
+		final JLabel hint = buildHint();
+		hint.setAlignmentX(Component.LEFT_ALIGNMENT);
+		top.add(hint);
+		top.add(Box.createVerticalStrut(4));
+
+		// Editable description, saved when Apply is clicked (Cancel/close leaves it unchanged).
+		descField = new JTextField(template.getDescription() == null ? "" : template.getDescription());
+		descField.setToolTipText("Shown to others when you share this template (up to 500 characters). Saved on Apply.");
+		final JPanel descRow = new JPanel(new BorderLayout(4, 0));
+		descRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		descRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		descRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, descField.getPreferredSize().height));
+		final JLabel descLabel = new JLabel("Description:");
+		descLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		descLabel.setFont(FontManager.getRunescapeSmallFont());
+		descRow.add(descLabel, BorderLayout.WEST);
+		descRow.add(descField, BorderLayout.CENTER);
+		top.add(descRow);
+		top.add(Box.createVerticalStrut(4));
+
+		tabBar.setAlignmentX(Component.LEFT_ALIGNMENT);
+		top.add(tabBar);
 
 		root.add(top, BorderLayout.NORTH);
 		root.add(scroll, BorderLayout.CENTER);
@@ -201,6 +227,18 @@ final class TemplateEditor
 		dialog.dispose();
 	}
 
+	// Saves the (edited) description, then commits the layout. Cancel or closing leaves the description as it was.
+	private void applyEdits()
+	{
+		String d = descField.getText().trim();
+		if (d.length() > 500)
+		{
+			d = d.substring(0, 500);
+		}
+		template.setDescription(d);
+		editor.finish();
+	}
+
 	private JLabel buildHint()
 	{
 		final JLabel hint = new JLabel("<html>Drag an item onto another slot to swap or insert. Right-click a "
@@ -212,35 +250,54 @@ final class TemplateEditor
 
 	private JPanel buildToolbar(Component parent)
 	{
-		final JPanel bar = new JPanel(new WrapLayout(FlowLayout.LEFT, 4, 4));
+		final JPanel bar = new JPanel(new BorderLayout());
 		bar.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-		// Apply commits the changes; closing (X) or Cancel discards them.
-		final JButton apply = button("Apply", editor::finish);
-		apply.setBackground(new Color(60, 110, 60));
-		bar.add(apply);
-		bar.add(button("Cancel", this::attemptClose));
+		// Left: the swap/insert toggle and the edit actions. WrapLayout flows onto a second row if narrow.
+		final JPanel left = new JPanel(new WrapLayout(FlowLayout.LEFT, 4, 4));
+		left.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-		bar.add(button("Add item", () -> ItemSearch.open(parent, itemIndex, id ->
+		// Swap/insert mode toggle: depressed (orange) = swap two slots; up = insert, shifting the rest.
+		final JToggleButton swap = new JToggleButton("Swap mode", swapMode);
+		swap.setFocusPainted(false);
+		swap.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
+		swap.setToolTipText("Depressed: swap two slots. Up: insert - move a slot, shifting the rest down.");
+		styleToggle(swap, swapMode);
+		swap.addActionListener(e ->
+		{
+			swapMode = swap.isSelected();
+			styleToggle(swap, swapMode);
+		});
+		left.add(swap);
+
+		left.add(button("Add item", () -> ItemSearch.open(parent, itemIndex, id ->
 		{
 			clientThread.invoke(() -> editor.addItemOrReport(tab, id, msg ->
 				SwingUtilities.invokeLater(() ->
 					JOptionPane.showMessageDialog(dialog, msg, "Already in layout", JOptionPane.INFORMATION_MESSAGE))));
 		})));
-		bar.add(button("Add filler", () -> editor.addItem(tab, BankTemplate.FILLER)));
-		bar.add(button("Add row", () -> editor.addRow(tab)));
-		bar.add(button("Clear tab", () -> editor.clearTab(tab)));
-		bar.add(button("Revert", editor::revert));
+		left.add(button("Add filler", () -> editor.addItem(tab, BankTemplate.FILLER)));
+		left.add(button("Add row", () -> editor.addRow(tab)));
+		left.add(button("Clear tab", () -> editor.clearTab(tab)));
+		left.add(button("Revert", editor::revert));
+		bar.add(left, BorderLayout.CENTER);
 
-		final JCheckBox swap = new JCheckBox("Swap mode");
-		swap.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		swap.setForeground(Color.WHITE);
-		swap.setFocusPainted(false);
-		swap.setToolTipText("On: clicking/dragging swaps two slots. Off: it moves a slot, shifting the rest.");
-		swap.addActionListener(e -> swapMode = swap.isSelected());
-		bar.add(swap);
+		// Right: Apply / Cancel pinned to the bottom-right corner. Apply commits; Cancel (or X) discards.
+		final JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 4));
+		right.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		right.add(button("Cancel", this::attemptClose));
+		final JButton apply = button("Apply", this::applyEdits);
+		apply.setBackground(new Color(60, 110, 60));
+		right.add(apply);
+		bar.add(right, BorderLayout.EAST);
 
 		return bar;
+	}
+
+	private static void styleToggle(JToggleButton b, boolean on)
+	{
+		b.setBackground(on ? ColorScheme.BRAND_ORANGE : ColorScheme.DARKER_GRAY_HOVER_COLOR);
+		b.setForeground(on ? Color.BLACK : Color.WHITE);
 	}
 
 	private JButton button(String text, Runnable action)
