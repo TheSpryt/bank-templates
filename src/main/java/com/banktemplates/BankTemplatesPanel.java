@@ -1334,9 +1334,10 @@ public class BankTemplatesPanel extends PluginPanel
 		return kind + " · " + items + (tabs > 1 ? " · " + tabs + " tabs" : "");
 	}
 
-	// Recompute the owned-items set on the client thread (reading client state isn't EDT-safe), then
-	// refresh the cards if it changed. Triggered when the local view is built.
-	private void refreshOwnedCanon()
+	// Recompute the owned-items set on the client thread (reading client state isn't EDT-safe), then refresh
+	// the cards if it changed. Triggered when the local view is built and whenever the bank container changes,
+	// so the "x / y items" counts fill in (and update) live without leaving and re-entering My Templates.
+	void refreshOwnedCanon()
 	{
 		clientThread.invoke(() ->
 		{
@@ -1344,7 +1345,12 @@ public class BankTemplatesPanel extends PluginPanel
 			if (!java.util.Objects.equals(owned, ownedCanon))
 			{
 				ownedCanon = owned;
-				rebuild();
+				// Only the local cards show these counts, so a rebuild is only needed there. Other views just
+				// keep the freshly-computed set for when the user returns to My Templates.
+				if (LOCAL.equals(mode))
+				{
+					rebuild();
+				}
 			}
 		});
 	}
