@@ -154,6 +154,8 @@ public class BankTemplatesPlugin extends Plugin
 		if (state == GameState.LOGGED_IN)
 		{
 			repositoryClient.setIdentity(client.getAccountHash());
+			// Load this account's cached bank counts (and pick up an account switch) without needing the bank open.
+			panel.refreshOwnedCanon();
 		}
 		else if (state == GameState.LOGIN_SCREEN)
 		{
