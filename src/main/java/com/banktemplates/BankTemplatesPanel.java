@@ -31,6 +31,7 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 import javax.swing.border.Border;
@@ -564,7 +565,7 @@ public class BankTemplatesPanel extends PluginPanel
 			final BankTemplatesConfig.ReorgDisplay d = BankTemplatesConfig.ReorgDisplay.fromLabel(selectedLabel);
 			text = d != null ? d.getDescription() : "";
 		}
-		return "<html><body style='width:185px'>" + escape(text) + "</body></html>";
+		return "<html><body style='width:165px'>" + escape(text) + "</body></html>";
 	}
 
 	private void addLocalSection(String name, List<BankTemplate> templates)
@@ -1223,9 +1224,11 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private JPanel buttonRow()
 	{
-		// Tight gaps so all the actions fit on one row; WrapLayout is just a safety net if they don't.
-		final JPanel buttons = new JPanel(new WrapLayout(FlowLayout.RIGHT, 2, 2));
+		// Left-aligned; WrapLayout flows onto a second row if they don't all fit. Min width 0 so the card can
+		// shrink to the panel width (forcing the wrap) instead of overflowing the right edge and clipping.
+		final JPanel buttons = new JPanel(new WrapLayout(FlowLayout.LEFT, 2, 2));
 		buttons.setOpaque(false);
+		buttons.setMinimumSize(new Dimension(0, 0));
 		return buttons;
 	}
 
@@ -1281,6 +1284,7 @@ public class BankTemplatesPanel extends PluginPanel
 	{
 		final JButton button = new JButton(text);
 		button.setFocusPainted(false);
+		button.setHorizontalAlignment(SwingConstants.CENTER);
 		button.setBackground(ColorScheme.DARKER_GRAY_HOVER_COLOR);
 		button.setForeground(Color.WHITE);
 		button.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
