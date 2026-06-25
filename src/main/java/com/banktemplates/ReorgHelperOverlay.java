@@ -709,10 +709,19 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			}
 			final int rank = cursor.getOrDefault(tt, 0);
 			final Rectangle b = widgets.get(k).getBounds();
-			if (b.width > 0 && targetRank.get(current.get(k)) != rank)
+			if (b.width > 0)
 			{
 				final int idx = targetRank.get(current.get(k));
-				drawTag(g, b, (idx / columns + 1) + "-" + (idx % columns + 1), config.reorgHighlightColor());
+				if (idx != rank)
+				{
+					// Right tab, wrong slot: tag it with the row-column it should sit at.
+					drawTag(g, b, (idx / columns + 1) + "-" + (idx % columns + 1), config.reorgHighlightColor());
+				}
+				else
+				{
+					// Right tab and right slot - a green tick to confirm it's already where it belongs.
+					drawCheckTag(g, b);
+				}
 			}
 			cursor.put(tt, rank + 1);
 		}
@@ -1462,9 +1471,9 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 	// identically on every platform regardless of which fonts are installed (macOS included).
 	private void drawInfinityTag(Graphics2D g, Rectangle b, Color color)
 	{
-		final float ox = 6.5f;        // how far each loop's control points spread out horizontally
+		final float ox = 9f;          // how far each loop's control points spread out horizontally (loop width)
 		final float oy = 4.5f;        // and vertically (loop height)
-		final float cx = b.x + b.width - 7f;
+		final float cx = b.x + b.width - 8.5f;
 		final float cy = b.y + b.height - 5f;
 		final GeneralPath p = new GeneralPath();
 		p.moveTo(cx, cy);
@@ -1476,6 +1485,26 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 		g.setStroke(new BasicStroke(1.4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 		g.setColor(color);
+		g.draw(p);
+		g.setStroke(old);
+		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+			aa != null ? aa : RenderingHints.VALUE_ANTIALIAS_DEFAULT);
+	}
+
+	// A small green tick in the slot's bottom-right, confirming an item is already in its correct slot.
+	private void drawCheckTag(Graphics2D g, Rectangle b)
+	{
+		final float bx = b.x + b.width - 11f;
+		final float by = b.y + b.height - 9f;
+		final GeneralPath p = new GeneralPath();
+		p.moveTo(bx, by + 4f);
+		p.lineTo(bx + 3f, by + 7f);
+		p.lineTo(bx + 9f, by);
+		final Object aa = g.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
+		final Stroke old = g.getStroke();
+		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		g.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+		g.setColor(new Color(80, 210, 90));
 		g.draw(p);
 		g.setStroke(old);
 		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
