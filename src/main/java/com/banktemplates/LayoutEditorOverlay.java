@@ -83,7 +83,10 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	{
 		// Editable whenever a user template is applied (always-on), or during an explicit edit session.
 		final BankTemplate template = layoutEditor.liveTemplate();
+		// Only edit in the bank when the editable template is the one actually applied/rendered. Editing a
+		// template from the side panel doesn't activate it, so its window edits must not touch the bank.
 		final boolean active = template != null
+			&& layoutEditor.liveOverBank()
 			&& (layoutEditor.isEditing() || (config.applyLayout() && !config.showReorgHelper()))
 			&& !BankLayoutRenderer.isBankFiltered(client);
 		if (!active)
