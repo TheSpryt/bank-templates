@@ -72,10 +72,10 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 
 	private static final Color SOURCE_COLOR = new Color(255, 165, 0);   // orange: item to move
 	private static final Color DONE_COLOR = new Color(110, 200, 110);
-	// Subtle, desaturated per-tab identity colours (index = tab number; 0 = main, unused). Step-by-step uses
-	// these to tint out-of-place items with their destination tab's colour and outline the tab buttons.
+	// Subtle, desaturated per-tab identity colours (index = tab number; 0 = the main/all-items tab). Colour-
+	// coding uses these to tint out-of-place items with their destination tab's colour and outline tab buttons.
 	private static final Color[] TAB_HINT = {
-		null,
+		new Color(170, 200, 225),
 		new Color(205, 80, 80),
 		new Color(210, 145, 60),
 		new Color(200, 190, 80),
@@ -139,8 +139,9 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		}
 
 		final BankTemplatesConfig.ReorgDisplay mode = config.reorgDisplay();
-		final boolean labels = mode == BankTemplatesConfig.ReorgDisplay.LABELS || mode == BankTemplatesConfig.ReorgDisplay.BOTH;
-		final boolean steps = mode == BankTemplatesConfig.ReorgDisplay.STEP_BY_STEP || mode == BankTemplatesConfig.ReorgDisplay.BOTH;
+		final boolean color = mode.isColor();
+		final boolean labels = mode.isLabels();
+		final boolean steps = mode.isSteps();
 
 		// In a Bank Tags tag tab, a search, or an Inventory Setups bank view the bank is filtered and can't be
 		// reorganised - guide the user back to the normal bank view (the all-items tab) first.
@@ -258,6 +259,13 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 
 		final Shape oldClip = graphics.getClip();
 
+		// Colour-coding is its own cue now (combinable with labels and step-by-step): tint out-of-place items
+		// and outline tabs with their destination colour, independent of whether step guidance is shown.
+		if (color)
+		{
+			drawColorHints(graphics, itemContainer, widgets, current, itemTab, targetTab);
+		}
+
 		if (labels)
 		{
 			graphics.setClip(itemContainer.getBounds());
@@ -267,7 +275,6 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 
 		if (steps)
 		{
-			drawColorHints(graphics, itemContainer, widgets, current, itemTab, targetTab);
 			drawSteps(graphics, itemContainer, template, currentTab, widgets, current, itemTab, targetTab, owned);
 			// Let the user skip whatever single move is currently shown - the next step then appears.
 			if (currentStepSig != null)
@@ -649,12 +656,13 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		}
 		g.setStroke(oldStroke);
 
-		// Wrong-tab items: a faint wash of their destination tab's colour.
+		// Wrong-tab items: a faint wash of their destination tab's colour (including items that belong in the
+		// main/all-items tab but are currently sitting in a numbered tab).
 		g.setClip(itemContainer.getBounds());
 		for (int k = 0; k < current.size(); k++)
 		{
 			final Integer tt = targetTab.get(current.get(k));
-			if (tt == null || tt == BankTemplate.MAIN_TAB || itemTab[k] == tt)
+			if (tt == null || itemTab[k] == tt)
 			{
 				continue;
 			}
@@ -671,7 +679,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 
 	private static Color hintColor(int tab)
 	{
-		return tab >= 1 && tab < TAB_HINT.length ? TAB_HINT[tab] : null;
+		return tab >= 0 && tab < TAB_HINT.length ? TAB_HINT[tab] : null;
 	}
 
 	private void drawLabels(Graphics2D g, List<Widget> widgets, List<Integer> current, int[] itemTab,
