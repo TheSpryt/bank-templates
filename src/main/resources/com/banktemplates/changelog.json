@@ -1,5 +1,21 @@
 [
   {
+    "version": "1.4",
+    "notes": [
+      "My Templates: each card now shows how many of its items you already own, as \"x / y items\", and the count fills in and updates live as your bank changes.",
+      "My Templates: the 'Remove Template' button is now 'Disable Template', and a template card's Use/Active control is an Enable/Disable toggle - click an active template's Disable to switch it off.",
+      "My Templates: shorter, tidier cards, with the reorganise mode moved into its own description card.",
+      "A new empty layout now applies itself automatically when you create it, and you can Edit a template in My Templates without activating it.",
+      "Browse: cards now show how much of each template you own (\"x / y items\"), and a new 'Closest to my bank' sort orders the results by how many of their items you already have.",
+      "Preview and Edit windows: a consistent width whatever the description, tabs on a single row by default (resize the window to wrap them), and the template's description is shown - and editable, across multiple lines, in the editor.",
+      "Layout editor: Swap mode is now a toggle button (pressed = swap, released = insert), and Apply/Cancel sit in the bottom-right corner.",
+      "Reorganise helper: colour-coding is now its own display option you can combine with Labels and Step-by-step. It tints out-of-place items and the tab buttons with their destination tab's colour so you can see where things belong at a glance.",
+      "Reorganise helper: each bank tab's colour can be customised in the plugin settings ('Reorganise tab colours'), and the main/all-items tab now has its own colour too.",
+      "Reorganise helper (labels): labels now sit in the bottom-right of each slot, clear of the stack count; items already in the right slot get a green tick; and the main tab is shown as an infinity symbol.",
+      "Reorganise helper (step-by-step): rebuilt the sort into a single forward pass - it moves each item to its tab as you reach it (creating new tabs inline along the way), then sorts each tab, without sending you back to earlier slots or looping."
+    ]
+  },
+  {
     "version": "1.3",
     "notes": [
       "Layout editor: the Add-item search now finds every item, including untradeable ones such as Barrows gloves, Arclight and Emberlight. It previously searched only tradeable (Grand Exchange) items.",
