@@ -1246,18 +1246,34 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			Arrays.fill(tabs, currentTab);
 			return tabs;
 		}
+		// All-items view: assign each visible item to its native tab. Walk the raw bank container by slot,
+		// charging every slot against the tab-count varbits (tabs are packed by slot budget, blanks included),
+		// but only emitting a tab for slots that pass the SAME filter as `current` (real, non-blank items).
+		// Counting filtered widgets against the varbits instead would drift whenever a tab holds a blank slot,
+		// misplacing the main-tab boundary - which made tabSorted and drawPositionStep disagree and loop.
+		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank == null)
+		{
+			Arrays.fill(tabs, BankTemplate.MAIN_TAB);
+			return tabs;
+		}
+		final Item[] items = bank.getItems();
+		int out = 0;
 		int idx = 0;
-		for (int t = 1; t <= 9; t++)
+		for (int t = 1; t <= 9 && out < n; t++)
 		{
 			final int count = client.getVarbitValue(TAB_COUNT_VARBITS[t - 1]);
-			for (int k = 0; k < count && idx < n; k++, idx++)
+			for (int k = 0; k < count && idx < items.length && out < n; k++, idx++)
 			{
-				tabs[idx] = t;
+				if (items[idx] != null && items[idx].getId() > 0 && items[idx].getId() != ItemID.BLANKOBJECT)
+				{
+					tabs[out++] = t;
+				}
 			}
 		}
-		while (idx < n)
+		while (out < n)
 		{
-			tabs[idx++] = BankTemplate.MAIN_TAB;
+			tabs[out++] = BankTemplate.MAIN_TAB;
 		}
 		return tabs;
 	}
