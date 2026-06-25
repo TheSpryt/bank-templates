@@ -67,8 +67,11 @@ public class BankTemplatesPanel extends PluginPanel
 	private static final int MAX_NAME_LENGTH = 25;
 	private static final int MAX_DESCRIPTION_LENGTH = 500;
 
-	private static final String[] SORT_LABELS = {"Most imported", "Newest", "Popular (30 days)"};
-	private static final String[] SORT_KEYS = {"imported", "newest", "popular"};
+	private static final String[] SORT_LABELS = {"Most imported", "Newest", "Popular (30 days)", "Closest to my bank"};
+	private static final String[] SORT_KEYS = {"imported", "newest", "popular", "closest"};
+	// Client-only sort: the server can't rank by your bank (and we don't send it your items), so results are
+	// fetched in this base order and re-sorted locally by how much of each template you already own.
+	private static final String CLOSEST_SORT = "closest";
 
 	private final TemplateManager templateManager;
 	private final ItemManager itemManager;
@@ -691,6 +694,13 @@ public class BankTemplatesPanel extends PluginPanel
 		listContainer.add(count);
 		listContainer.add(Box.createVerticalStrut(6));
 
+		// Re-sort the fetched page by how much of each template you own (most-owned first). Done here so it
+		// always reflects the latest bank contents, even on a plain rebuild.
+		if (CLOSEST_SORT.equals(browseSort) && ownedCanon != null)
+		{
+			browseResults.sort((a, b) -> Double.compare(ownershipRatio(b), ownershipRatio(a)));
+		}
+
 		for (RemoteTemplate rt : browseResults)
 		{
 			listContainer.add(buildRemoteCard(rt));
@@ -841,7 +851,9 @@ public class BankTemplatesPanel extends PluginPanel
 		browseStatus = "Searching…";
 		browseResults.clear();
 		rebuildOnEdt();
-		repositoryClient.search(searchBar.getText(), browseSort, browseOffset,
+		// "Closest to my bank" is sorted client-side (see buildBrowseView); fetch in a neutral order.
+		final String serverSort = CLOSEST_SORT.equals(browseSort) ? "imported" : browseSort;
+		repositoryClient.search(searchBar.getText(), serverSort, browseOffset,
 			page -> SwingUtilities.invokeLater(() ->
 			{
 				browseResults.clear();
@@ -1202,7 +1214,38 @@ public class BankTemplatesPanel extends PluginPanel
 		votes.add(author);
 
 		text.add(votes);
+
+		final JLabel meta = new JLabel(remoteMeta(rt));
+		meta.setFont(FontManager.getRunescapeSmallFont());
+		meta.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		meta.setAlignmentX(Component.LEFT_ALIGNMENT);
+		text.add(meta);
 		return text;
+	}
+
+	// "x / y items" (x = how many of the template's items you own) plus tab count, for a Browse card. Falls
+	// back to "y items" until the bank has loaded.
+	private String remoteMeta(RemoteTemplate rt)
+	{
+		final BankTemplate t = rt.toTemplate();
+		final int total = t.itemCount();
+		final int tabs = t.tabCount();
+		final String items = ownedCanon != null
+			? ownedOfTemplate(t, ownedCanon) + " / " + total + " items"
+			: total + " items";
+		return items + (tabs > 1 ? " · " + tabs + " tabs" : "");
+	}
+
+	// Fraction of a remote template's items the player currently owns (0 when the bank isn't known yet).
+	private double ownershipRatio(RemoteTemplate rt)
+	{
+		if (ownedCanon == null)
+		{
+			return 0;
+		}
+		final BankTemplate t = rt.toTemplate();
+		final int total = t.itemCount();
+		return total == 0 ? 0 : ownedOfTemplate(t, ownedCanon) / (double) total;
 	}
 
 	private JLabel voteLabel(String html, Color color)
@@ -1345,9 +1388,9 @@ public class BankTemplatesPanel extends PluginPanel
 			if (!java.util.Objects.equals(owned, ownedCanon))
 			{
 				ownedCanon = owned;
-				// Only the local cards show these counts, so a rebuild is only needed there. Other views just
-				// keep the freshly-computed set for when the user returns to My Templates.
-				if (LOCAL.equals(mode))
+				// My Templates and Browse cards both show these counts, so rebuild on either (a Browse rebuild
+				// reuses the cached results - no re-fetch). The Updates view just keeps the freshly-computed set.
+				if (LOCAL.equals(mode) || BROWSE.equals(mode))
 				{
 					rebuild();
 				}
