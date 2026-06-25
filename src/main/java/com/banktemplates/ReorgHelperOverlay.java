@@ -730,7 +730,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			currentStepSig = sig;
 			final Widget from = widgets.get(k);
 			final String name = client.getItemDefinition(from.getItemId()).getName();
-			outline(g, from.getBounds(), SOURCE_COLOR);
+			outlineInContainer(g, itemContainer, from.getBounds(), SOURCE_COLOR);
 			final Widget tabBtn = buttons.get(tt);
 			if (tabBtn != null)
 			{
@@ -768,7 +768,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			{
 				currentStepSig = bestSig;
 				final Widget from = widgets.get(bestK);
-				outline(g, from.getBounds(), SOURCE_COLOR);
+				outlineInContainer(g, itemContainer, from.getBounds(), SOURCE_COLOR);
 				final Color addColor = hintColor(lowest);
 				pulseRect(g, addBtn.getBounds(), addColor != null ? addColor : config.reorgHighlightColor());
 				final String name = client.getItemDefinition(from.getItemId()).getName();
@@ -803,7 +803,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				}
 				currentStepSig = "F:" + deficitTab;
 				final Widget from = widgets.get(k);
-				outline(g, from.getBounds(), SOURCE_COLOR);
+				outlineInContainer(g, itemContainer, from.getBounds(), SOURCE_COLOR);
 				final Widget tabBtn = tabButtons().get(deficitTab);
 				final String tabName = deficitTab == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + deficitTab;
 				if (tabBtn != null)
@@ -864,7 +864,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			{
 				pulseRect(g, srcBtn.getBounds(), config.reorgHighlightColor());
 			}
-			outline(g, from.getBounds(), SOURCE_COLOR);
+			outlineInContainer(g, itemContainer, from.getBounds(), SOURCE_COLOR);
 			final String srcName = itemTab[k] == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + itemTab[k];
 			setBankTitle("Open " + srcName + " to move " + name, Color.WHITE, null, false);
 			return;
@@ -1265,6 +1265,16 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		g.setStroke(new BasicStroke(2f));
 		g.drawRect(b.x - 1, b.y - 1, b.width + 2, b.height + 2);
 		g.setStroke(old);
+	}
+
+	// Like outline(), but clipped to the item container so a highlight for an item scrolled out of the bank
+	// view is clipped to the items window instead of rendering over the buttons below it.
+	private void outlineInContainer(Graphics2D g, Widget itemContainer, Rectangle b, Color c)
+	{
+		final Shape old = g.getClip();
+		g.setClip(itemContainer.getBounds());
+		outline(g, b, c);
+		g.setClip(old);
 	}
 
 	private void outline(Graphics2D g, Rectangle b, Color c)
