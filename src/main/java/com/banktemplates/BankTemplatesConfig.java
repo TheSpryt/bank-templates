@@ -131,22 +131,54 @@ public interface BankTemplatesConfig extends Config
 		return ReorgDisplay.STEP_BY_STEP;
 	}
 
+	// Reorganise display styles. Colour-coding, labels and step-by-step are three independent cues that can be
+	// combined, enumerated here as the selectable combinations. The constant NAMES of the original three
+	// (STEP_BY_STEP, LABELS, BOTH) are kept so existing saved settings still resolve.
 	enum ReorgDisplay
 	{
-		STEP_BY_STEP("Step-by-step",
-			"Sorts items into the right tabs first, then guides each one into its exact slot, one move at a time - choosing swap or insert to keep the number of drags down. Items in the wrong tab are tinted with their destination tab's colour."),
-		LABELS("Labels",
+		COLOR("Colour-coded", true, false, false,
+			"Tints each out-of-place item and every tab with the destination tab's colour, so you can see where things belong at a glance."),
+		LABELS("Labels", false, true, false,
 			"Tags every out-of-place item with where it belongs: first its destination tab, then its row and column within that tab."),
-		BOTH("Labels + step-by-step",
-			"Shows the destination tags on every item and the step-by-step guidance at the same time.");
+		STEP_BY_STEP("Step-by-step", false, false, true,
+			"Sorts items into the right tabs first, then guides each one into its exact slot, one move at a time - choosing swap or insert to keep the number of drags down."),
+		COLOR_LABELS("Colour-coded + Labels", true, true, false,
+			"Destination-tab colour-coding and labels together: each item tinted by where it belongs, with a tag for its exact tab, row and column."),
+		COLOR_STEP_BY_STEP("Colour-coded + Step-by-step", true, false, true,
+			"Destination-tab colour-coding while you are guided through each move, one at a time."),
+		BOTH("Labels + Step-by-step", false, true, true,
+			"Shows the destination tags on every item and the step-by-step guidance at the same time."),
+		COLOR_BOTH("Colour-coded + Labels + Step-by-step", true, true, true,
+			"Everything at once: destination-tab colour-coding, labels, and step-by-step guidance.");
 
 		private final String label;
+		private final boolean color;
+		private final boolean labels;
+		private final boolean steps;
 		private final String description;
 
-		ReorgDisplay(String label, String description)
+		ReorgDisplay(String label, boolean color, boolean labels, boolean steps, String description)
 		{
 			this.label = label;
+			this.color = color;
+			this.labels = labels;
+			this.steps = steps;
 			this.description = description;
+		}
+
+		public boolean isColor()
+		{
+			return color;
+		}
+
+		public boolean isLabels()
+		{
+			return labels;
+		}
+
+		public boolean isSteps()
+		{
+			return steps;
 		}
 
 		public String getDescription()
