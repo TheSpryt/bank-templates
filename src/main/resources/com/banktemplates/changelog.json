@@ -6,7 +6,7 @@
       "My Templates: the 'Remove Template' button is now 'Disable Template', and a template card's Use/Active control is an Enable/Disable toggle - click an active template's Disable to switch it off.",
       "My Templates: shorter, tidier cards, with the reorganise mode moved into its own description card.",
       "A new empty layout now applies itself automatically when you create it, and you can Edit a template in My Templates without activating it.",
-      "Browse: cards now show how much of each template you own (\"x / y items\"), and a new 'Closest to my bank' sort orders the results by how many of their items you already have.",
+      "Browse: cards now show how much of each template you own (\"x / y items\"), and a new 'Items owned' sort orders the results by how many of their items you already have.",
       "Preview and Edit windows: a consistent width whatever the description, tabs on a single row by default (resize the window to wrap them), and the template's description is shown - and editable, across multiple lines, in the editor.",
       "Layout editor: Swap mode is now a toggle button (pressed = swap, released = insert), and Apply/Cancel sit in the bottom-right corner.",
       "Reorganise helper: colour-coding is now its own display option you can combine with Labels and Step-by-step. It tints out-of-place items and the tab buttons with their destination tab's colour so you can see where things belong at a glance.",
