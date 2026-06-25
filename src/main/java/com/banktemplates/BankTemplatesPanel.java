@@ -33,6 +33,7 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
@@ -67,7 +68,7 @@ public class BankTemplatesPanel extends PluginPanel
 	private static final int MAX_NAME_LENGTH = 25;
 	private static final int MAX_DESCRIPTION_LENGTH = 500;
 
-	private static final String[] SORT_LABELS = {"Most imported", "Newest", "Popular (30 days)", "Closest to my bank"};
+	private static final String[] SORT_LABELS = {"Most imported", "Newest", "Popular (30 days)", "Items owned"};
 	private static final String[] SORT_KEYS = {"imported", "newest", "popular", "closest"};
 	// Client-only sort: the server can't rank by your bank (and we don't send it your items), so results are
 	// fetched in this base order and re-sorted locally by how much of each template you already own.
@@ -83,7 +84,10 @@ public class BankTemplatesPanel extends PluginPanel
 	private final LayoutEditor layoutEditor;
 	private final ItemIndex itemIndex;
 
-	private final JPanel listContainer = new JPanel();
+	// Tracks the scroll viewport's width so it never grows wider than the panel (e.g. a long dropdown item or
+	// label can't push it out). Without this, "full-width" buttons stretch past the visible area and their
+	// centred text ends up sitting left of centre.
+	private final JPanel listContainer = new ListPanel();
 	private final SearchBar searchBar = new SearchBar();
 	private final JPanel tabsPanel = new JPanel();
 	private final JButton localTab = new JButton("My Templates");
@@ -1354,6 +1358,41 @@ public class BankTemplatesPanel extends PluginPanel
 		button.setForeground(Color.WHITE);
 		button.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
 		return button;
+	}
+
+	// A vertical BoxLayout list that always matches the scroll viewport's width (never wider), so a wide child
+	// can't push the content out and shift full-width buttons' centred text off to the left.
+	private static final class ListPanel extends JPanel implements Scrollable
+	{
+		@Override
+		public Dimension getPreferredScrollableViewportSize()
+		{
+			return getPreferredSize();
+		}
+
+		@Override
+		public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction)
+		{
+			return 16;
+		}
+
+		@Override
+		public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction)
+		{
+			return Math.max(16, visibleRect.height - 16);
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportWidth()
+		{
+			return true;
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportHeight()
+		{
+			return false;
+		}
 	}
 
 	private JButton iconButton(String text, String tooltip, Runnable action)
