@@ -603,6 +603,38 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				g.drawRect(r.x + 1, r.y + 1, r.width - 2, r.height - 2);
 			}
 		}
+
+		// + (new tab) button: when the template needs a tab you don't have yet, colour it with that tab's
+		// colour so it matches the items destined for it.
+		final Widget addBtn = addTabButton();
+		if (addBtn != null && !addBtn.isHidden())
+		{
+			int existing = 0;
+			for (int key : tabButtons().keySet())
+			{
+				if (key != BankTemplate.MAIN_TAB && key > existing)
+				{
+					existing = key;
+				}
+			}
+			int lowestMissing = Integer.MAX_VALUE;
+			for (int k = 0; k < current.size(); k++)
+			{
+				final Integer tt = targetTab.get(current.get(k));
+				if (tt != null && tt != BankTemplate.MAIN_TAB && tt > existing && tt < lowestMissing)
+				{
+					lowestMissing = tt;
+				}
+			}
+			final Color c = lowestMissing != Integer.MAX_VALUE ? hintColor(lowestMissing) : null;
+			final Rectangle r = addBtn.getBounds();
+			if (c != null && r.width > 0)
+			{
+				g.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), 150));
+				g.setStroke(new BasicStroke(2f));
+				g.drawRect(r.x + 1, r.y + 1, r.width - 2, r.height - 2);
+			}
+		}
 		g.setStroke(oldStroke);
 
 		// Wrong-tab items: a faint wash of their destination tab's colour.
@@ -752,7 +784,8 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				currentStepSig = bestSig;
 				final Widget from = widgets.get(bestK);
 				outline(g, from.getBounds(), SOURCE_COLOR);
-				pulseRect(g, addBtn.getBounds(), config.reorgHighlightColor());
+				final Color addColor = hintColor(lowest);
+				pulseRect(g, addBtn.getBounds(), addColor != null ? addColor : config.reorgHighlightColor());
 				final String name = client.getItemDefinition(from.getItemId()).getName();
 				setBankTitle("Drag " + name + " to a new tab (the + button)", Color.WHITE, null, false);
 				return;
