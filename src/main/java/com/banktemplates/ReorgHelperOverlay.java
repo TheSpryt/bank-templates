@@ -72,21 +72,6 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 
 	private static final Color SOURCE_COLOR = new Color(255, 165, 0);   // orange: item to move
 	private static final Color DONE_COLOR = new Color(110, 200, 110);
-	// Subtle, desaturated per-tab identity colours (index = tab number; 0 = the main/all-items tab). Colour-
-	// coding uses these to tint out-of-place items with their destination tab's colour and outline tab buttons.
-	private static final Color[] TAB_HINT = {
-		new Color(170, 200, 225),
-		new Color(205, 80, 80),
-		new Color(210, 145, 60),
-		new Color(200, 190, 80),
-		new Color(95, 175, 95),
-		new Color(85, 135, 205),
-		new Color(155, 110, 200),
-		new Color(205, 120, 170),
-		new Color(85, 190, 180),
-		new Color(180, 180, 185),
-	};
-
 	private static final int[] TAB_COUNT_VARBITS = {
 		VarbitID.BANK_TAB_1, VarbitID.BANK_TAB_2, VarbitID.BANK_TAB_3, VarbitID.BANK_TAB_4,
 		VarbitID.BANK_TAB_5, VarbitID.BANK_TAB_6, VarbitID.BANK_TAB_7, VarbitID.BANK_TAB_8,
@@ -677,9 +662,35 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		g.setClip(oldClip);
 	}
 
-	private static Color hintColor(int tab)
+	// Per-tab identity colour from config (index = tab number; 0 = the main/all-items tab). null for any tab
+	// outside 0..9.
+	private Color hintColor(int tab)
 	{
-		return tab >= 0 && tab < TAB_HINT.length ? TAB_HINT[tab] : null;
+		switch (tab)
+		{
+			case 0:
+				return config.reorgTabColorMain();
+			case 1:
+				return config.reorgTabColor1();
+			case 2:
+				return config.reorgTabColor2();
+			case 3:
+				return config.reorgTabColor3();
+			case 4:
+				return config.reorgTabColor4();
+			case 5:
+				return config.reorgTabColor5();
+			case 6:
+				return config.reorgTabColor6();
+			case 7:
+				return config.reorgTabColor7();
+			case 8:
+				return config.reorgTabColor8();
+			case 9:
+				return config.reorgTabColor9();
+			default:
+				return null;
+		}
 	}
 
 	private void drawLabels(Graphics2D g, List<Widget> widgets, List<Integer> current, int[] itemTab,
@@ -1415,10 +1426,6 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 	{
 		g.setFont(g.getFont().deriveFont(Font.PLAIN, 12f));
 		final FontMetrics fm = g.getFontMetrics();
-		final int w = fm.stringWidth(text) + 4;
-		final int h = fm.getHeight() - 2;
-		g.setColor(new Color(0, 0, 0, 200));
-		g.fillRect(b.x + 1, b.y + 1, w, h);
 		g.setColor(color);
 		g.drawString(text, b.x + 3, b.y + 1 + fm.getAscent() - 1);
 	}
