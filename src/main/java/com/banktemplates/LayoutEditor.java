@@ -83,6 +83,18 @@ public class LayoutEditor
 		return active != null && !active.isPreset() ? active : null;
 	}
 
+	/**
+	 * True when the live (editable) template is the one currently applied/rendered, so in-bank editing is
+	 * valid. Editing a template from the side panel does NOT activate it, so its window edits don't render
+	 * over the bank - in-bank editing stays off until that template is the active one.
+	 */
+	boolean liveOverBank()
+	{
+		final BankTemplate t = liveTemplate();
+		final BankTemplate a = templateManager.getActive();
+		return t != null && a != null && t.getName().equals(a.getName());
+	}
+
 	/** True when the bank should show {@code template} in editable form. */
 	boolean isEditing(BankTemplate template)
 	{
@@ -91,8 +103,9 @@ public class LayoutEditor
 	}
 
 	/**
-	 * Begins editing a user template. Makes it the active template so it renders over the bank, and
-	 * snapshots it for {@link #revert()}. Presets and nulls are rejected.
+	 * Begins editing a user template in the side-panel window. Does NOT activate it - the bank keeps showing
+	 * whatever template is currently applied, so you can edit a template without changing your bank view.
+	 * Snapshots it for {@link #revert()}. Presets and nulls are rejected.
 	 */
 	boolean start(BankTemplate template)
 	{
@@ -103,7 +116,6 @@ public class LayoutEditor
 		this.target = template;
 		this.snapshot = template.copy();
 		this.editing = true;
-		templateManager.setActive(template);
 		notifyChanged();
 		return true;
 	}
