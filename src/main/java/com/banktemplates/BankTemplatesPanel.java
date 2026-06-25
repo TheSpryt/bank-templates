@@ -19,7 +19,9 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.swing.BorderFactory;
@@ -83,6 +85,9 @@ public class BankTemplatesPanel extends PluginPanel
 	private final BankTemplatesConfig config;
 	private final LayoutEditor layoutEditor;
 	private final ItemIndex itemIndex;
+	private final ScheduledExecutorService executor;
+	// Persists each account's owned-item set so "x / y items" counts can show before the bank loads this session.
+	private final OwnedBankCache ownedCache;
 
 	// Tracks the scroll viewport's width so it never grows wider than the panel (e.g. a long dropdown item or
 	// label can't push it out). Without this, "full-width" buttons stretch past the visible area and their
@@ -100,9 +105,12 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private String mode = LOCAL;
 	private String query = "";
-	// Variant-collapsed ids the player owns in their bank (qty > 0), for the "x / y items" card meta.
-	// Computed on the client thread (reading client state isn't EDT-safe); null until the bank has loaded.
+	// Variant-collapsed ids the player owns in their bank (qty > 0), for the "x / y items" card meta. Computed
+	// on the client thread (reading client state isn't EDT-safe), or loaded from the per-account cache until the
+	// live bank has loaded; null when neither is available yet.
 	private volatile Set<Integer> ownedCanon;
+	// The account ownedCanon belongs to, so it's discarded (and reloaded) when the player switches accounts.
+	private volatile long ownedAccountHash = -1;
 
 	private final List<RemoteTemplate> browseResults = new ArrayList<>();
 	private String browseStatus;
@@ -119,7 +127,7 @@ public class BankTemplatesPanel extends PluginPanel
 	@Inject
 	BankTemplatesPanel(TemplateManager templateManager, ItemManager itemManager, TemplateRepositoryClient repositoryClient,
 		Client client, ClientThread clientThread, ConfigManager configManager, BankTemplatesConfig config,
-		LayoutEditor layoutEditor, ItemIndex itemIndex, Gson gson)
+		LayoutEditor layoutEditor, ItemIndex itemIndex, ScheduledExecutorService executor, Gson gson)
 	{
 		// Don't let PluginPanel wrap us in its own scrollpane - we manage our own so the Updates bar can
 		// stay pinned to the bottom while only the template list scrolls.
@@ -133,6 +141,8 @@ public class BankTemplatesPanel extends PluginPanel
 		this.config = config;
 		this.layoutEditor = layoutEditor;
 		this.itemIndex = itemIndex;
+		this.executor = executor;
+		this.ownedCache = new OwnedBankCache(gson);
 		this.latestUpdate = Changelog.latest(gson);
 		this.allUpdates = Changelog.all(gson);
 
@@ -1430,18 +1440,61 @@ public class BankTemplatesPanel extends PluginPanel
 	{
 		clientThread.invoke(() ->
 		{
-			final Set<Integer> owned = ownedBankCanonical();
-			if (!java.util.Objects.equals(owned, ownedCanon))
+			final long accountHash = client.getAccountHash();
+			// Switched account (or logged out): the old set belonged to a different bank - drop it so the new
+			// account's live bank or cache fills in instead.
+			if (accountHash != ownedAccountHash)
 			{
-				ownedCanon = owned;
-				// My Templates and Browse cards both show these counts, so rebuild on either (a Browse rebuild
-				// reuses the cached results - no re-fetch). The Updates view just keeps the freshly-computed set.
-				if (LOCAL.equals(mode) || BROWSE.equals(mode))
+				ownedAccountHash = accountHash;
+				ownedCanon = null;
+				countsChanged();
+			}
+
+			final Set<Integer> live = ownedBankCanonical();
+			if (live != null)
+			{
+				if (!Objects.equals(live, ownedCanon))
 				{
-					rebuild();
+					ownedCanon = live;
+					countsChanged();
+					// Persist this account's latest snapshot (off the client thread - file IO).
+					if (accountHash != -1)
+					{
+						executor.execute(() -> ownedCache.put(accountHash, live));
+					}
 				}
 			}
+			else if (ownedCanon == null && accountHash != -1)
+			{
+				// Bank not loaded yet - show the last-known snapshot for this account until it recalculates.
+				executor.execute(() ->
+				{
+					final Set<Integer> cached = ownedCache.get(accountHash);
+					if (cached != null)
+					{
+						SwingUtilities.invokeLater(() ->
+						{
+							// Only if the live bank still hasn't taken over and we're still on this account.
+							if (ownedCanon == null && accountHash == ownedAccountHash)
+							{
+								ownedCanon = cached;
+								countsChanged();
+							}
+						});
+					}
+				});
+			}
 		});
+	}
+
+	// The "x / y items" counts are shown on My Templates and Browse cards, so rebuild on either (a Browse
+	// rebuild reuses the cached results - no re-fetch). The Updates view just keeps the freshly-computed set.
+	private void countsChanged()
+	{
+		if (LOCAL.equals(mode) || BROWSE.equals(mode))
+		{
+			rebuild();
+		}
 	}
 
 	// Variant-collapsed ids the player owns (qty > 0). Bank placeholders (qty 0) are excluded, so they
