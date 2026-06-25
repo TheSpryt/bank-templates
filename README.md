@@ -87,7 +87,8 @@ If you'd rather rearrange your *real* bank to match a template: select the templ
 virtual layout) and guides you through the moves. **You** drag the items yourself; it never moves
 anything. Untick it to go back to the virtual layout.
 
-You can choose how it guides you (from the side panel): **Labels**, **Step-by-step**, or both.
+You can choose how it guides you (from the side panel): **Labels**, **Step-by-step**, **Drunken Sailor**,
+or both Labels and Step-by-step together.
 
 - **Labels** tag each out-of-place item with where it needs to go: first its destination tab, then its
   row and column within that tab.
@@ -97,6 +98,8 @@ You can choose how it guides you (from the side panel): **Labels**, **Step-by-st
   exact number to enter, or to use **All** when they'd fill your bank, with a **Skip** option); it
   points you to open the tab an item is in before you drag it; and it helps you create extra tabs (drag
   to the **+**) when a template has more tabs than you currently do.
+- **Drunken Sailor** is colour-only, no text to read: from the stowaways tab (∞), drag each item to the
+  same-coloured numbered tab; then within each tab, drag red items into place until they turn green.
 
 Item kits and alternate versions of an item (charged/uncharged, degraded, recoloured, and so on) count
 as the same item, so the helper won't flag a slot just because you hold a different variant. If a Bank

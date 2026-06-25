@@ -133,21 +133,47 @@ public interface BankTemplatesConfig extends Config
 
 	enum ReorgDisplay
 	{
-		STEP_BY_STEP("Step-by-step"),
-		LABELS("Labels"),
-		BOTH("Labels + step-by-step");
+		STEP_BY_STEP("Step-by-step",
+			"Highlights one item and its exact destination slot. Picks swap or insert mode to minimise total drags."),
+		LABELS("Labels",
+			"Tags every out-of-place item with its target tab number or row-column position. No step-by-step guidance."),
+		BOTH("Labels + step-by-step",
+			"Shows destination tags on all items and step-by-step guidance at the same time."),
+		DRUNKEN_SAILOR("Drunken Sailor",
+			"Colour-only, no labels to read. Drag items to the same-coloured tab, then drag red items "
+			+ "into place within each tab until it's all green.");
 
 		private final String label;
+		private final String description;
 
-		ReorgDisplay(String label)
+		ReorgDisplay(String label, String description)
 		{
 			this.label = label;
+			this.description = description;
+		}
+
+		public String getDescription()
+		{
+			return description;
 		}
 
 		@Override
 		public String toString()
 		{
 			return label;
+		}
+
+		// Reverse lookup from the dropdown label (toString()), since valueOf() only matches constant names.
+		public static ReorgDisplay fromLabel(String label)
+		{
+			for (ReorgDisplay d : values())
+			{
+				if (d.label.equals(label))
+				{
+					return d;
+				}
+			}
+			return null;
 		}
 	}
 

@@ -488,14 +488,17 @@ public class BankTemplatesPanel extends PluginPanel
 		listContainer.add(newButton);
 
 		listContainer.add(Box.createVerticalStrut(8));
-		final JPanel reorgRow = new JPanel(new BorderLayout(6, 0));
-		reorgRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		reorgRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-		reorgRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-		final JLabel reorgLabel = new JLabel("Reorganise");
+		final JPanel reorgBlock = new JPanel();
+		reorgBlock.setLayout(new BoxLayout(reorgBlock, BoxLayout.Y_AXIS));
+		reorgBlock.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		reorgBlock.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		final JLabel reorgLabel = new JLabel("Reorganise:");
 		reorgLabel.setForeground(Color.WHITE);
 		reorgLabel.setToolTipText("Guide for rearranging your real bank to match the active template");
-		reorgRow.add(reorgLabel, BorderLayout.WEST);
+		reorgLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		reorgBlock.add(reorgLabel);
+		reorgBlock.add(Box.createVerticalStrut(2));
 
 		final String off = "Off";
 		final JComboBox<String> reorgMode = new JComboBox<>();
@@ -506,6 +509,26 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		reorgMode.setSelectedItem(config.showReorgHelper() ? config.reorgDisplay().toString() : off);
 		reorgMode.setFocusable(false);
+		reorgMode.setAlignmentX(Component.LEFT_ALIGNMENT);
+		reorgMode.setMaximumSize(new Dimension(Integer.MAX_VALUE, reorgMode.getPreferredSize().height));
+		reorgBlock.add(reorgMode);
+
+		// Dark card with orange left accent — styled directly on the label so BoxLayout doesn't
+		// stretch a wrapper panel beyond the text height.
+		final String initialSel = config.showReorgHelper() ? config.reorgDisplay().toString() : off;
+		final JLabel reorgDesc = new JLabel("<html><body style='width:148px'>" + descriptionFor(initialSel, off) + "</body></html>");
+		reorgDesc.setForeground(Color.LIGHT_GRAY);
+		reorgDesc.setFont(reorgDesc.getFont().deriveFont(13f));
+		reorgDesc.setOpaque(true);
+		reorgDesc.setBackground(new Color(30, 30, 30));
+		reorgDesc.setAlignmentX(Component.LEFT_ALIGNMENT);
+		reorgDesc.setMaximumSize(new Dimension(Integer.MAX_VALUE, reorgDesc.getPreferredSize().height + 16));
+		reorgDesc.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 3, 0, 0, ColorScheme.BRAND_ORANGE),
+			BorderFactory.createEmptyBorder(4, 6, 4, 4)));
+		reorgBlock.add(Box.createVerticalStrut(4));
+		reorgBlock.add(reorgDesc);
+
 		reorgMode.addActionListener(e ->
 		{
 			final String sel = (String) reorgMode.getSelectedItem();
@@ -525,10 +548,13 @@ public class BankTemplatesPanel extends PluginPanel
 				}
 				configManager.setConfiguration(BankTemplatesConfig.GROUP, "showReorgHelper", true);
 			}
+			reorgDesc.setText("<html><body style='width:148px'>" + descriptionFor(sel, off) + "</body></html>");
+			reorgDesc.setMaximumSize(new Dimension(Integer.MAX_VALUE, reorgDesc.getPreferredSize().height + 16));
+			reorgBlock.revalidate();
 			onActiveChanged.run();
 		});
-		reorgRow.add(reorgMode, BorderLayout.CENTER);
-		listContainer.add(reorgRow);
+
+		listContainer.add(reorgBlock);
 	}
 
 	private void addLocalSection(String name, List<BankTemplate> templates)
@@ -1219,6 +1245,17 @@ public class BankTemplatesPanel extends PluginPanel
 			});
 		}
 		return card;
+	}
+
+	// Returns the description for the given reorg mode label, or a blank string for Off.
+	private static String descriptionFor(String selectedLabel, String off)
+	{
+		if (off.equals(selectedLabel))
+		{
+			return "Reorganise helper is off.";
+		}
+		final BankTemplatesConfig.ReorgDisplay d = BankTemplatesConfig.ReorgDisplay.fromLabel(selectedLabel);
+		return d != null ? d.getDescription() : "";
 	}
 
 	private JLabel sectionLabel(String text)

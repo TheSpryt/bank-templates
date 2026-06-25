@@ -68,6 +68,26 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 	private static final Color SOURCE_COLOR = new Color(255, 165, 0);   // orange: item to move
 	private static final Color DONE_COLOR = new Color(110, 200, 110);
 
+	// Drunken Sailor mode: default to swap (one bubble pops per drag). Switch to insert only when it
+	// saves this many moves or more — that means a large circular shift where one insert drag
+	// cascades fixes across 5+ items at once (a big satisfying multi-bubble pop).
+	private static final int INSERT_SAVINGS_THRESHOLD = 5;
+
+	// One color per tab slot (index 0-9). Tab 0 is the main/infinity tab.
+	// Colors are chosen to be visually distinct from each other at a glance.
+	private static final Color[] TAB_COLORS = {
+		new Color( 20,  20,  20), // 0: main/infinity - near-black
+		new Color(255,  60,  60), // 1: red
+		new Color(255, 150,  20), // 2: orange
+		new Color(230, 220,  30), // 3: yellow
+		new Color( 60, 200,  60), // 4: green
+		new Color( 50, 100, 255), // 5: deep blue (distinct from teal)
+		new Color(160,  50, 255), // 6: purple
+		new Color(255,  80, 180), // 7: hot pink
+		new Color( 20, 220, 190), // 8: teal (distinct from deep blue)
+		new Color(255, 255, 255), // 9: white
+	};
+
 	private static final int[] TAB_COUNT_VARBITS = {
 		VarbitID.BANK_TAB_1, VarbitID.BANK_TAB_2, VarbitID.BANK_TAB_3, VarbitID.BANK_TAB_4,
 		VarbitID.BANK_TAB_5, VarbitID.BANK_TAB_6, VarbitID.BANK_TAB_7, VarbitID.BANK_TAB_8,
@@ -85,6 +105,18 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 	private int planTab = -1;
 	private String planTemplate = "";
 	private boolean planSwap;
+
+	// Caches the full-bank scan (allItemsInCorrectTab/tabsSorted) instead of redoing it every render()
+	// call; busted by onItemContainerChanged or a template change.
+	private boolean bankScanDirty = true;
+	private boolean cachedAllSettled;
+	private boolean[] cachedTabSorted;
+	private String cachedScanTemplate = "";
+
+	void onItemContainerChanged()
+	{
+		bankScanDirty = true;
+	}
 
 	@Inject
 	ReorgHelperOverlay(Client client, BankTemplatesConfig config, TemplateManager templateManager, ItemManager itemManager,
@@ -121,6 +153,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		final BankTemplatesConfig.ReorgDisplay mode = config.reorgDisplay();
 		final boolean labels = mode == BankTemplatesConfig.ReorgDisplay.LABELS || mode == BankTemplatesConfig.ReorgDisplay.BOTH;
 		final boolean steps = mode == BankTemplatesConfig.ReorgDisplay.STEP_BY_STEP || mode == BankTemplatesConfig.ReorgDisplay.BOTH;
+		final boolean colorMode = mode == BankTemplatesConfig.ReorgDisplay.DRUNKEN_SAILOR;
 
 		// In a Bank Tags tag tab, a search, or an Inventory Setups bank view the bank is filtered and can't be
 		// reorganised - guide the user back to the normal bank view (the all-items tab) first.
@@ -252,6 +285,126 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			if (currentStepSig != null)
 			{
 				drawSkipButton(graphics);
+			}
+		}
+
+		if (colorMode)
+		{
+			if (bankScanDirty || !template.getName().equals(cachedScanTemplate))
+			{
+				cachedAllSettled = allItemsInCorrectTab(targetTab);
+				cachedTabSorted = cachedAllSettled ? tabsSorted(targetRank) : null;
+				cachedScanTemplate = template.getName();
+				bankScanDirty = false;
+			}
+			final boolean allSettled = cachedAllSettled;
+			final boolean[] tabSorted = cachedTabSorted;
+
+			// Tab button coloring must happen outside the item-container clip — the buttons are above it.
+			final Map<Integer, Widget> colorTabButtons = tabButtons();
+			drawColorTabButtons(graphics, colorTabButtons, allSettled, tabSorted);
+
+			// Phase 1, numbered tab: no item coloring. Draw a single arrow across the top bar
+			// from the "Show worn items" button to the ∞ all-items button so it's obvious we
+			// want the user over there. All the rainbow routing happens in the all-items view.
+			if (!allSettled && currentTab != BankTemplate.MAIN_TAB)
+			{
+				setBankTitle("Man the <col=111111>∞ tab</col>, <col=ffd700>Captain!</col>",
+					Color.WHITE,
+					"Tip: scroll and drag items to their colored tab",
+					false);
+				final Widget allBtn = colorTabButtons.get(BankTemplate.MAIN_TAB);
+				final Widget wornBtn = client.getWidget(InterfaceID.Bankmain.DEPOSITWORN);
+
+				graphics.setClip(oldClip);
+				if (wornBtn != null && !wornBtn.isHidden() && allBtn != null && !allBtn.isHidden())
+				{
+					drawArrow(graphics, wornBtn.getBounds(), allBtn.getBounds(), Color.WHITE);
+				}
+				if (allBtn != null && !allBtn.isHidden())
+				{
+					pulseRect(graphics, allBtn.getBounds(), Color.WHITE);
+				}
+				return null;
+			}
+
+			graphics.setClip(itemContainer.getBounds());
+			drawColorLabels(graphics, widgets, current, itemTab, targetTab, currentTab, targetRank, allSettled, tabSorted);
+			graphics.setClip(oldClip);
+
+			if (!allSettled)
+			{
+				// Phase 1, all-items view: if the template needs tabs that don't exist yet,
+				// tell the player to create one by dragging an item to the + button.
+				int existingTabs = 0;
+				for (int key : colorTabButtons.keySet())
+				{
+					if (key != BankTemplate.MAIN_TAB && key > existingTabs)
+					{
+						existingTabs = key;
+					}
+				}
+				int lowestMissingTab = Integer.MAX_VALUE;
+				int missingTabItem = -1;
+				for (int k = 0; k < current.size(); k++)
+				{
+					final int tt = targetTab.getOrDefault(current.get(k), BankTemplate.MAIN_TAB);
+					if (tt != BankTemplate.MAIN_TAB && tt > existingTabs && tt < lowestMissingTab)
+					{
+						lowestMissingTab = tt;
+						missingTabItem = k;
+					}
+				}
+				if (missingTabItem != -1)
+				{
+					final Widget addBtn = addTabButton();
+					if (addBtn != null && !addBtn.isHidden())
+					{
+						pulseRect(graphics, addBtn.getBounds(), tabColor(lowestMissingTab));
+						final String itemName = itemManager.getItemComposition(current.get(missingTabItem)).getName();
+						final String col = "<col=" + hex(tabColor(lowestMissingTab)) + ">";
+						setBankTitle(col + "Need tab " + lowestMissingTab + "</col> — drag " + itemName + " to <col=ffd700>+</col>", Color.WHITE, null, false);
+					}
+				}
+				else
+				{
+					// Show "Hunt: [item] > [tab]" for the first item that belongs in a colored
+					// tab but isn't there yet. Skip stowaways — their black outlines and the tab
+					// buttons already handle that signal.
+					for (int k = 0; k < current.size(); k++)
+					{
+						final int tt = targetTab.getOrDefault(current.get(k), BankTemplate.MAIN_TAB);
+						if (tt != BankTemplate.MAIN_TAB && itemTab[k] != tt)
+						{
+							final String itemName = itemManager.getItemComposition(current.get(k)).getName();
+							final String dest = "<col=" + hex(tabColor(tt)) + ">tab " + tt + "</col>";
+							setBankTitle("<col=ffd700>Hunt:</col> " + itemName + " <col=ffffff>></col> " + dest, Color.WHITE, null, false);
+							break;
+						}
+					}
+				}
+			}
+			else
+			{
+				// Phase 2: within-tab swap sort.
+				final boolean currentTabSorted = tabSorted != null
+					&& currentTab < tabSorted.length && tabSorted[currentTab];
+				final boolean allTabsSorted = tabSorted != null && allTabsSorted(tabSorted);
+				if (allTabsSorted)
+				{
+					setBankTitle("Bank <col=" + hex(DONE_COLOR) + ">shipshape</col> — <col=ffd700>sail on!</col>", DONE_COLOR, null, false);
+				}
+				else if (currentTabSorted)
+				{
+					if (currentTab != BankTemplate.MAIN_TAB)
+					{
+						setBankTitle("Tab " + currentTab + " <col=" + hex(DONE_COLOR) + ">shipshape</col> — <col=ffd700>sail on!</col>", DONE_COLOR, null, false);
+					}
+				}
+				else if (currentTab != BankTemplate.MAIN_TAB)
+				{
+					drawColorPositionStep(graphics, itemContainer, template, currentTab, widgets, current, itemTab, targetRank);
+				}
 			}
 		}
 
@@ -560,6 +713,459 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			pulseRect(g, w.getBounds(), config.reorgHighlightColor());
 		}
 	}
+
+	/**
+	 * Fixed per-tab color so the player can match a colored chip to its tab button at a glance,
+	 * without reading the number. Falls back to white for any tab beyond the defined palette.
+	 */
+	private static Color tabColor(int tab)
+	{
+		if (tab >= 0 && tab < TAB_COLORS.length)
+		{
+			return TAB_COLORS[tab];
+		}
+		return Color.WHITE;
+	}
+
+	/** Returns true when every numbered tab (1..MAX_TABS) is sorted. */
+	private static boolean allTabsSorted(boolean[] tabSorted)
+	{
+		for (int t = 1; t < tabSorted.length; t++)
+		{
+			if (!tabSorted[t])
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Checks whether items within each tab are in non-decreasing targetRank order.
+	 * Returns {@code boolean[}{@link LayoutEditor#MAX_TABS}{@code  + 1]} where index = tab number
+	 * (0 = main). Only called once {@link #allItemsInCorrectTab} returns true.
+	 */
+	private boolean[] tabsSorted(Map<Integer, Integer> targetRank)
+	{
+		final boolean[] sorted = new boolean[LayoutEditor.MAX_TABS + 1];
+		Arrays.fill(sorted, true);
+		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank == null)
+		{
+			return sorted;
+		}
+		final Item[] items = bank.getItems();
+		int idx = 0;
+		for (int t = 1; t <= LayoutEditor.MAX_TABS; t++)
+		{
+			final int count = client.getVarbitValue(TAB_COUNT_VARBITS[t - 1]);
+			int prevRank = -1;
+			for (int k = 0; k < count && idx < items.length; k++, idx++)
+			{
+				if (items[idx] == null || items[idx].getId() <= 0)
+				{
+					continue;
+				}
+				final Integer rank = targetRank.get(reorgId(items[idx].getId()));
+				if (rank == null)
+				{
+					continue;
+				}
+				if (rank < prevRank)
+				{
+					sorted[t] = false;
+				}
+				else
+				{
+					prevRank = rank;
+				}
+			}
+		}
+		int prevRank = -1;
+		for (; idx < items.length; idx++)
+		{
+			if (items[idx] == null || items[idx].getId() <= 0)
+			{
+				continue;
+			}
+			final Integer rank = targetRank.get(reorgId(items[idx].getId()));
+			if (rank == null)
+			{
+				continue;
+			}
+			if (rank < prevRank)
+			{
+				sorted[BankTemplate.MAIN_TAB] = false;
+			}
+			else
+			{
+				prevRank = rank;
+			}
+		}
+		return sorted;
+	}
+
+	/**
+	 * Scans the FULL {@link ItemContainer} (all tabs, not just the visible one) to check whether
+	 * every item is already in its correct native tab. This is the gate for showing green tab
+	 * buttons — we can't rely on the visible widget list because it only contains items from the
+	 * currently viewed tab.
+	 */
+	private boolean allItemsInCorrectTab(Map<Integer, Integer> targetTab)
+	{
+		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank == null)
+		{
+			return false;
+		}
+		final Item[] items = bank.getItems();
+		int idx = 0;
+		for (int t = 1; t <= 9; t++)
+		{
+			final int count = client.getVarbitValue(TAB_COUNT_VARBITS[t - 1]);
+			for (int k = 0; k < count && idx < items.length; k++, idx++)
+			{
+				if (items[idx] == null || items[idx].getId() <= 0)
+				{
+					continue;
+				}
+				final int canon = reorgId(items[idx].getId());
+				if (targetTab.getOrDefault(canon, BankTemplate.MAIN_TAB) != t)
+				{
+					return false;
+				}
+			}
+		}
+		for (; idx < items.length; idx++)
+		{
+			if (items[idx] == null || items[idx].getId() <= 0)
+			{
+				continue;
+			}
+			final int canon = reorgId(items[idx].getId());
+			if (targetTab.getOrDefault(canon, BankTemplate.MAIN_TAB) != BankTemplate.MAIN_TAB)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Paints each numbered tab button:
+	 * <ul>
+	 *   <li>Phase 1 (items still in wrong tabs): rainbow colors so the player can match item outlines
+	 *     to their destination tab button by color alone.</li>
+	 *   <li>Phase 2 (all items in correct tabs): green if items within that tab are already in correct
+	 *     order, red if not — so the player knows which tabs still need internal sorting.</li>
+	 * </ul>
+	 * Called without a clip so the buttons (which sit above the item container) aren't hidden.
+	 */
+	private void drawColorTabButtons(Graphics2D g, Map<Integer, Widget> buttons,
+		boolean allSettled, boolean[] tabSorted)
+	{
+		for (Map.Entry<Integer, Widget> entry : buttons.entrySet())
+		{
+			final int tab = entry.getKey();
+			final Widget btn = entry.getValue();
+			if (btn == null || btn.isHidden() || btn.getBounds().width <= 0)
+			{
+				continue;
+			}
+			final Color c;
+			final Color border;
+			if (allSettled)
+			{
+				if (tab == BankTemplate.MAIN_TAB)
+				{
+					c = TAB_COLORS[0]; // always near-black — stowaways tab should be empty
+					border = Color.WHITE;
+				}
+				else
+				{
+					final boolean done = tabSorted == null || tab >= tabSorted.length || tabSorted[tab];
+					c = done ? DONE_COLOR : Color.RED;
+					border = Color.WHITE;
+				}
+			}
+			else
+			{
+				c = tabColor(tab);
+				border = (tab == BankTemplate.MAIN_TAB) ? Color.WHITE : c;
+			}
+			final Rectangle b = btn.getBounds();
+			g.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), 180));
+			g.fillRect(b.x, b.y, b.width, b.height);
+			g.setColor(border);
+			final Stroke old = g.getStroke();
+			g.setStroke(new BasicStroke(3f));
+			g.drawRect(b.x - 1, b.y - 1, b.width + 2, b.height + 2);
+			g.setStroke(old);
+		}
+	}
+
+	/**
+	 * Item outlines in color mode.
+	 *
+	 * <p>Non-template items ({@code targetTab = }{@code BankTemplate#MAIN_TAB}, the stowaways)
+	 * are ALWAYS outlined in near-black, in every phase and every tab view. This is intentional: if
+	 * you load someone else's template to copy their bank layout, the black outlines immediately show
+	 * you which of your items their template doesn't cover — the gaps between their organisation and
+	 * yours become visible at a glance.
+	 *
+	 * <ul>
+	 *   <li>Phase 1 (not allSettled): wrong-tab items get a rainbow outline in their destination
+	 *     tab's color; non-template items are already "home" (stowaways tab) so their black outline
+	 *     only appears when they are sitting in a numbered tab they don't belong in.</li>
+	 *   <li>Phase 2 (allSettled): numbered tabs show green (correct position) or red (needs to
+	 *     move). Non-template items in the stowaways tab keep their black outline regardless.</li>
+	 * </ul>
+	 */
+	private void drawColorLabels(Graphics2D g, List<Widget> widgets, List<Integer> current,
+		int[] itemTab, Map<Integer, Integer> targetTab, int currentTab, Map<Integer, Integer> targetRank,
+		boolean allSettled, boolean[] tabSorted)
+	{
+		// Always draw black outlines on stowaway items — items with no template destination.
+		// Skipped when the item is already in the stowaways tab AND we are in phase 2 (all settled),
+		// since there is nothing actionable to communicate: they are exactly where they belong.
+		for (int k = 0; k < current.size(); k++)
+		{
+			final int tt = targetTab.getOrDefault(current.get(k), BankTemplate.MAIN_TAB);
+			if (tt != BankTemplate.MAIN_TAB)
+			{
+				continue;
+			}
+			// In phase 1, only flag them when they are sitting in the wrong tab (a numbered tab).
+			// In phase 2, flag them always so the player can see which items fall outside the template.
+			if (!allSettled && itemTab[k] == BankTemplate.MAIN_TAB)
+			{
+				continue;
+			}
+			final Rectangle b = widgets.get(k).getBounds();
+			if (b.width <= 0)
+			{
+				continue;
+			}
+			final Color c = TAB_COLORS[0]; // near-black
+			g.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), 120));
+			g.fillRect(b.x, b.y, b.width, b.height);
+			g.setColor(Color.WHITE); // white border so near-black is visible on dark background
+			final Stroke old = g.getStroke();
+			g.setStroke(new BasicStroke(3f));
+			g.drawRect(b.x - 1, b.y - 1, b.width + 2, b.height + 2);
+			g.setStroke(old);
+		}
+
+		if (!allSettled)
+		{
+			// Phase 1: rainbow outlines for wrong-tab template items.
+			for (int k = 0; k < current.size(); k++)
+			{
+				final int tt = targetTab.getOrDefault(current.get(k), BankTemplate.MAIN_TAB);
+				if (tt == BankTemplate.MAIN_TAB || itemTab[k] == tt)
+				{
+					continue; // stowaways handled above; already-correct items get no outline
+				}
+				final Rectangle b = widgets.get(k).getBounds();
+				if (b.width <= 0)
+				{
+					continue;
+				}
+				final Color c = tabColor(tt);
+				g.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), 120));
+				g.fillRect(b.x, b.y, b.width, b.height);
+				g.setColor(c);
+				final Stroke old = g.getStroke();
+				g.setStroke(new BasicStroke(3f));
+				g.drawRect(b.x - 1, b.y - 1, b.width + 2, b.height + 2);
+				g.setStroke(old);
+			}
+			return;
+		}
+
+		// Phase 2: no per-item position outlines when viewing the stowaways tab or a sorted tab.
+		if (currentTab == BankTemplate.MAIN_TAB)
+		{
+			return;
+		}
+
+		// Phase 2: check if the current tab is already sorted — if so, show nothing extra.
+		final boolean currentSorted = tabSorted == null
+			|| currentTab >= tabSorted.length
+			|| tabSorted[currentTab];
+		if (currentSorted)
+		{
+			return;
+		}
+
+		// Build the target order for this tab's visible items and compare position by position.
+		final List<Widget> tabWidgets = new ArrayList<>();
+		final List<Integer> tabCurrent = new ArrayList<>();
+		for (int k = 0; k < current.size(); k++)
+		{
+			if (itemTab[k] == currentTab)
+			{
+				tabWidgets.add(widgets.get(k));
+				tabCurrent.add(current.get(k));
+			}
+		}
+		final List<Integer> tabTarget = sortedByRank(tabCurrent, targetRank);
+
+		for (int i = 0; i < tabCurrent.size(); i++)
+		{
+			final boolean correct = i < tabTarget.size() && tabCurrent.get(i).equals(tabTarget.get(i));
+			final Color c = correct ? DONE_COLOR : Color.RED;
+			final Rectangle b = tabWidgets.get(i).getBounds();
+			if (b.width <= 0)
+			{
+				continue;
+			}
+			g.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), 70));
+			g.fillRect(b.x, b.y, b.width, b.height);
+			g.setColor(c);
+			final Stroke old = g.getStroke();
+			g.setStroke(new BasicStroke(2f));
+			g.drawRect(b.x, b.y, b.width, b.height);
+			g.setStroke(old);
+		}
+	}
+
+	/**
+	 * Bubble-wrap sort phase (Drunken Sailor mode, phase 2).
+	 *
+	 * <p>Default: swap mode, one move pops one item green. Satisfying one-at-a-time progress.
+	 *
+	 * <p>Exception — insert mode: if a single circular shift has thrown {@code 5+} items out of
+	 * place, one insert drag fixes them all at once (a big multi-bubble pop). We switch to insert
+	 * for this case only when insert saves at least {@code INSERT_SAVINGS_THRESHOLD} moves vs swap.
+	 * The 3-arrow toggle indicator tells the player which mode switch is needed so the extra step
+	 * never feels mysterious. Uses {@link VarbitID#BANK_INSERTMODE} to check the current mode.
+	 */
+	private void drawColorPositionStep(Graphics2D g, Widget itemContainer, BankTemplate template,
+		int currentTab, List<Widget> widgets, List<Integer> current, int[] itemTab,
+		Map<Integer, Integer> targetRank)
+	{
+		// Collect items visible in this tab.
+		final List<Widget> tabWidgets = new ArrayList<>();
+		final List<Integer> tabCurrent = new ArrayList<>();
+		for (int k = 0; k < current.size(); k++)
+		{
+			if (itemTab[k] == currentTab)
+			{
+				tabWidgets.add(widgets.get(k));
+				tabCurrent.add(current.get(k));
+			}
+		}
+		if (tabWidgets.isEmpty())
+		{
+			setBankTitle("Tab " + currentTab + " shipshape, sail on!", DONE_COLOR, null, false);
+			return;
+		}
+
+		// Target order for this tab: sorted by targetRank, unknowns at the end.
+		final List<Integer> tabTarget = sortedByRank(tabCurrent, targetRank);
+
+		// First slot where current item doesn't match target.
+		int destIdx = -1;
+		for (int i = 0; i < tabCurrent.size(); i++)
+		{
+			if (!tabCurrent.get(i).equals(tabTarget.get(i)))
+			{
+				destIdx = i;
+				break;
+			}
+		}
+
+		final Shape oldClip = g.getClip();
+		g.setClip(itemContainer.getBounds());
+
+		if (destIdx < 0)
+		{
+			final String tabLabel = "<col=" + hex(tabColor(currentTab)) + ">tab " + currentTab + "</col>";
+			setBankTitle(tabLabel + " <col=" + hex(DONE_COLOR) + ">shipshape</col> — <col=ffd700>sail on!</col>", DONE_COLOR, null, false);
+			g.setClip(oldClip);
+			return;
+		}
+
+		// Decide swap vs insert once per tab change. Default: swap (one bubble at a time).
+		// Switch to insert only when it saves INSERT_SAVINGS_THRESHOLD+ moves — that means a big
+		// circular shift where one insert drag pops many items green simultaneously.
+		if (planTab != currentTab || !template.getName().equals(planTemplate))
+		{
+			final int[] perm = permutation(tabCurrent, tabTarget);
+			final int swapCost = perm.length - cycleCount(perm);
+			final int insertCost = simulateColorInsertCost(perm);
+			planSwap = (swapCost - insertCost) < INSERT_SAVINGS_THRESHOLD;
+			planTab = currentTab;
+			planTemplate = template.getName();
+		}
+		final boolean useSwap = planSwap;
+		final int neededMode = useSwap ? 0 : 1; // BANK_INSERTMODE: 0=swap, 1=insert
+		final boolean modeOk = client.getVarbitValue(VarbitID.BANK_INSERTMODE) == neededMode;
+
+		// Green outline on every correctly-placed item (bubble-wrap progress).
+		for (int i = 0; i < tabCurrent.size(); i++)
+		{
+			if (tabCurrent.get(i).equals(tabTarget.get(i)))
+			{
+				outline(g, tabWidgets.get(i).getBounds(), DONE_COLOR);
+			}
+		}
+
+		// Prefer moving the misplaced item at destIdx straight to its own slot when that clears the
+		// whole run in one drag (a circular shift, e.g. [6,1,2,3,4,5] needs one insert of 6 after 5,
+		// not five drags bringing 1..5 back one at a time). Only valid in Insert mode — Swap can't
+		// shift a range, just exchange two slots.
+		final int selfMoveTo = useSwap ? -1 : singleMoveTarget(tabCurrent, tabTarget, destIdx);
+		final int sourceIdx;
+		final int dragDestIdx;
+		if (selfMoveTo != -1)
+		{
+			sourceIdx = destIdx;
+			dragDestIdx = selfMoveTo;
+		}
+		else
+		{
+			// Default: bring the item that belongs at destIdx back to it.
+			final int wantCanon = tabTarget.get(destIdx);
+			int s = destIdx + 1;
+			while (s < tabCurrent.size() && !tabCurrent.get(s).equals(wantCanon))
+			{
+				s++;
+			}
+			if (s >= tabCurrent.size())
+			{
+				g.setClip(oldClip);
+				return;
+			}
+			sourceIdx = s;
+			dragDestIdx = destIdx;
+		}
+
+		final Widget from = tabWidgets.get(sourceIdx);
+		final Widget to = tabWidgets.get(dragDestIdx);
+		outline(g, from.getBounds(), Color.RED);
+		pulseRect(g, to.getBounds(), DONE_COLOR);
+		drawArrow(g, from.getBounds(), to.getBounds(), DONE_COLOR);
+
+		g.setClip(oldClip);
+
+		final String modeName = useSwap ? "Swap" : "Insert";
+		if (!modeOk)
+		{
+			setBankTitle("Ready the <col=ff9000>" + modeName + "</col> — <col=ff5555>change yer mode!</col>", Color.WHITE,
+				"Switch the bank to " + modeName + " mode (highlighted)", true);
+			highlightToggle(g);
+			drawArrowsToToggle(g);
+		}
+		else
+		{
+			final String tabLabel = "<col=" + hex(tabColor(currentTab)) + ">tab " + currentTab + "</col>";
+			final String name = client.getItemDefinition(from.getItemId()).getName();
+			setBankTitle("<col=ff9000>Heave</col> " + name + " into port " + tabLabel, Color.WHITE, null, false);
+		}
+	}
+
 
 	// Draw a destination tag on each out-of-place item: tab number if in the wrong tab, else row-col.
 	private void drawLabels(Graphics2D g, List<Widget> widgets, List<Integer> current, int[] itemTab,
@@ -1038,6 +1644,50 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		return null;
 	}
 
+	private static List<Integer> sortedByRank(List<Integer> items, Map<Integer, Integer> rank)
+	{
+		final List<Integer> sorted = new ArrayList<>(items);
+		sorted.sort((a, b) ->
+		{
+			final Integer ra = rank.get(a);
+			final Integer rb = rank.get(b);
+			if (ra == null && rb == null) return 0;
+			if (ra == null) return 1;
+			if (rb == null) return -1;
+			return Integer.compare(ra, rb);
+		});
+		return sorted;
+	}
+
+	// Returns the index where moving current.get(from) there directly would resolve every slot between
+	// `from` and that index in one drag (the circular-shift shortcut simulateColorInsertCost also
+	// looks for), or -1 if no such shortcut exists from `from`.
+	private static int singleMoveTarget(List<Integer> current, List<Integer> target, int from)
+	{
+		final int v = current.get(from);
+		int to = -1;
+		for (int k = from + 1; k < target.size(); k++)
+		{
+			if (target.get(k).equals(v))
+			{
+				to = k;
+				break;
+			}
+		}
+		if (to == -1)
+		{
+			return -1;
+		}
+		for (int k = from; k < to; k++)
+		{
+			if (!current.get(k + 1).equals(target.get(k)))
+			{
+				return -1;
+			}
+		}
+		return to;
+	}
+
 	private static int[] permutation(List<Integer> current, List<Integer> target)
 	{
 		// Map each value to its target slots in order, so repeated (functionally-identical) items are
@@ -1106,6 +1756,60 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		return moves;
 	}
 
+	// Like simulateInsertCost, but also catches the case that one does miss: a circular shift where
+	// every item is displaced by the same amount (e.g. [6,1,2,3,4,5] -> sorted in 1 move by inserting 6
+	// after 5, not 5 moves bringing 1..5 back one at a time). Kept separate from simulateInsertCost so
+	// Step-by-step's swap/insert threshold — which shares that method — is unaffected.
+	private static int simulateColorInsertCost(int[] perm)
+	{
+		final List<Integer> a = new ArrayList<>();
+		for (int v : perm)
+		{
+			a.add(v);
+		}
+		int moves = 0;
+		for (int i = 0; i < a.size(); i++)
+		{
+			if (a.get(i) == i)
+			{
+				continue;
+			}
+			final int v = a.get(i);
+			if (v > i && selfMoveResolvesRun(a, i, v))
+			{
+				a.add(v, a.remove(i));
+				moves++;
+				continue;
+			}
+			int j = i + 1;
+			while (j < a.size() && a.get(j) != i)
+			{
+				j++;
+			}
+			if (j >= a.size())
+			{
+				break;
+			}
+			a.add(i, a.remove(j));
+			moves++;
+		}
+		return moves;
+	}
+
+	// True when moving a.get(from) directly to index `to` (shifting from+1..to left by one) leaves
+	// every one of those slots holding its correct value (slot k holds value k).
+	private static boolean selfMoveResolvesRun(List<Integer> a, int from, int to)
+	{
+		for (int k = from; k < to; k++)
+		{
+			if (a.get(k + 1) != k)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	private void drawTag(Graphics2D g, Rectangle b, String text, Color color)
 	{
 		g.setFont(g.getFont().deriveFont(Font.PLAIN, 12f));
@@ -1126,6 +1830,62 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		{
 			pulseRect(g, toggle.getBounds(), SOURCE_COLOR);
 		}
+	}
+
+	/**
+	 * Three arrows converging on the Swap/Insert toggle button so it's impossible to miss:
+	 * <ul>
+	 *   <li>horizontal (from the left)</li>
+	 *   <li>vertical (from below)</li>
+	 *   <li>diagonal at ~2 o'clock angle (from lower-left, pointing upper-right)</li>
+	 * </ul>
+	 */
+	private void drawArrowsToToggle(Graphics2D g)
+	{
+		final Widget toggle = client.getWidget(InterfaceID.Bankmain.SWAP_INSERT);
+		if (toggle == null || toggle.isHidden())
+		{
+			return;
+		}
+		final Rectangle btn = toggle.getBounds();
+		final int cx = btn.x + btn.width / 2;
+		final int cy = btn.y + btn.height / 2;
+		final int d = 56;
+
+		// Pulse: stroke swells from 4 to 7px and alpha from 180 to 255 so the arrows are impossible to miss.
+		final double pulse = 0.5 + 0.5 * Math.sin(System.currentTimeMillis() / 180.0);
+		final float stroke = (float) (4.0 + 3.0 * pulse);
+		final int alpha = (int) (180 + 75 * pulse);
+		final Color c = new Color(SOURCE_COLOR.getRed(), SOURCE_COLOR.getGreen(), SOURCE_COLOR.getBlue(), alpha);
+
+		final Stroke oldStroke = g.getStroke();
+		g.setStroke(new BasicStroke(stroke, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+		g.setColor(c);
+
+		final int diag = (int) (d / Math.sqrt(2));
+		final int[][] tails = {
+			{cx - d, cy},             // horizontal: from the left
+			{cx, cy + d},             // vertical: from below
+			{cx - diag, cy + diag},   // ~2 o'clock diagonal: from lower-left
+		};
+
+		for (int[] tail : tails)
+		{
+			final int x1 = tail[0];
+			final int y1 = tail[1];
+			final int x2 = cx;
+			final int y2 = cy;
+			g.drawLine(x1, y1, x2, y2);
+			final double angle = Math.atan2(y2 - y1, x2 - x1);
+			final int len = 12;
+			final int ax = (int) (x2 - len * Math.cos(angle - Math.PI / 6));
+			final int ay = (int) (y2 - len * Math.sin(angle - Math.PI / 6));
+			final int bx = (int) (x2 - len * Math.cos(angle + Math.PI / 6));
+			final int by = (int) (y2 - len * Math.sin(angle + Math.PI / 6));
+			g.fillPolygon(new int[]{x2, ax, bx}, new int[]{y2, ay, by}, 3);
+		}
+
+		g.setStroke(oldStroke);
 	}
 
 	private void pulseRect(Graphics2D g, Rectangle b, Color c)
