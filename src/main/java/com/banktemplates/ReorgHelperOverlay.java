@@ -25,6 +25,7 @@ import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.ScriptID;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
@@ -64,6 +65,10 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 	// Signature of the move step currently shown (null during the filler step or when nothing is shown). The
 	// title-bar Skip button adds this to skippedSteps.
 	private volatile String currentStepSig;
+	// Bounds of the current step's source item, and the step we last auto-scrolled for, so the bank brings
+	// the highlighted item into view once when the step changes (without fighting the user's own scrolling).
+	private Rectangle stepItemBounds;
+	private String lastScrollSig;
 
 	private static final Color SOURCE_COLOR = new Color(255, 165, 0);   // orange: item to move
 	private static final Color DONE_COLOR = new Color(110, 200, 110);
@@ -125,6 +130,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		}
 		skipButtonRect = null;
 		currentStepSig = null;
+		stepItemBounds = null;
 
 		final BankTemplate template = templateManager.getActive();
 		if (template == null)
@@ -268,6 +274,12 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			{
 				drawSkipButton(graphics);
 			}
+			// Bring the highlighted item into view when the step changes (once, so it doesn't fight scrolling).
+			if (currentStepSig != null && !currentStepSig.equals(lastScrollSig) && stepItemBounds != null)
+			{
+				scrollItemIntoView(itemContainer, stepItemBounds);
+			}
+			lastScrollSig = currentStepSig;
 		}
 
 		return null;
@@ -730,7 +742,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			currentStepSig = sig;
 			final Widget from = widgets.get(k);
 			final String name = client.getItemDefinition(from.getItemId()).getName();
-			outlineInContainer(g, itemContainer, from.getBounds(), SOURCE_COLOR);
+			markSource(g, itemContainer, from.getBounds());
 			final Widget tabBtn = buttons.get(tt);
 			if (tabBtn != null)
 			{
@@ -766,7 +778,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				}
 				currentStepSig = "F:" + deficitTab;
 				final Widget from = widgets.get(k);
-				outlineInContainer(g, itemContainer, from.getBounds(), SOURCE_COLOR);
+				markSource(g, itemContainer, from.getBounds());
 				final Widget tabBtn = tabButtons().get(deficitTab);
 				final String tabName = deficitTab == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + deficitTab;
 				if (tabBtn != null)
@@ -827,7 +839,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			{
 				pulseRect(g, srcBtn.getBounds(), config.reorgHighlightColor());
 			}
-			outlineInContainer(g, itemContainer, from.getBounds(), SOURCE_COLOR);
+			markSource(g, itemContainer, from.getBounds());
 			final String srcName = itemTab[k] == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + itemTab[k];
 			setBankTitle("Open " + srcName + " to move " + name, Color.WHITE, null, false);
 			return;
@@ -865,7 +877,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 					}
 					currentStepSig = sig;
 					final Widget from = widgets.get(k);
-					outlineInContainer(g, itemContainer, from.getBounds(), SOURCE_COLOR);
+					markSource(g, itemContainer, from.getBounds());
 					pulseRect(g, addBtn.getBounds(), addColor != null ? addColor : config.reorgHighlightColor());
 					final String name = client.getItemDefinition(from.getItemId()).getName();
 					setBankTitle("Drag " + name + " onto the + button to create tab " + lowestMissing, Color.WHITE, null, false);
@@ -891,7 +903,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 					{
 						pulseRect(g, srcBtn.getBounds(), addColor != null ? addColor : config.reorgHighlightColor());
 					}
-					outlineInContainer(g, itemContainer, from.getBounds(), SOURCE_COLOR);
+					markSource(g, itemContainer, from.getBounds());
 					final String srcName = itemTab[k] == BankTemplate.MAIN_TAB ? "the main tab" : "tab " + itemTab[k];
 					final String name = client.getItemDefinition(from.getItemId()).getName();
 					setBankTitle("Open " + srcName + " to move " + name + " to new tab " + lowestMissing, Color.WHITE, null, false);
@@ -1015,7 +1027,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 
 		drawGhost(graphics, from.getItemId(), to.getBounds());
 		outline(graphics, to.getBounds(), highlight);
-		outline(graphics, from.getBounds(), SOURCE_COLOR);
+		markSource(graphics, itemContainer, from.getBounds());
 		drawArrow(graphics, from.getBounds(), to.getBounds(), highlight);
 
 		graphics.setClip(oldClip);
@@ -1295,6 +1307,43 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		g.setStroke(new BasicStroke(2f));
 		g.drawRect(b.x - 1, b.y - 1, b.width + 2, b.height + 2);
 		g.setStroke(old);
+	}
+
+	// Outlines the current step's source item (clipped to the items window) and records it so the bank can
+	// auto-scroll it into view when the step changes.
+	private void markSource(Graphics2D g, Widget itemContainer, Rectangle b)
+	{
+		stepItemBounds = b;
+		outlineInContainer(g, itemContainer, b, SOURCE_COLOR);
+	}
+
+	// Scrolls the bank item container so the given item (screen bounds) is fully visible.
+	private void scrollItemIntoView(Widget itemContainer, Rectangle item)
+	{
+		if (itemContainer == null || item == null || item.height <= 0)
+		{
+			return;
+		}
+		final int relY = item.y - itemContainer.getBounds().y;
+		final int viewH = itemContainer.getHeight();
+		final int scroll = itemContainer.getScrollY();
+		int newScroll = scroll;
+		if (relY < 0)
+		{
+			newScroll = scroll + relY;
+		}
+		else if (relY + item.height > viewH)
+		{
+			newScroll = scroll + (relY + item.height - viewH);
+		}
+		final int max = Math.max(0, itemContainer.getScrollHeight() - viewH);
+		newScroll = Math.max(0, Math.min(newScroll, max));
+		if (newScroll != scroll)
+		{
+			itemContainer.setScrollY(newScroll);
+			itemContainer.revalidateScroll();
+			client.runScript(ScriptID.UPDATE_SCROLLBAR, InterfaceID.Bankmain.SCROLLBAR, InterfaceID.Bankmain.ITEMS, newScroll);
+		}
 	}
 
 	// Like outline(), but clipped to the item container so a highlight for an item scrolled out of the bank
