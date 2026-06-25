@@ -484,6 +484,7 @@ public class BankTemplatesPanel extends PluginPanel
 
 		listContainer.add(Box.createVerticalStrut(6));
 		final JButton captureButton = styledButton("Capture current bank");
+		captureButton.setHorizontalAlignment(SwingConstants.CENTER);
 		captureButton.setAlignmentX(Component.LEFT_ALIGNMENT);
 		captureButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		captureButton.setToolTipText("Save your current bank (all tabs, in order) as a new template");
@@ -492,6 +493,7 @@ public class BankTemplatesPanel extends PluginPanel
 
 		listContainer.add(Box.createVerticalStrut(4));
 		final JButton newButton = styledButton("New empty layout");
+		newButton.setHorizontalAlignment(SwingConstants.CENTER);
 		newButton.setAlignmentX(Component.LEFT_ALIGNMENT);
 		newButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		newButton.setToolTipText("Build a layout from scratch - add items you don't own as placeholders");
@@ -505,9 +507,7 @@ public class BankTemplatesPanel extends PluginPanel
 		reorgCard.setLayout(new BoxLayout(reorgCard, BoxLayout.Y_AXIS));
 		reorgCard.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		reorgCard.setAlignmentX(Component.LEFT_ALIGNMENT);
-		reorgCard.setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createMatteBorder(0, 3, 0, 0, ColorScheme.BRAND_ORANGE),
-			BorderFactory.createEmptyBorder(6, 6, 6, 6)));
+		reorgCard.setBorder(reorgCardBorder(config.showReorgHelper()));
 
 		final JLabel reorgLabel = new JLabel("Reorganise");
 		reorgLabel.setForeground(Color.WHITE);
@@ -553,6 +553,7 @@ public class BankTemplatesPanel extends PluginPanel
 				}
 				configManager.setConfiguration(BankTemplatesConfig.GROUP, "showReorgHelper", true);
 			}
+			reorgCard.setBorder(reorgCardBorder(!off.equals(sel)));
 			reorgDesc.setText(reorgDescription(sel, off));
 			reorgCard.revalidate();
 			onActiveChanged.run();
@@ -560,6 +561,17 @@ public class BankTemplatesPanel extends PluginPanel
 
 		listContainer.add(reorgCard);
 		listContainer.add(Box.createVerticalGlue());
+	}
+
+	// Reorganise card border: the orange accent bar only when a mode is active; when off, a plain border with
+	// the same content inset (3px bar + 6px = 9px left) so nothing shifts as you toggle it on and off.
+	private static javax.swing.border.Border reorgCardBorder(boolean active)
+	{
+		return active
+			? BorderFactory.createCompoundBorder(
+				BorderFactory.createMatteBorder(0, 3, 0, 0, ColorScheme.BRAND_ORANGE),
+				BorderFactory.createEmptyBorder(6, 6, 6, 6))
+			: BorderFactory.createEmptyBorder(6, 9, 6, 6);
 	}
 
 	// HTML so the text wraps inside the reorganise card. Width is sized to the side panel.
