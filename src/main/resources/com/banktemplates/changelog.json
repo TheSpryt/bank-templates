@@ -2,7 +2,9 @@
   {
     "version": "1.4.1",
     "notes": [
-      "My Templates: the 'Capture current bank' and 'New empty template' buttons now sit at the top of the tab, just under the search box, so they are easy to reach. ('New empty layout' was also renamed to 'New empty template'.)"
+      "My Templates: the 'Capture current bank' and 'New empty template' buttons now sit at the top of the tab, just under the search box, so they are easy to reach. ('New empty layout' was also renamed to 'New empty template'.)",
+      "Bank view: faded placeholder slots (items a template wants but you don't own yet) now show a '0' stack count, like the real bank's leftover placeholders, so it's clear at a glance that you own none of that item.",
+      "Counts: bank fillers (the reserved-slot item) are no longer counted toward a template's item total or the 'x / y items' owned count."
     ]
   },
   {
