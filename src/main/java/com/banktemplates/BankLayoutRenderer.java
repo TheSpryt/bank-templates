@@ -762,7 +762,9 @@ public class BankLayoutRenderer
 				return;
 			}
 			c.setItemQuantity(0);
-			c.setItemQuantityMode(ItemQuantityMode.NEVER);
+			// Show a "0" stack count (top-left, like the real bank's leftover placeholders) so it's clear at a
+			// glance that you own none of this item.
+			c.setItemQuantityMode(ItemQuantityMode.ALWAYS);
 			c.setOpacity(120);
 			c.setAction(10 - 1, "Examine");
 		}
