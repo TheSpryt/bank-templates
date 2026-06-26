@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.4.1",
+    "notes": [
+      "My Templates: the 'Capture current bank' and 'New empty template' buttons now sit at the top of the tab, just under the search box, so they are easy to reach. ('New empty layout' was also renamed to 'New empty template'.)"
+    ]
+  },
+  {
     "version": "1.4",
     "notes": [
       "My Templates: each card now shows how many of its items you already own, as \"x / y items\". The count shows from your last bank visit even before you open the bank this session, then updates live as your bank changes.",
