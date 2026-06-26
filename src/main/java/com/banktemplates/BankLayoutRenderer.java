@@ -740,17 +740,23 @@ public class BankLayoutRenderer
 			return;
 		}
 		final int qty = bank.count(item);
+		// A real bank placeholder (the game's own marker - left after withdrawing your last one, or present while
+		// the item is equipped/in your inventory) must NEVER render as a withdrawable item, or the client lets
+		// you "withdraw" a phantom copy of an item you don't actually have (issue #8). The bank stores a
+		// placeholder under the placeholder item's id with quantity 1, so count() returns 1 and the old qty<=0
+		// check let it through as a real item - force it down the faded branch instead.
+		final boolean isPlaceholder = def.getPlaceholderTemplateId() != -1;
 
 		c.setItemId(item);
 		c.setName("<col=ff9040>" + def.getName() + "</col>");
 		c.clearActions();
 		c.setOnDragListener((Object[]) null);
 
-		if (qty <= 0)
+		if (qty <= 0 || isPlaceholder)
 		{
-			// In the editor, always show a faded placeholder - otherwise items you add but don't own
-			// would be invisible and impossible to arrange.
-			if (!config.showPlaceholders() && !editing)
+			// Our own placeholders for items not in the bank at all are gated by the showPlaceholders config; a
+			// real game placeholder is an actual bank slot, so always show it (matching the real bank view).
+			if (!isPlaceholder && !config.showPlaceholders() && !editing)
 			{
 				drawEmpty(c, idx, columns);
 				return;

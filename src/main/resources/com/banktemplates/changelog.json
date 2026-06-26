@@ -12,7 +12,8 @@
       "Reorganise helper: colour-coding is now its own display option you can combine with Labels and Step-by-step. It tints out-of-place items and the tab buttons with their destination tab's colour so you can see where things belong at a glance.",
       "Reorganise helper: each bank tab's colour can be customised in the plugin settings ('Reorganise tab colours'), and the main/all-items tab now has its own colour too.",
       "Reorganise helper (labels): labels now sit in the bottom-right of each slot, clear of the stack count; items already in the right slot get a green tick; and the main tab is shown as an infinity symbol.",
-      "Reorganise helper (step-by-step): rebuilt the sort into a single forward pass - it moves each item to its tab as you reach it (creating new tabs inline along the way), then sorts each tab, without sending you back to earlier slots or looping."
+      "Reorganise helper (step-by-step): rebuilt the sort into a single forward pass - it moves each item to its tab as you reach it (creating new tabs inline along the way), then sorts each tab, without sending you back to earlier slots or looping.",
+      "Bank view: fixed bank placeholders (for example the last item of a stack you withdrew, or an item you have equipped) showing as withdrawable while a template was applied, which let you 'withdraw' a phantom copy that vanished when the bank closed. Placeholders now render correctly."
     ]
   },
   {
