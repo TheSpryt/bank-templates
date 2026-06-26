@@ -190,9 +190,13 @@ anywhere, including for the **Items owned** sort.
 
 ## Screenshots
 
-| My templates | Browse the community repository | Template preview |
+| My Templates | Browse the community repository | Template preview |
 |---|---|---|
-| ![My templates](docs/images/my-templates.png) | ![Browse](docs/images/browse.png) | ![Preview](docs/images/preview.png) |
+| ![My Templates](docs/images/my-templates.png) | ![Browse](docs/images/browse.png) | ![Preview](docs/images/preview.png) |
+
+| Layout editor | Reorganise helper over the bank |
+|---|---|
+| ![Layout editor](docs/images/editor.png) | ![Reorganise helper](docs/images/reorg.png) |
 
 ## License
 
