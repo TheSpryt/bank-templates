@@ -477,6 +477,25 @@ public class BankTemplatesPanel extends PluginPanel
 		refreshOwnedCanon();
 		if (query.isEmpty())
 		{
+			// Capture / new-template actions sit at the top, directly under the search bar.
+			final JButton captureButton = styledButton("Capture current bank");
+			captureButton.setHorizontalAlignment(SwingConstants.CENTER);
+			captureButton.setAlignmentX(Component.LEFT_ALIGNMENT);
+			captureButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+			captureButton.setToolTipText("Save your current bank (all tabs, in order) as a new template");
+			captureButton.addActionListener(e -> captureCurrentBank());
+			listContainer.add(captureButton);
+
+			listContainer.add(Box.createVerticalStrut(4));
+			final JButton newButton = styledButton("New empty template");
+			newButton.setHorizontalAlignment(SwingConstants.CENTER);
+			newButton.setAlignmentX(Component.LEFT_ALIGNMENT);
+			newButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+			newButton.setToolTipText("Build a template from scratch - add items you don't own as placeholders");
+			newButton.addActionListener(e -> createNewLayout());
+			listContainer.add(newButton);
+			listContainer.add(Box.createVerticalStrut(8));
+
 			final boolean hasActive = templateManager.getActive() != null;
 			final JButton remove = styledButton(hasActive ? "Disable Template" : "No template applied");
 			remove.setEnabled(hasActive);
@@ -498,24 +517,6 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			addLocalSection("My templates", userTemplates);
 		}
-
-		listContainer.add(Box.createVerticalStrut(6));
-		final JButton captureButton = styledButton("Capture current bank");
-		captureButton.setHorizontalAlignment(SwingConstants.CENTER);
-		captureButton.setAlignmentX(Component.LEFT_ALIGNMENT);
-		captureButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-		captureButton.setToolTipText("Save your current bank (all tabs, in order) as a new template");
-		captureButton.addActionListener(e -> captureCurrentBank());
-		listContainer.add(captureButton);
-
-		listContainer.add(Box.createVerticalStrut(4));
-		final JButton newButton = styledButton("New empty layout");
-		newButton.setHorizontalAlignment(SwingConstants.CENTER);
-		newButton.setAlignmentX(Component.LEFT_ALIGNMENT);
-		newButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-		newButton.setToolTipText("Build a layout from scratch - add items you don't own as placeholders");
-		newButton.addActionListener(e -> createNewLayout());
-		listContainer.add(newButton);
 
 		listContainer.add(Box.createVerticalStrut(8));
 
