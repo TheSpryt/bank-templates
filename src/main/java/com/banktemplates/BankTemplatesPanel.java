@@ -1498,8 +1498,9 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 	}
 
-	// Variant-collapsed ids the player owns (qty > 0). Bank placeholders (qty 0) are excluded, so they
-	// correctly don't count as owned. Returns null if the bank container hasn't loaded yet. Client thread only.
+	// Variant-collapsed ids the player owns (qty > 0). Bank placeholders (qty 0) and bank fillers (the 🚫
+	// reserved-slot item) are excluded, so neither counts as owned. Returns null if the bank container hasn't
+	// loaded yet. Client thread only.
 	private Set<Integer> ownedBankCanonical()
 	{
 		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
@@ -1510,7 +1511,7 @@ public class BankTemplatesPanel extends PluginPanel
 		final Set<Integer> owned = new HashSet<>();
 		for (Item it : bank.getItems())
 		{
-			if (it.getId() > 0 && it.getQuantity() > 0)
+			if (it.getId() > 0 && it.getId() != BankTemplate.FILLER && it.getQuantity() > 0)
 			{
 				owned.add(ItemVariationMapping.map(it.getId()));
 			}

@@ -86,6 +86,16 @@ final class BankCapture
 	private static int slot(Item item, ItemManager itemManager)
 	{
 		final int id = item.getId();
-		return id > 0 ? itemManager.canonicalize(id) : BankTemplate.EMPTY;
+		if (id <= 0)
+		{
+			return BankTemplate.EMPTY;
+		}
+		// A bank filler (the 🚫 reserved-slot item) is captured as a FILLER slot, never a real item, so it's
+		// never counted in the template's item totals or the "x / y items" owned count.
+		if (id == BankTemplate.FILLER)
+		{
+			return BankTemplate.FILLER;
+		}
+		return itemManager.canonicalize(id);
 	}
 }
