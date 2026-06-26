@@ -9,9 +9,9 @@ import java.util.List;
  * Each {@link TabLayout} holds a flat, row-major grid for one tab ({@link #MAIN_TAB} = the main
  * "all items" view, 1-9 = the numbered tabs). Each slot is one of:
  * <ul>
- *     <li>a real item id (&gt; 0) — drawn real if owned, faded placeholder if not,</li>
- *     <li>{@link #EMPTY} (-1) — an empty slot,</li>
- *     <li>{@link #FILLER} — a reserved 🚫 slot.</li>
+ *     <li>a real item id (&gt; 0) - drawn real if owned, faded placeholder if not,</li>
+ *     <li>{@link #EMPTY} (-1) - an empty slot,</li>
+ *     <li>{@link #FILLER} - a reserved 🚫 slot.</li>
  * </ul>
  * {@link #getColumns()} is the grid width the template was designed for (default 8), so it renders
  * consistently regardless of the player's bank window width.
