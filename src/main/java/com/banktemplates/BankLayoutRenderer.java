@@ -67,6 +67,12 @@ public class BankLayoutRenderer
 	private boolean editing;
 	// True while rendering an editable (non-preset) template, so item slots get a "Release" menu entry.
 	private boolean liveEditable;
+	// True while viewing a template tab the real bank doesn't have (current tab > real tab count). The native
+	// bank shows all items for such an invalid tab, so we must not append "your other items" below the layout.
+	private boolean virtualTab;
+	// The last bank tab the user viewed, so we can re-select it when the bank reopens. The game persists real
+	// tabs itself but resets an out-of-range (virtual) tab to the all-items view, so we restore that one.
+	private int lastViewedTab = BankTemplate.MAIN_TAB;
 	// Row indices where a tab-divider line should be drawn (all-items view only).
 	private int[] mainDividerRows = new int[0];
 	// Virtual item widgets we create to render template slots beyond the real bank's capacity, so a
@@ -177,6 +183,17 @@ public class BankLayoutRenderer
 			return;
 		}
 
+		renderTemplate();
+	}
+
+	/**
+	 * Applies the active template's layout to the bank widgets for the tab in view - the native current tab,
+	 * or a synthesized "override" tab (a template tab the real bank doesn't have, picked via a synthesized
+	 * tab button). Safe to call directly to redraw without a full game bank rebuild (e.g. on a synth-tab
+	 * click).
+	 */
+	void renderTemplate()
+	{
 		resetWidgets();
 
 		final BankTemplate template = templateManager.getActive();
@@ -195,7 +212,18 @@ public class BankLayoutRenderer
 			return;
 		}
 
+		// Clicking an overlay extra tab sets the native current-tab varbit (even out of range), so the tab in
+		// view is just the native current tab.
 		final int currentTab = client.getVarbitValue(VarbitID.BANK_CURRENTTAB);
+		final int realTabs = realBankTabCount();
+		this.virtualTab = currentTab != BankTemplate.MAIN_TAB && currentTab > realTabs;
+		// Remember the tab in view so the bank can reopen on it. Skip the brief on-open build where the tabs
+		// aren't loaded yet (realTabs == 0) and the tab reads as the all-items default, or it would clobber
+		// the virtual tab we still need to restore.
+		if (realTabs > 0 || currentTab != BankTemplate.MAIN_TAB)
+		{
+			lastViewedTab = currentTab;
+		}
 		int[] layout;
 		if (currentTab == BankTemplate.MAIN_TAB)
 		{
@@ -205,10 +233,11 @@ public class BankLayoutRenderer
 		else
 		{
 			layout = template.tabLayout(currentTab);
-			// A numbered tab gets a single divider where its template items end and your other items begin.
+			// A numbered tab gets a single divider where its template items end and your other items begin -
+			// but a virtual tab has no "other items", so no divider.
 			final int cols = template.getColumns();
 			final int len = layout == null ? 0 : layout.length;
-			this.mainDividerRows = len > 0 ? new int[]{(len + cols - 1) / cols} : new int[0];
+			this.mainDividerRows = len > 0 && !virtualTab ? new int[]{(len + cols - 1) / cols} : new int[0];
 		}
 		if (layout == null || layout.length == 0)
 		{
@@ -234,6 +263,45 @@ public class BankLayoutRenderer
 		}
 	}
 
+	// Re-select the tab the user last viewed when the bank reopens. The game restores real tabs on its own,
+	// but resets an out-of-range (virtual) template tab to the all-items view, so re-set the varbit for it.
+	// Detected by the reset itself: a virtual tab reads back as 0 on open, a real tab as its own number.
+	void restoreViewedTabOnOpen()
+	{
+		final int tab = lastViewedTab;
+		if (tab != BankTemplate.MAIN_TAB && client.getVarbitValue(VarbitID.BANK_CURRENTTAB) != tab)
+		{
+			client.setVarbit(VarbitID.BANK_CURRENTTAB, tab);
+		}
+	}
+
+	// The number of numbered tabs the real bank has (its item-icon tab buttons), so we can tell when the
+	// current tab is a virtual one the bank doesn't actually have.
+	private int realBankTabCount()
+	{
+		final Widget tabs = client.getWidget(InterfaceID.Bankmain.TABS);
+		if (tabs == null)
+		{
+			return 0;
+		}
+		int count = 0;
+		for (Widget[] group : new Widget[][]{tabs.getDynamicChildren(), tabs.getStaticChildren(), tabs.getNestedChildren()})
+		{
+			if (group == null)
+			{
+				continue;
+			}
+			for (Widget c : group)
+			{
+				if (c != null && c.getItemId() > 0)
+				{
+					count++;
+				}
+			}
+		}
+		return count;
+	}
+
 	// Tab icons are set during the bank build, so override them AFTER it runs (post-fire), or they'd be
 	// clobbered.
 	void onScriptPostFired(ScriptPostFired event)
@@ -253,6 +321,16 @@ public class BankLayoutRenderer
 		{
 			return;
 		}
+		decorateBank(template);
+	}
+
+	/**
+	 * Post-build bank decoration: tab icons/selection, the slot counter, and the title bar. Also invoked when
+	 * an overlay extra tab is clicked (which doesn't trigger a native rebuild), so the native tab selection,
+	 * counter and title follow the viewed tab.
+	 */
+	private void decorateBank(BankTemplate template)
+	{
 		applyTabIcons(template);
 
 		// Overwrite the bank's slot counter to show the active template's footprint (items + placeholders +
@@ -265,15 +343,12 @@ public class BankLayoutRenderer
 			occupied.setText(capacity > 0 && used > capacity ? "<col=ff3030>" + used + "</col>" : Integer.toString(used));
 		}
 
-		// While editing, show the "Editing ..." banner in the bank's real title bar (set after the bank's
-		// own title so it isn't clobbered). Over-capacity is conveyed by the red slot counter above.
-		if (layoutEditor.isEditing(template))
+		// Title bar: the editing banner while editing (the native title is correct otherwise, since the viewed
+		// tab is the native current tab).
+		final Widget title = client.getWidget(InterfaceID.Bankmain.TITLE);
+		if (title != null && layoutEditor.isEditing(template))
 		{
-			final Widget title = client.getWidget(InterfaceID.Bankmain.TITLE);
-			if (title != null)
-			{
-				title.setText("Editing \"" + template.getName() + "\"");
-			}
+			title.setText("Editing \"" + template.getName() + "\"");
 		}
 	}
 
@@ -381,6 +456,9 @@ public class BankLayoutRenderer
 				icon.setHidden(true);
 				continue;
 			}
+			// Block the native tab-drag reorder (it would shuffle the real bank's tabs); the overlay
+			// intercepts the drop and reorders the template's tabs instead.
+			icon.setOnDragCompleteListener((JavaScriptCallback) ev -> client.setDraggedOnWidget(null));
 			final int iconItem = firstItem(template.tabLayout(tabNum));
 			if (iconItem > 0)
 			{
@@ -409,16 +487,18 @@ public class BankLayoutRenderer
 				}
 				bg.revalidate();
 			}
-			if (addIcon != null)
-			{
-				addIcon.setOriginalX(TAB_ICON_X + packed * TAB_W);
-				addIcon.revalidate();
-			}
-			if (addBg != null)
-			{
-				addBg.setOriginalX(TAB_BG_X + packed * TAB_W);
-				addBg.revalidate();
-			}
+		}
+
+		// The + is drawn by the overlay (after the extra tabs) instead of being repositioned here:
+		// repositioning the native + widened the bank's tab layout and glitched the tab row on hover. Just
+		// hide the native one.
+		if (addIcon != null)
+		{
+			addIcon.setHidden(true);
+		}
+		if (addBg != null)
+		{
+			addBg.setHidden(true);
 		}
 	}
 
@@ -637,7 +717,7 @@ public class BankLayoutRenderer
 		// a numbered tab while editing we skip them (the grid is the design surface); in the all-items view
 		// we still show them, separated by a divider, so you can see what's not yet in the template.
 		int slotIdx = appendStart;
-		if ((!editing || mainView) && !config.hideNonTemplateItems())
+		if ((!editing || mainView) && !config.hideNonTemplateItems() && !virtualTab)
 		{
 			for (int itemId : bankItems)
 			{

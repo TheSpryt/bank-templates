@@ -128,6 +128,7 @@ public class TemplateManager
 			if (t != null && t.getName() != null && !t.getTabs().isEmpty())
 			{
 				t.setPreset(false);
+				t.pruneTrailingEmptyTabs();
 				userTemplates.put(t.getName(), t);
 			}
 		}
