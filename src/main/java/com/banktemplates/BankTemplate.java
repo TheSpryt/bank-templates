@@ -177,6 +177,66 @@ public class BankTemplate
 		tabs.removeIf(t -> t.getTab() == tab && t.getLayout().isEmpty());
 	}
 
+	/**
+	 * Removes trailing empty numbered tabs - the highest-numbered tabs holding no real item (e.g. a tab left
+	 * behind after all its items were moved away). Stops at the first non-empty tab from the top, so it never
+	 * leaves a gap in the numbering. Pointless empty tabs otherwise count toward the 9-tab cap (hiding the +)
+	 * and render as a blank tab button.
+	 */
+	public synchronized void pruneTrailingEmptyTabs()
+	{
+		normalize();
+		for (int n = 9; n >= 1; n--)
+		{
+			final int[] lay = tabLayout(n);
+			if (lay == null)
+			{
+				continue;
+			}
+			boolean hasItem = false;
+			for (int v : lay)
+			{
+				if (v > 0 && v != FILLER)
+				{
+					hasItem = true;
+					break;
+				}
+			}
+			if (hasItem)
+			{
+				break;
+			}
+			final int num = n;
+			tabs.removeIf(t -> t.getTab() == num);
+		}
+	}
+
+	/**
+	 * Removes a numbered tab and renumbers the higher tabs down to close the gap (like the real bank collapsing
+	 * a tab). The main view (0) is never removed. No-op if the tab isn't defined.
+	 */
+	public synchronized void removeTab(int tab)
+	{
+		normalize();
+		if (tab == MAIN_TAB)
+		{
+			return;
+		}
+		// Snapshot the surviving numbered tabs (their backing lists), renumbering anything above the removed
+		// tab down by one.
+		final List<TabLayout> survivors = new ArrayList<>();
+		for (TabLayout t : tabs)
+		{
+			if (t.getTab() == MAIN_TAB || t.getTab() == tab)
+			{
+				continue;
+			}
+			survivors.add(new TabLayout(t.getTab() > tab ? t.getTab() - 1 : t.getTab(), t.getLayout()));
+		}
+		tabs.removeIf(t -> t.getTab() != MAIN_TAB);
+		tabs.addAll(survivors);
+	}
+
 	/** Tabs this template defines, ascending, with the main view (0) sorting first for the editor. */
 	public synchronized List<Integer> definedTabs()
 	{
@@ -194,6 +254,44 @@ public class BankTemplate
 	{
 		// Main/untabbed (0) sorts first in the editor (it's the "all items" view); numbered tabs follow.
 		return tab == MAIN_TAB ? -1 : tab;
+	}
+
+	/**
+	 * Swaps two numbered tabs, like dragging one bank tab onto another: {@code fromTab} and {@code toTab}
+	 * exchange contents (their tab numbers stay put, so the rest of the tabs are untouched). The main view
+	 * (0) is never involved. Returns the tab number now holding what was dragged ({@code toTab}), or -1 on a
+	 * no-op (either isn't a numbered tab this template defines, or they're the same).
+	 */
+	public synchronized int moveTab(int fromTab, int toTab)
+	{
+		normalize();
+		if (fromTab == MAIN_TAB || toTab == MAIN_TAB || fromTab == toTab)
+		{
+			return -1;
+		}
+		List<Integer> fromLayout = null;
+		List<Integer> toLayout = null;
+		for (TabLayout t : tabs)
+		{
+			if (t.getTab() == fromTab)
+			{
+				fromLayout = t.getLayout();
+			}
+			else if (t.getTab() == toTab)
+			{
+				toLayout = t.getLayout();
+			}
+		}
+		if (fromLayout == null || toLayout == null)
+		{
+			return -1;
+		}
+		// Exchange the two tabs' contents, keeping their numbers (drag tab 3 onto tab 1 -> tab 1 shows tab 3's
+		// items and vice versa).
+		tabs.removeIf(t -> t.getTab() == fromTab || t.getTab() == toTab);
+		tabs.add(new TabLayout(toTab, fromLayout));
+		tabs.add(new TabLayout(fromTab, toLayout));
+		return toTab;
 	}
 
 	/** A deep, independent copy - used to snapshot a template before editing so edits can be reverted. */
