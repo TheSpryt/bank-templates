@@ -179,8 +179,24 @@ public class LayoutEditor
 	{
 		if (itemId == BankTemplate.FILLER || (itemId > 0 && !contains(itemId)))
 		{
-			edit(tab, slots -> slots.add(itemId));
+			edit(tab, slots -> addOrFill(slots, itemId));
 		}
+	}
+
+	// Places an item in the first empty slot if there is one, else appends - so adding to a freshly created
+	// tab (which starts as a row of empty slots) lands in the top-left, not in the row after the empties.
+	private static void addOrFill(List<Integer> slots, int itemId)
+	{
+		for (int i = 0; i < slots.size(); i++)
+		{
+			final Integer v = slots.get(i);
+			if (v == null || v == BankTemplate.EMPTY)
+			{
+				slots.set(i, itemId);
+				return;
+			}
+		}
+		slots.add(itemId);
 	}
 
 	/**
@@ -213,7 +229,7 @@ public class LayoutEditor
 			}
 			return;
 		}
-		edit(tab, slots -> slots.add(itemId));
+		edit(tab, slots -> addOrFill(slots, itemId));
 	}
 
 	/**
@@ -362,16 +378,28 @@ public class LayoutEditor
 		}
 	}
 
-	/** Removes a slot, shifting everything after it up. */
+	/** Removes a slot, shifting everything after it up; collapses the tab if it leaves no real items. */
 	void removeSlot(int tab, int pos)
 	{
-		edit(tab, slots ->
+		final BankTemplate t = liveTemplate();
+		if (t == null)
 		{
+			return;
+		}
+		synchronized (t)
+		{
+			final List<Integer> slots = t.editableTab(tab);
 			if (pos >= 0 && pos < slots.size())
 			{
 				slots.remove(pos);
 			}
-		});
+			if (tab != BankTemplate.MAIN_TAB && !hasRealItems(slots))
+			{
+				t.removeTab(tab);
+			}
+		}
+		templateManager.saveUserTemplate(t);
+		notifyChanged();
 	}
 
 	/** Inserts an empty slot at {@code pos}, shifting everything from there down. */
@@ -400,42 +428,69 @@ public class LayoutEditor
 		});
 	}
 
-	/** Moves the slot at {@code fromPos} in {@code fromTab} to the end of {@code toTab} (drag onto a tab). */
-	void moveToTab(int fromTab, int fromPos, int toTab)
+	/**
+	 * Moves the slot at {@code fromPos} in {@code fromTab} to the end of {@code toTab} (drag onto a tab).
+	 * Returns the destination tab's final number (shifted down if collapsing the source renumbered it), or
+	 * -1 if nothing moved - so the bank can follow the item when the viewed tab collapses.
+	 */
+	int moveToTab(int fromTab, int fromPos, int toTab)
 	{
 		final BankTemplate t = liveTemplate();
 		if (t == null || fromTab == toTab)
 		{
-			return;
+			return -1;
 		}
 		synchronized (t)
 		{
 			final List<Integer> from = t.editableTab(fromTab);
 			if (fromPos < 0 || fromPos >= from.size())
 			{
-				return;
+				return -1;
 			}
 			final Integer value = from.remove(fromPos);
 			if (value != null && value != BankTemplate.EMPTY)
 			{
 				t.editableTab(toTab).add(value);
 			}
+			// Collapse the source tab if dragging its last item out left it with no real items; the
+			// destination shifts down a number if it sat above the removed tab.
+			if (fromTab != BankTemplate.MAIN_TAB && !hasRealItems(from))
+			{
+				t.removeTab(fromTab);
+				if (toTab > fromTab)
+				{
+					toTab--;
+				}
+			}
 		}
 		templateManager.saveUserTemplate(t);
 		notifyChanged();
+		return toTab;
+	}
+
+	private static boolean hasRealItems(List<Integer> slots)
+	{
+		for (Integer v : slots)
+		{
+			if (v != null && v > 0 && v != BankTemplate.FILLER)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
 	 * Moves the slot at {@code fromPos} in {@code fromTab} into a brand-new tab (the next free numbered
-	 * tab), mirroring the game's "drag to the + tab" behaviour. Respects the 9-tab maximum; returns false
-	 * (and does nothing) if all nine tabs are already used.
+	 * tab), mirroring the game's "drag to the + tab" behaviour. Respects the 9-tab maximum. Returns the new
+	 * tab's final number (so the bank can follow the item), or -1 if all nine tabs are already used.
 	 */
-	boolean moveToNewTab(int fromTab, int fromPos)
+	int moveToNewTab(int fromTab, int fromPos)
 	{
 		final BankTemplate t = liveTemplate();
 		if (t == null)
 		{
-			return false;
+			return -1;
 		}
 		int next;
 		synchronized (t)
@@ -452,10 +507,29 @@ public class LayoutEditor
 		}
 		if (next > MAX_TABS)
 		{
-			return false;
+			return -1;
 		}
-		moveToTab(fromTab, fromPos, next);
-		return true;
+		return moveToTab(fromTab, fromPos, next);
+	}
+
+	/**
+	 * Reorders numbered tabs (drag a tab onto another to move it there), renumbering them 1..N. Returns the
+	 * moved tab's new number, or -1 on a no-op.
+	 */
+	int moveTab(int fromTab, int toTab)
+	{
+		final BankTemplate t = liveTemplate();
+		if (t == null)
+		{
+			return -1;
+		}
+		final int newNum = t.moveTab(fromTab, toTab);
+		if (newNum > 0)
+		{
+			templateManager.saveUserTemplate(t);
+			notifyChanged();
+		}
+		return newNum;
 	}
 
 	/** Swaps the contents of two slots (drag-to-swap). Pads with empties if needed. */

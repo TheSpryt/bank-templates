@@ -170,6 +170,8 @@ public class BankTemplatesPlugin extends Plugin
 		// into place after a tab click, which forces a rebuild). Force that clean rebuild on open.
 		if (event.getGroupId() == InterfaceID.BANKMAIN)
 		{
+			// Re-select a virtual template tab the game reset to all-items, before forcing the clean rebuild.
+			renderer.restoreViewedTabOnOpen();
 			requestBankRebuild();
 		}
 	}
