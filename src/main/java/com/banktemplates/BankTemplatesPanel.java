@@ -1423,7 +1423,11 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private String localMeta(BankTemplate template)
 	{
-		final String kind = template.isPreset() ? "Preset" : template.isOwned() ? "Shared by you" : "Custom";
+		// Owned = you uploaded it; an imported template has a repo id but isn't owned; otherwise local-only.
+		final String kind = template.isPreset() ? "Preset"
+			: template.isOwned() ? "Shared by you"
+			: template.getRepoId() != null ? "Imported"
+			: "Custom";
 		final int total = template.itemCount();
 		final int tabs = template.tabCount();
 		// "x / y items" when the bank is known (x = how many of the template's items you currently own),
@@ -1573,9 +1577,59 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		else
 		{
-			TemplateEditor.open(this, itemManager, itemIndex, clientThread, layoutEditor, template);
+			TemplateEditor.open(this, itemManager, itemIndex, clientThread, layoutEditor, templateManager, template,
+				() ->
+				{
+					rebuildOnEdt();
+					maybePromptPushAfterEdit(template);
+				});
 		}
 		rebuildOnEdt();
+	}
+
+	// After editing a template you've shared, offer to push the changes to your community copy. Imports and
+	// local-only templates have nothing to push, so they're skipped.
+	private void maybePromptPushAfterEdit(BankTemplate template)
+	{
+		if (!repositoryClient.isEnabled() || !template.isOwned() || template.getRepoId() == null)
+		{
+			return;
+		}
+		final int choice = JOptionPane.showConfirmDialog(this,
+			"<html><body style='width:240px'>You edited \"" + escape(template.getName()) + "\", which you've shared."
+				+ "<br>Push these changes to your shared copy now?<br><br>"
+				+ "This won't change copies other players have already imported - only new imports get the update."
+				+ "</body></html>",
+			"Update shared copy?", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+		if (choice == JOptionPane.YES_OPTION)
+		{
+			pushUpdate(template);
+		}
+	}
+
+	// Pushes the template's current name/description/layout to its shared copy, reusing the saved author and
+	// anonymous preference (no need to re-prompt the full share dialog).
+	private void pushUpdate(BankTemplate template)
+	{
+		if (template.getRepoId() == null || !requireLogin())
+		{
+			return;
+		}
+		final boolean anonymous = template.isSharedAnonymously();
+		clientThread.invoke(() ->
+		{
+			final Player local = client.getLocalPlayer();
+			final String author = local != null && local.getName() != null ? local.getName() : "";
+			repositoryClient.update(template.getRepoId(), template, author, anonymous,
+				() -> SwingUtilities.invokeLater(() ->
+				{
+					templateManager.saveUserTemplate(template);
+					rebuildOnEdt();
+					JOptionPane.showMessageDialog(this, "Updated your shared \"" + template.getName() + "\".", "Updated", JOptionPane.INFORMATION_MESSAGE);
+				}),
+				error -> SwingUtilities.invokeLater(() ->
+					JOptionPane.showMessageDialog(this, error, "Update failed", JOptionPane.WARNING_MESSAGE)));
+		});
 	}
 
 	private void createNewLayout()
@@ -1593,7 +1647,12 @@ public class BankTemplatesPanel extends PluginPanel
 		if (templateManager.saveUserTemplate(t))
 		{
 			rebuildOnEdt();
-			TemplateEditor.open(this, itemManager, itemIndex, clientThread, layoutEditor, t);
+			TemplateEditor.open(this, itemManager, itemIndex, clientThread, layoutEditor, templateManager, t,
+				() ->
+				{
+					rebuildOnEdt();
+					maybePromptPushAfterEdit(t);
+				});
 			// A brand-new layout auto-applies, so you can build it live over the bank straight away.
 			select(t);
 		}

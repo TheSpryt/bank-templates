@@ -233,6 +233,68 @@ public class TemplateManager
 		return true;
 	}
 
+	/**
+	 * Renames a user template, moving its on-disk file and keeping the active-template config in sync.
+	 * The template's name is its storage key (map key + file name), so this re-keys it rather than just
+	 * setting the field. Returns false if the new name is blank or collides with a preset or another
+	 * user template (case-insensitive); a no-op rename to the same name returns true.
+	 */
+	public boolean renameTemplate(BankTemplate template, String newName)
+	{
+		if (template == null || template.isPreset() || newName == null)
+		{
+			return false;
+		}
+
+		final String trimmed = newName.trim();
+		if (trimmed.isEmpty())
+		{
+			return false;
+		}
+
+		final String oldName = template.getName();
+		if (trimmed.equals(oldName))
+		{
+			return true;
+		}
+
+		// Don't shadow a preset, or clobber a different user template that already uses the name.
+		for (BankTemplate p : presets)
+		{
+			if (p.getName().equalsIgnoreCase(trimmed))
+			{
+				return false;
+			}
+		}
+		for (BankTemplate t : userTemplates.values())
+		{
+			if (t != template && t.getName().equalsIgnoreCase(trimmed))
+			{
+				return false;
+			}
+		}
+
+		userTemplates.remove(oldName);
+		template.setName(trimmed);
+		userTemplates.put(trimmed, template);
+
+		// Write the new file first, then drop the old one - but only if it's a different file (a rename that
+		// only changes case or punctuation can map to the same safe file name, which we must not delete).
+		final Path oldFile = fileFor(oldName);
+		writeAsync(template);
+		if (!fileFor(trimmed).equals(oldFile))
+		{
+			deleteAsync(oldName);
+		}
+
+		// The active template is tracked by name in config; if this is it, repoint the stored name.
+		if (active == template)
+		{
+			configManager.setConfiguration(BankTemplatesConfig.GROUP, BankTemplatesConfig.ACTIVE_TEMPLATE_KEY, trimmed);
+		}
+		return true;
+	}
+
 	public void deleteUserTemplate(BankTemplate template)
 	{
 		if (template == null || template.isPreset())
