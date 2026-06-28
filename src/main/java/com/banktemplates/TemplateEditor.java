@@ -23,6 +23,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -52,6 +53,9 @@ final class TemplateEditor
 {
 	private static final int CELL = 38;
 	private static final Border CELL_BORDER = BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR);
+	// Client property on each tab button holding its tab number; the "+" (new tab) button uses NEW_TAB.
+	private static final String TAB_PROP = "bt.tab";
+	private static final Integer NEW_TAB = Integer.MIN_VALUE;
 
 	private final ItemManager itemManager;
 	private final ItemIndex itemIndex;
@@ -349,6 +353,7 @@ final class TemplateEditor
 				rebuildTabs();
 				rebuildGrid();
 			});
+			add.putClientProperty(TAB_PROP, NEW_TAB);
 			tabBar.add(add);
 		}
 		tabBar.revalidate();
@@ -361,6 +366,7 @@ final class TemplateEditor
 		// its text label. Empty numbered tabs fall back to the text label too.
 		final int iconId = t == BankTemplate.MAIN_TAB ? 0 : firstItem(t);
 		final JButton b = new JButton(iconId > 0 ? "" : text);
+		b.putClientProperty(TAB_PROP, t);
 		if (iconId > 0)
 		{
 			itemManager.getImage(iconId).addTo(b);
@@ -375,6 +381,47 @@ final class TemplateEditor
 			tab = t;
 			rebuildTabs();
 			rebuildGrid();
+		});
+		// Drag a numbered tab onto another tab to reorder them (the main view can't be moved). A plain
+		// click still switches tabs (the action above); only a release over a different tab reorders.
+		b.addMouseMotionListener(new MouseMotionAdapter()
+		{
+			@Override
+			public void mouseDragged(MouseEvent e)
+			{
+				if (!SwingUtilities.isLeftMouseButton(e) || t == BankTemplate.MAIN_TAB || iconId <= 0)
+				{
+					return;
+				}
+				if (!glass.isVisible())
+				{
+					glass.start(itemManager.getImage(iconId));
+				}
+				glass.moveTo(SwingUtilities.convertPoint(b, e.getPoint(), glass));
+			}
+		});
+		b.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseReleased(MouseEvent e)
+			{
+				glass.stop();
+				if (t == BankTemplate.MAIN_TAB)
+				{
+					return;
+				}
+				final Integer dest = tabDropTarget(b, e.getPoint());
+				if (dest != null && !dest.equals(NEW_TAB) && dest != BankTemplate.MAIN_TAB && dest != t)
+				{
+					final int newNum = editor.moveTab(t, dest);
+					if (newNum > 0)
+					{
+						tab = newNum;
+						rebuildTabs();
+						rebuildGrid();
+					}
+				}
+			}
 		});
 		return b;
 	}
@@ -498,6 +545,21 @@ final class TemplateEditor
 				glass.stop();
 				if (maybePopup(e, index))
 				{
+					return;
+				}
+				// Dropped on a tab button -> move this item to that tab's end (or onto + for a new tab),
+				// like dragging onto a tab over the real bank.
+				final Integer destTab = tabDropTarget(cell, e.getPoint());
+				if (destTab != null)
+				{
+					if (destTab.equals(NEW_TAB))
+					{
+						editor.moveToNewTab(tab, index);
+					}
+					else if (destTab != tab)
+					{
+						editor.moveToTab(tab, index, destTab);
+					}
 					return;
 				}
 				// Drag: pressed on this cell, released over another -> move/swap.
@@ -641,5 +703,26 @@ final class TemplateEditor
 			return cells.indexOf(c);
 		}
 		return -1;
+	}
+
+	// The tab a point (in {@code src}'s coordinates) is over in the tab bar: a tab number, NEW_TAB for the
+	// "+" button, or null if the point isn't over a tab button.
+	private Integer tabDropTarget(Component src, Point p)
+	{
+		final Point inBar = SwingUtilities.convertPoint(src, p, tabBar);
+		if (inBar.x < 0 || inBar.y < 0 || inBar.x >= tabBar.getWidth() || inBar.y >= tabBar.getHeight())
+		{
+			return null;
+		}
+		final Component c = tabBar.getComponentAt(inBar);
+		if (c instanceof JComponent)
+		{
+			final Object t = ((JComponent) c).getClientProperty(TAB_PROP);
+			if (t instanceof Integer)
+			{
+				return (Integer) t;
+			}
+		}
+		return null;
 	}
 }
