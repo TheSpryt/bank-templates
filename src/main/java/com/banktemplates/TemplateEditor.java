@@ -32,6 +32,7 @@ import javax.swing.JPopupMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
@@ -57,11 +58,17 @@ final class TemplateEditor
 	private static final String TAB_PROP = "bt.tab";
 	private static final Integer NEW_TAB = Integer.MIN_VALUE;
 
+	// Template names cap at this length (matches the panel's capture/new-layout naming).
+	private static final int MAX_NAME_LENGTH = 25;
+
 	private final ItemManager itemManager;
 	private final ItemIndex itemIndex;
 	private final ClientThread clientThread;
 	private final LayoutEditor editor;
+	private final TemplateManager templateManager;
 	private final BankTemplate template;
+	// Run after a successful Apply (used to offer pushing changes to the shared copy). May be null.
+	private final Runnable onApplied;
 
 	private final JPanel gridHolder = new JPanel(new BorderLayout());
 	private final JPanel tabBar = new JPanel(new WrapLayout(FlowLayout.LEFT, 3, 2));
@@ -73,30 +80,36 @@ final class TemplateEditor
 	private boolean swapMode = false;
 	private Runnable listener;
 	private JDialog dialog;
+	private JTextField nameField;
 	private JTextArea descArea;
 	private final DragGlass glass = new DragGlass();
 
-	private TemplateEditor(ItemManager itemManager, ItemIndex itemIndex, ClientThread clientThread, LayoutEditor editor, BankTemplate template)
+	private TemplateEditor(ItemManager itemManager, ItemIndex itemIndex, ClientThread clientThread, LayoutEditor editor,
+		TemplateManager templateManager, BankTemplate template, Runnable onApplied)
 	{
 		this.itemManager = itemManager;
 		this.itemIndex = itemIndex;
 		this.clientThread = clientThread;
 		this.editor = editor;
+		this.templateManager = templateManager;
 		this.template = template;
+		this.onApplied = onApplied;
 		this.tab = template.definedTabs().isEmpty() ? BankTemplate.MAIN_TAB : template.definedTabs().get(0);
 	}
 
 	/**
 	 * Starts an edit session on {@code template} (if not already) and opens the editor window beside
-	 * {@code parent}.
+	 * {@code parent}. {@code onApplied} runs after a successful Apply (e.g. to offer pushing the changes
+	 * to the shared copy); it may be null.
 	 */
-	static void open(Component parent, ItemManager itemManager, ItemIndex itemIndex, ClientThread clientThread, LayoutEditor editor, BankTemplate template)
+	static void open(Component parent, ItemManager itemManager, ItemIndex itemIndex, ClientThread clientThread,
+		LayoutEditor editor, TemplateManager templateManager, BankTemplate template, Runnable onApplied)
 	{
 		if (!editor.isEditing(template) && !editor.start(template))
 		{
 			return;
 		}
-		new TemplateEditor(itemManager, itemIndex, clientThread, editor, template).show(parent);
+		new TemplateEditor(itemManager, itemIndex, clientThread, editor, templateManager, template, onApplied).show(parent);
 	}
 
 	private void show(Component parent)
@@ -130,6 +143,27 @@ final class TemplateEditor
 		final JLabel hint = buildHint();
 		hint.setAlignmentX(Component.LEFT_ALIGNMENT);
 		top.add(hint);
+		top.add(Box.createVerticalStrut(4));
+
+		// Editable name, saved on Apply. The name is also the template's storage key, so Apply renames the
+		// on-disk file too (Cancel/close leaves it unchanged).
+		final JLabel nameLabel = new JLabel("Name:");
+		nameLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		nameLabel.setFont(FontManager.getRunescapeSmallFont());
+		nameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		top.add(nameLabel);
+		top.add(Box.createVerticalStrut(2));
+
+		nameField = new JTextField(template.getName() == null ? "" : template.getName());
+		nameField.setFont(FontManager.getRunescapeSmallFont());
+		nameField.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		nameField.setForeground(Color.WHITE);
+		nameField.setCaretColor(Color.WHITE);
+		nameField.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+		nameField.setAlignmentX(Component.LEFT_ALIGNMENT);
+		nameField.setMaximumSize(new Dimension(Integer.MAX_VALUE, nameField.getPreferredSize().height));
+		nameField.setToolTipText("Rename this template (up to " + MAX_NAME_LENGTH + " characters). Saved on Apply.");
+		top.add(nameField);
 		top.add(Box.createVerticalStrut(4));
 
 		// Editable, multi-line description, saved when Apply is clicked (Cancel/close leaves it unchanged).
@@ -247,9 +281,29 @@ final class TemplateEditor
 		dialog.dispose();
 	}
 
-	// Saves the (edited) description, then commits the layout. Cancel or closing leaves the description as it was.
+	// Applies the (edited) name and description, then commits the layout. Cancel or closing leaves them as
+	// they were. A name clash with a preset or another template is reported and Apply is held open.
 	private void applyEdits()
 	{
+		String newName = nameField.getText().trim();
+		if (newName.isEmpty())
+		{
+			JOptionPane.showMessageDialog(dialog, "Enter a name for this template.", "Name required", JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+		if (newName.length() > MAX_NAME_LENGTH)
+		{
+			newName = newName.substring(0, MAX_NAME_LENGTH).trim();
+		}
+		// Rename re-keys the template and moves its on-disk file; reject a clash rather than overwriting.
+		if (!newName.equals(template.getName()) && !templateManager.renameTemplate(template, newName))
+		{
+			JOptionPane.showMessageDialog(dialog,
+				"A template named \"" + newName + "\" already exists. Choose a different name.",
+				"Name in use", JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+
 		String d = descArea.getText().trim();
 		if (d.length() > 500)
 		{
@@ -257,6 +311,12 @@ final class TemplateEditor
 		}
 		template.setDescription(d);
 		editor.finish();
+
+		// Once the editor has closed, optionally offer to push the changes to the shared copy.
+		if (onApplied != null)
+		{
+			SwingUtilities.invokeLater(onApplied);
+		}
 	}
 
 	private JLabel buildHint()
