@@ -39,7 +39,8 @@ final class TemplatePreview
 	{
 	}
 
-	static JPanel build(ItemManager itemManager, ClientThread clientThread, BankTemplate template, String description)
+	static JPanel build(ItemManager itemManager, ClientThread clientThread, BankTemplate template, String description,
+		java.util.function.Consumer<TabLayout> onImportTab)
 	{
 		final int columns = template.getColumns();
 		final List<TabLayout> tabs = new ArrayList<>(template.getTabs());
@@ -63,6 +64,9 @@ final class TemplatePreview
 		final JPanel tabBar = new JPanel(new WrapLayout(FlowLayout.LEFT, 3, 2));
 		tabBar.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		final List<JButton> tabButtons = new ArrayList<>();
+		// "Import this tab" copies the currently viewed numbered tab elsewhere; disabled on the main view.
+		final TabLayout[] current = {null};
+		final JButton importBtn = onImportTab == null ? null : new JButton("Import this tab");
 		for (int i = 0; i < tabs.size(); i++)
 		{
 			final TabLayout tab = tabs.get(i);
@@ -88,6 +92,11 @@ final class TemplatePreview
 					other.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 				}
 				b.setBackground(ColorScheme.BRAND_ORANGE);
+				current[0] = tab;
+				if (importBtn != null)
+				{
+					importBtn.setEnabled(!isMain);
+				}
 				gridHolder.removeAll();
 				gridHolder.add(grid(itemManager, clientThread, BankTemplate.toArray(tab.getLayout()), columnsRef[0]), BorderLayout.NORTH);
 				gridHolder.revalidate();
@@ -120,6 +129,26 @@ final class TemplatePreview
 
 		root.add(top, BorderLayout.NORTH);
 		root.add(scroll, BorderLayout.CENTER);
+
+		if (importBtn != null)
+		{
+			importBtn.setFocusPainted(false);
+			importBtn.setBackground(ColorScheme.DARKER_GRAY_HOVER_COLOR);
+			importBtn.setForeground(Color.WHITE);
+			importBtn.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+			importBtn.setToolTipText("Copy the tab in view into one of your templates (or a new one).");
+			importBtn.addActionListener(e ->
+			{
+				if (current[0] != null && current[0].getTab() != BankTemplate.MAIN_TAB)
+				{
+					onImportTab.accept(current[0]);
+				}
+			});
+			final JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 4));
+			bottom.setBackground(ColorScheme.DARK_GRAY_COLOR);
+			bottom.add(importBtn);
+			root.add(bottom, BorderLayout.SOUTH);
+		}
 
 		// Select the first tab.
 		if (!tabButtons.isEmpty())
