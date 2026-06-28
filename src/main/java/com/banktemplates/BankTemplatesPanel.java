@@ -1668,8 +1668,144 @@ public class BankTemplatesPanel extends PluginPanel
 		content.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		content.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 		// The preview builds its own description (so the window is a consistent width either way).
-		content.add(TemplatePreview.build(itemManager, clientThread, template, template.getDescription()), BorderLayout.CENTER);
+		content.add(TemplatePreview.build(itemManager, clientThread, template, template.getDescription(),
+			this::importTabInto), BorderLayout.CENTER);
 		showSideDialog("Preview: " + template.getName(), content);
+	}
+
+	// Copies one tab from a previewed template into a template of the user's choice (an existing one, or a
+	// brand-new one), appending it as that template's next free numbered tab. Lets you mix tabs from
+	// different templates without rebuilding them by hand. Source identity doesn't matter - only the layout.
+	private void importTabInto(TabLayout source)
+	{
+		if (source == null || source.getTab() == BankTemplate.MAIN_TAB)
+		{
+			return;
+		}
+		final List<Integer> layout = new ArrayList<>(source.getLayout());
+
+		final List<BankTemplate> dests = templateManager.getUserTemplates();
+		final String newOption = "+ New template...";
+		final List<String> options = new ArrayList<>();
+		for (BankTemplate t : dests)
+		{
+			options.add(t.getName());
+		}
+		options.add(newOption);
+
+		final String choice = (String) JOptionPane.showInputDialog(this, "Import this tab into:", "Import tab",
+			JOptionPane.PLAIN_MESSAGE, null, options.toArray(), options.get(0));
+		if (choice == null)
+		{
+			return;
+		}
+
+		if (newOption.equals(choice))
+		{
+			final String input = JOptionPane.showInputDialog(this,
+				"Name for the new template (max " + MAX_NAME_LENGTH + " chars):", "New template");
+			if (input == null || input.trim().isEmpty())
+			{
+				return;
+			}
+			final BankTemplate t = new BankTemplate();
+			t.setName(uniqueName(capName(input)));
+			t.setColumns(BankTemplatesPlugin.ITEMS_PER_ROW);
+			t.putTab(BankTemplate.MAIN_TAB, new ArrayList<>());
+			t.putTab(1, layout);
+			if (templateManager.saveUserTemplate(t))
+			{
+				rebuildOnEdt();
+				JOptionPane.showMessageDialog(this, "Created \"" + t.getName() + "\" with the imported tab.",
+					"Imported tab", JOptionPane.INFORMATION_MESSAGE);
+			}
+			else
+			{
+				JOptionPane.showMessageDialog(this, "Could not create that template.", "Import failed", JOptionPane.ERROR_MESSAGE);
+			}
+			return;
+		}
+
+		final BankTemplate dest = templateManager.findByName(choice);
+		if (dest == null || dest.isPreset())
+		{
+			return;
+		}
+		final int free = nextFreeTab(dest.definedTabs());
+		if (free < 0)
+		{
+			JOptionPane.showMessageDialog(this, "\"" + dest.getName() + "\" already has the maximum of 9 tabs.",
+				"No free tab", JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+		dest.putTab(free, layout);
+		// An item can only live in one bank tab, so release any item this tab brings in from wherever it
+		// already sat in the destination - it "moves" to the imported tab.
+		final int released = releaseDuplicates(dest, free, layout);
+		templateManager.saveUserTemplate(dest);
+		rebuildOnEdt();
+		final String extra = released > 0
+			? " Moved " + released + " item" + (released == 1 ? "" : "s") + " out of other tabs (they can't be in two tabs at once)."
+			: "";
+		JOptionPane.showMessageDialog(this, "Added the tab to \"" + dest.getName() + "\" as tab " + free + "." + extra,
+			"Imported tab", JOptionPane.INFORMATION_MESSAGE);
+	}
+
+	// Releases (removes, shifting the rest up) any real item the newly imported tab contains from the
+	// destination's other tabs, so each item lives in a single tab. Fillers and empty slots are left alone.
+	// Returns how many slots were released.
+	private static int releaseDuplicates(BankTemplate dest, int importedTab, List<Integer> importedLayout)
+	{
+		final java.util.Set<Integer> imported = new java.util.HashSet<>();
+		for (Integer v : importedLayout)
+		{
+			if (v != null && v > 0 && v != BankTemplate.FILLER)
+			{
+				imported.add(v);
+			}
+		}
+		if (imported.isEmpty())
+		{
+			return 0;
+		}
+
+		int released = 0;
+		for (Integer t : dest.definedTabs())
+		{
+			if (t == importedTab)
+			{
+				continue;
+			}
+			final List<Integer> layout = dest.copyTab(t);
+			final List<Integer> kept = new ArrayList<>(layout.size());
+			for (Integer v : layout)
+			{
+				if (v != null && imported.contains(v))
+				{
+					released++;
+					continue;
+				}
+				kept.add(v);
+			}
+			if (kept.size() != layout.size())
+			{
+				dest.putTab(t, kept);
+			}
+		}
+		return released;
+	}
+
+	// The first numbered tab (1-9) a template doesn't already define, or -1 when all nine are taken.
+	private static int nextFreeTab(List<Integer> defined)
+	{
+		for (int t = 1; t <= 9; t++)
+		{
+			if (!defined.contains(t))
+			{
+				return t;
+			}
+		}
+		return -1;
 	}
 
 	/**
