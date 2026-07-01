@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.5.2",
+    "notes": [
+      "Bank view: template tabs your bank doesn't have yet now show their value in the bank title, matching your real tabs.",
+      "Bank view: fixed the extra template-tab buttons disappearing while certain numbered tabs were open."
+    ]
+  },
+  {
     "version": "1.5.1",
     "notes": [
       "Bank view: fixed being unable to withdraw items while Quest Helper's 'show quest items' bank view is open. The template now steps aside for it, the same way it already does for Bank Tags tag tabs, bank searches and Inventory Setups."

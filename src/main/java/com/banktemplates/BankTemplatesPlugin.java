@@ -57,6 +57,12 @@ public class BankTemplatesPlugin extends Plugin
 	private BankLayoutRenderer renderer;
 
 	@Inject
+	private net.runelite.client.eventbus.EventBus eventBus;
+
+	@Inject
+	private BankValuePreRenderer bankValuePreRenderer;
+
+	@Inject
 	private TemplateRepositoryClient repositoryClient;
 
 	@Inject
@@ -107,6 +113,11 @@ public class BankTemplatesPlugin extends Plugin
 			.build();
 		clientToolbar.addNavigation(navButton);
 
+		// Second, higher-priority ScriptPreFired subscriber (see BankValuePreRenderer): renders virtual tabs
+		// before RuneLite's Bank plugin values the title. It's not auto-registered like the plugin's own
+		// subscriptions, so register it here and unregister on shutdown.
+		eventBus.register(bankValuePreRenderer);
+
 		overlayManager.add(reorgHelperOverlay);
 		overlayManager.add(layoutEditorOverlay);
 		mouseManager.registerMouseListener(layoutEditorOverlay);
@@ -119,6 +130,7 @@ public class BankTemplatesPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
+		eventBus.unregister(bankValuePreRenderer);
 		if (layoutEditor.isEditing())
 		{
 			layoutEditor.finish();
