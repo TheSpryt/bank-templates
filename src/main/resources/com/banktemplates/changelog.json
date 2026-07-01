@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.5.1",
+    "notes": [
+      "Bank view: fixed being unable to withdraw items while Quest Helper's 'show quest items' bank view is open. The template now steps aside for it, the same way it already does for Bank Tags tag tabs, bank searches and Inventory Setups."
+    ]
+  },
+  {
     "version": "1.5",
     "notes": [
       "Layout editor: you can now rename a template - edit its Name at the top of the editor and click Apply. (No more being stuck with a template called 'My bank'.)",
