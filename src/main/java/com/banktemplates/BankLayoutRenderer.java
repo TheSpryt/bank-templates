@@ -148,6 +148,10 @@ public class BankLayoutRenderer
 		return s != null ? s : obtainVirtual(container, virt[0]++);
 	}
 
+	// The bank's default title, and the prefix of the title we set ourselves while live-editing a template.
+	private static final String NORMAL_BANK_TITLE = "The Bank of Gielinor";
+	private static final String EDIT_TITLE_PREFIX = "Editing \"";
+
 	static boolean isBankFiltered(Client client)
 	{
 		final Widget title = client.getWidget(InterfaceID.Bankmain.TITLE);
@@ -155,11 +159,39 @@ public class BankLayoutRenderer
 		{
 			return false;
 		}
-		final String t = Text.removeTags(title.getText()).toLowerCase();
-		// "tag tab"/"showing" = a Bank Tags tag tab or a search. "inventory setup" = the Inventory Setups
-		// bank view, which overrides the bank title to "Inventory Setup <name>". In all of these the bank is
-		// showing a filtered/foreign layout, so we must not apply ours over the top of it.
-		return t.contains("tag tab") || t.startsWith("showing") || t.startsWith("inventory setup");
+		// The bank/tab value display appends a value suffix - "The Bank of Gielinor (1,567,565,294)",
+		// "Tab 3 (325,395)" - to the title after the build, so strip a trailing "(...)" before matching or an
+		// owned view would look foreign (and, being checked every frame / at click time, break withdrawals).
+		final String t = Text.removeTags(title.getText()).trim().replaceAll("\\s*\\([^)]*\\)\\s*$", "").trim();
+		// Allow-list, not block-list: we render only over views the bank itself owns - the normal bank, a
+		// numbered tab ("Tab 3", including the out-of-range virtual tabs we select), and our own "Editing"
+		// view. Any other title means another plugin has taken over the bank widgets: a search ("Showing
+		// items: ..."), a Bank Tags "Tag tab ...", Inventory Setups, Quest Helper's "Tab <coloured name>",
+		// and so on. Treating every non-owned title as foreign means new bank plugins need no special case.
+		return !t.equalsIgnoreCase(NORMAL_BANK_TITLE) && !t.startsWith(EDIT_TITLE_PREFIX) && !isNumberedTabTitle(t);
+	}
+
+	// True for the native numbered-tab title "Tab <n>" (n = 1..9, or a virtual tab number we've selected).
+	// Quest Helper's "Tab <quest name>" and Bank Tags' "Tag tab <name>" deliberately don't match.
+	private static boolean isNumberedTabTitle(String t)
+	{
+		if (!t.startsWith("Tab "))
+		{
+			return false;
+		}
+		final String rest = t.substring(4).trim();
+		if (rest.isEmpty())
+		{
+			return false;
+		}
+		for (int i = 0; i < rest.length(); i++)
+		{
+			if (!Character.isDigit(rest.charAt(i)))
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 
 	void onScriptPreFired(ScriptPreFired event)
@@ -241,12 +273,14 @@ public class BankLayoutRenderer
 		}
 		if (layout == null || layout.length == 0)
 		{
-			if (!editingNow)
+			// A real bank tab the template doesn't cover: leave the bank in its default state so the real
+			// items still show. But a virtual tab has no real tab underneath it, so render it (empty) rather
+			// than bailing out - otherwise clicking an empty virtual tab in applied mode shows nothing.
+			if (!editingNow && !virtualTab)
 			{
-				// This template doesn't define the tab being viewed: leave the bank in its default state.
 				return;
 			}
-			// Editing a tab the template doesn't cover yet: render an empty, editable grid.
+			// A virtual/empty tab, or editing a tab the template doesn't cover yet: render an empty grid.
 			layout = new int[0];
 		}
 
