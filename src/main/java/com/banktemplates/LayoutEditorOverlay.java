@@ -703,8 +703,19 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		// The tab backgrounds (all-items + numbered, ascending x); the rightmost is the last real tab. Used to
 		// size/place the overlay extra tabs to match the native tab buttons exactly.
 		bgs.sort((a, b) -> a.x - b.x);
-		this.lastTabBg = bgs.isEmpty() ? null : bgs.get(bgs.size() - 1);
-		this.tabBgPitch = bgs.size() >= 2 ? bgs.get(1).x - bgs.get(0).x : 0;
+		// A selected/hovered tab can carry a second background at the same x as its base tab; collapse
+		// duplicate x positions so the pitch (spacing between adjacent tabs) can't come out as 0 (which blanks
+		// the overlay extra tabs).
+		final java.util.List<Rectangle> distinct = new java.util.ArrayList<>();
+		for (Rectangle r : bgs)
+		{
+			if (distinct.isEmpty() || distinct.get(distinct.size() - 1).x != r.x)
+			{
+				distinct.add(r);
+			}
+		}
+		this.lastTabBg = distinct.isEmpty() ? null : distinct.get(distinct.size() - 1);
+		this.tabBgPitch = distinct.size() >= 2 ? distinct.get(1).x - distinct.get(0).x : 0;
 		return map;
 	}
 

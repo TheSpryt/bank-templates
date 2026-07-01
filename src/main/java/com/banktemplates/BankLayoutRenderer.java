@@ -194,6 +194,26 @@ public class BankLayoutRenderer
 		return true;
 	}
 
+	// Renders an out-of-range (virtual) tab a step early - before RuneLite's Bank plugin sums the visible
+	// widgets for the title value - so a virtual tab shows its value in the title like a real tab does. Only
+	// virtual tabs qualify (a tag tab, search or Inventory Setups view never uses an out-of-range tab), so
+	// this can't clobber another plugin's view; the normal render still runs afterwards for every case.
+	void preRenderVirtualTab(ScriptPreFired event)
+	{
+		if (event.getScriptId() != ScriptID.BANKMAIN_FINISHBUILDING)
+		{
+			return;
+		}
+		final int realTabs = realBankTabCount();
+		final int currentTab = client.getVarbitValue(VarbitID.BANK_CURRENTTAB);
+		if (realTabs <= 0 || currentTab <= realTabs || isBankFiltered(client))
+		{
+			return;
+		}
+		hideVirtualSlots();
+		renderTemplate();
+	}
+
 	void onScriptPreFired(ScriptPreFired event)
 	{
 		if (event.getScriptId() != ScriptID.BANKMAIN_FINISHBUILDING)
