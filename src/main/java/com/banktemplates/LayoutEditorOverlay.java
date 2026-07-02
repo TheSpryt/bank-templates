@@ -361,9 +361,14 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		}
 	}
 
-	// First real item of a tab (the icon), or -1.
+	// The tab's icon: its chosen custom icon, else its first real item, or -1 if it has neither.
 	private static int firstTabItem(BankTemplate template, int tabNum)
 	{
+		final int custom = template.getTabIcon(tabNum);
+		if (custom > 0)
+		{
+			return custom;
+		}
 		final int[] layout = template.tabLayout(tabNum);
 		if (layout != null)
 		{
@@ -507,6 +512,14 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 			pressPoint = p;
 		}
 		return e;
+	}
+
+	// The numbered tab (1-9, real or virtual) whose button contains {@code p}, or -1. Used by the plugin to
+	// add a "Set icon" entry to a bank tab's right-click menu.
+	int tabAt(java.awt.Point p)
+	{
+		final int real = tabButtonAt(p);
+		return real >= 1 ? real : extraTabAt(p);
 	}
 
 	// The numbered tab (1-9) whose button contains {@code p}, or -1 (the main/all-items tab isn't returned).
