@@ -588,6 +588,46 @@ public class LayoutEditor
 		notifyChanged();
 	}
 
+	/** Sets (0 clears, reverting to the first item) the custom icon for a tab on the live template. */
+	void setTabIcon(int tab, int iconId)
+	{
+		final BankTemplate t = liveTemplate();
+		if (t == null || tab == BankTemplate.MAIN_TAB)
+		{
+			return;
+		}
+		synchronized (t)
+		{
+			t.setTabIcon(tab, iconId);
+		}
+		templateManager.saveUserTemplate(t);
+		notifyChanged();
+	}
+
+	/** Collapses a tab into the all-items view: moves its real items to the main tab, then removes the tab. */
+	void collapseTab(int tab)
+	{
+		final BankTemplate t = liveTemplate();
+		if (t == null || tab == BankTemplate.MAIN_TAB)
+		{
+			return;
+		}
+		synchronized (t)
+		{
+			final List<Integer> main = t.editableTab(BankTemplate.MAIN_TAB);
+			for (Integer v : t.copyTab(tab))
+			{
+				if (v != null && v > 0 && v != BankTemplate.FILLER)
+				{
+					main.add(v);
+				}
+			}
+			t.removeTab(tab);
+		}
+		templateManager.saveUserTemplate(t);
+		notifyChanged();
+	}
+
 	// Drop trailing empty slots from a tab so a saved layout doesn't carry dead space at the end.
 	private static void trimTrailing(List<Integer> slots)
 	{
