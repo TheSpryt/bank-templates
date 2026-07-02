@@ -329,6 +329,12 @@ public class BankLayoutRenderer
 		}
 	}
 
+	// The number of real numbered tabs the bank has; a template tab above this is a virtual (overlay) tab.
+	int realTabCount()
+	{
+		return realBankTabCount();
+	}
+
 	// The number of numbered tabs the real bank has (its item-icon tab buttons), so we can tell when the
 	// current tab is a virtual one the bank doesn't actually have.
 	private int realBankTabCount()
@@ -513,7 +519,8 @@ public class BankLayoutRenderer
 			// Block the native tab-drag reorder (it would shuffle the real bank's tabs); the overlay
 			// intercepts the drop and reorders the template's tabs instead.
 			icon.setOnDragCompleteListener((JavaScriptCallback) ev -> client.setDraggedOnWidget(null));
-			final int iconItem = firstItem(template.tabLayout(tabNum));
+			final int custom = template.getTabIcon(tabNum);
+			final int iconItem = custom > 0 ? custom : firstItem(template.tabLayout(tabNum));
 			if (iconItem > 0)
 			{
 				icon.setItemId(iconItem);

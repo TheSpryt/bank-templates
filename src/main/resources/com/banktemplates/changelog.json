@@ -2,6 +2,8 @@
   {
     "version": "1.5.2",
     "notes": [
+      "Bank tabs: choose a custom icon for any tab instead of it defaulting to the tab's first item. Right-click a tab - in the layout editor or in-bank - and pick 'Set icon' (search for the item in the chatbox), or 'Reset icon' to go back to the first item. Handy when another plugin's tab-naming clashes with the default icon.",
+      "Bank view: template tabs your bank doesn't have yet (the extra tabs) now have the full right-click menu - View tab, Set icon, Collapse tab, Remove placeholders - and a hover action, matching your real tabs. 'Collapse tab' moves the tab's items into the all-items view and drops the tab; 'Remove placeholders' clears the tab's not-yet-owned items.",
       "Bank view: template tabs your bank doesn't have yet now show their value in the bank title, matching your real tabs.",
       "Bank view: fixed the extra template-tab buttons disappearing while certain numbered tabs were open."
     ]

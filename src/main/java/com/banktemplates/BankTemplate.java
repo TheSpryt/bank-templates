@@ -141,8 +141,52 @@ public class BankTemplate
 	public synchronized void putTab(int tab, List<Integer> tabLayout)
 	{
 		normalize();
+		// Keep any custom icon the tab already had - replacing its layout (e.g. moving items in) shouldn't
+		// silently reset the icon the user chose for it.
+		int icon = 0;
+		for (TabLayout t : tabs)
+		{
+			if (t.getTab() == tab)
+			{
+				icon = t.getCustomIconId();
+				break;
+			}
+		}
 		tabs.removeIf(t -> t.getTab() == tab);
-		tabs.add(new TabLayout(tab, tabLayout));
+		final TabLayout added = new TabLayout(tab, tabLayout);
+		added.setCustomIconId(icon);
+		tabs.add(added);
+	}
+
+	/** The custom icon item id chosen for a tab's button, or 0 to use the tab's first item (the default). */
+	public synchronized int getTabIcon(int tab)
+	{
+		normalize();
+		for (TabLayout t : tabs)
+		{
+			if (t.getTab() == tab)
+			{
+				return t.getCustomIconId();
+			}
+		}
+		return 0;
+	}
+
+	/** Sets (or clears, with 0) a tab's custom icon, creating the tab if it isn't defined yet. */
+	public synchronized void setTabIcon(int tab, int iconId)
+	{
+		normalize();
+		for (TabLayout t : tabs)
+		{
+			if (t.getTab() == tab)
+			{
+				t.setCustomIconId(iconId);
+				return;
+			}
+		}
+		final TabLayout created = new TabLayout(tab, new ArrayList<>());
+		created.setCustomIconId(iconId);
+		tabs.add(created);
 	}
 
 	/**
@@ -231,7 +275,9 @@ public class BankTemplate
 			{
 				continue;
 			}
-			survivors.add(new TabLayout(t.getTab() > tab ? t.getTab() - 1 : t.getTab(), t.getLayout()));
+			final TabLayout moved = new TabLayout(t.getTab() > tab ? t.getTab() - 1 : t.getTab(), t.getLayout());
+			moved.setCustomIconId(t.getCustomIconId());
+			survivors.add(moved);
 		}
 		tabs.removeIf(t -> t.getTab() != MAIN_TAB);
 		tabs.addAll(survivors);
@@ -271,26 +317,34 @@ public class BankTemplate
 		}
 		List<Integer> fromLayout = null;
 		List<Integer> toLayout = null;
+		int fromIcon = 0;
+		int toIcon = 0;
 		for (TabLayout t : tabs)
 		{
 			if (t.getTab() == fromTab)
 			{
 				fromLayout = t.getLayout();
+				fromIcon = t.getCustomIconId();
 			}
 			else if (t.getTab() == toTab)
 			{
 				toLayout = t.getLayout();
+				toIcon = t.getCustomIconId();
 			}
 		}
 		if (fromLayout == null || toLayout == null)
 		{
 			return -1;
 		}
-		// Exchange the two tabs' contents, keeping their numbers (drag tab 3 onto tab 1 -> tab 1 shows tab 3's
-		// items and vice versa).
+		// Exchange the two tabs' contents (and their icons - the icon belongs to the items), keeping their
+		// numbers (drag tab 3 onto tab 1 -> tab 1 shows tab 3's items and icon, and vice versa).
 		tabs.removeIf(t -> t.getTab() == fromTab || t.getTab() == toTab);
-		tabs.add(new TabLayout(toTab, fromLayout));
-		tabs.add(new TabLayout(fromTab, toLayout));
+		final TabLayout movedTo = new TabLayout(toTab, fromLayout);
+		movedTo.setCustomIconId(fromIcon);
+		final TabLayout movedFrom = new TabLayout(fromTab, toLayout);
+		movedFrom.setCustomIconId(toIcon);
+		tabs.add(movedTo);
+		tabs.add(movedFrom);
 		return toTab;
 	}
 
@@ -309,7 +363,9 @@ public class BankTemplate
 		c.tabs = new ArrayList<>();
 		for (TabLayout t : tabs)
 		{
-			c.tabs.add(new TabLayout(t.getTab(), new ArrayList<>(t.getLayout())));
+			final TabLayout copy = new TabLayout(t.getTab(), new ArrayList<>(t.getLayout()));
+			copy.setCustomIconId(t.getCustomIconId());
+			c.tabs.add(copy);
 		}
 		return c;
 	}
@@ -322,7 +378,9 @@ public class BankTemplate
 		tabs.clear();
 		for (TabLayout t : other.tabs)
 		{
-			tabs.add(new TabLayout(t.getTab(), new ArrayList<>(t.getLayout())));
+			final TabLayout copy = new TabLayout(t.getTab(), new ArrayList<>(t.getLayout()));
+			copy.setCustomIconId(t.getCustomIconId());
+			tabs.add(copy);
 		}
 		columns = other.columns;
 	}
