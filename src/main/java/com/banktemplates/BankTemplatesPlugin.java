@@ -6,9 +6,17 @@ import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.ItemContainer;
+import net.runelite.api.MenuAction;
+import net.runelite.api.MenuEntry;
+import net.runelite.api.Point;
+import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.MenuOpened;
 import net.runelite.api.events.MenuOptionClicked;
+import net.runelite.api.gameval.VarbitID;
+import net.runelite.client.game.ItemManager;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.ScriptPreFired;
 import net.runelite.api.events.WidgetLoaded;
@@ -17,6 +25,7 @@ import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.game.chatbox.ChatboxItemSearch;
 import net.runelite.client.input.MouseManager;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
@@ -76,6 +85,12 @@ public class BankTemplatesPlugin extends Plugin
 
 	@Inject
 	private LayoutEditorOverlay layoutEditorOverlay;
+
+	@Inject
+	private ChatboxItemSearch itemSearch;
+
+	@Inject
+	private ItemManager itemManager;
 
 	@Inject
 	private MouseManager mouseManager;
@@ -204,6 +219,154 @@ public class BankTemplatesPlugin extends Plugin
 	{
 		renderer.handleRelease(event);
 		renderer.remapWithdraw(event);
+	}
+
+	@Subscribe
+	public void onMenuOpened(MenuOpened event)
+	{
+		// A REAL numbered tab: the game already provides View/Collapse/Remove placeholders, so just slot in
+		// "Set icon"/"Reset icon" as the 2nd/3rd options. Only over the applied template's own bank view (not
+		// a tag tab, a search or a different template). Virtual tabs have no game menu - their whole menu is
+		// built each tick in onClientTick instead (so it also works as the hover action).
+		if (templateManager.getActive() == null || !layoutEditor.liveOverBank()
+			|| BankLayoutRenderer.isBankFiltered(client))
+		{
+			return;
+		}
+		final Point m = client.getMouseCanvasPosition();
+		if (m == null)
+		{
+			return;
+		}
+		final int tab = layoutEditorOverlay.tabAt(new java.awt.Point(m.getX(), m.getY()));
+		if (tab < 1 || tab > renderer.realTabCount())
+		{
+			return;
+		}
+		final BankTemplate template = layoutEditor.liveTemplate();
+		if (template == null)
+		{
+			return;
+		}
+		final String target = "<col=ff9040>Tab " + tab + "</col>";
+		if (template.getTabIcon(tab) > 0)
+		{
+			client.createMenuEntry(-2).setOption("Reset icon").setTarget(target)
+				.setType(MenuAction.RUNELITE).onClick(e -> layoutEditor.setTabIcon(tab, 0));
+		}
+		client.createMenuEntry(-2).setOption("Set icon").setTarget(target)
+			.setType(MenuAction.RUNELITE).onClick(e -> openTabIconSearch(tab));
+	}
+
+	@Subscribe
+	public void onClientTick(ClientTick event)
+	{
+		// A virtual tab is overlay-drawn with no game widget, so it has no hover action or right-click menu of
+		// its own. Build the full menu each tick the cursor is over one, so the top-left reads "View tab N /
+		// x more options" and right-click shows every option. Skip when it's already there - RuneLite only
+		// rebuilds the menu when the cursor moves, so re-adding while it sits still piles up duplicates.
+		if (templateManager.getActive() == null || !layoutEditor.liveOverBank()
+			|| BankLayoutRenderer.isBankFiltered(client))
+		{
+			return;
+		}
+		final Point m = client.getMouseCanvasPosition();
+		if (m == null)
+		{
+			return;
+		}
+		final int tab = layoutEditorOverlay.tabAt(new java.awt.Point(m.getX(), m.getY()));
+		if (tab <= renderer.realTabCount() || menuHasOption("View tab"))
+		{
+			return;
+		}
+		final BankTemplate template = layoutEditor.liveTemplate();
+		if (template == null)
+		{
+			return;
+		}
+		final String target = "<col=ff9040>Tab " + tab + "</col>";
+		// Built bottom-up (each -1 goes to the top): View tab, Set icon, [Reset icon], Collapse, Remove placeholders.
+		client.createMenuEntry(-1).setOption("Remove placeholders").setTarget(target)
+			.setType(MenuAction.RUNELITE).onClick(e -> removeTabPlaceholders(tab));
+		client.createMenuEntry(-1).setOption("Collapse tab").setTarget(target)
+			.setType(MenuAction.RUNELITE).onClick(e -> collapseVirtualTab(tab));
+		if (template.getTabIcon(tab) > 0)
+		{
+			client.createMenuEntry(-1).setOption("Reset icon").setTarget(target)
+				.setType(MenuAction.RUNELITE).onClick(e -> layoutEditor.setTabIcon(tab, 0));
+		}
+		client.createMenuEntry(-1).setOption("Set icon").setTarget(target)
+			.setType(MenuAction.RUNELITE).onClick(e -> openTabIconSearch(tab));
+		client.createMenuEntry(-1).setOption("View tab").setTarget(target)
+			.setType(MenuAction.RUNELITE).onClick(e -> viewTab(tab));
+	}
+
+	// Whether the current right-click menu already contains an entry with this option text.
+	private boolean menuHasOption(String option)
+	{
+		for (MenuEntry e : client.getMenuEntries())
+		{
+			if (option.equals(e.getOption()))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// Opens RuneLite's chatbox item search to choose a tab's custom icon.
+	private void openTabIconSearch(int tab)
+	{
+		itemSearch
+			.tooltipText("Set the icon for tab " + tab)
+			.onItemSelected(itemId -> clientThread.invokeLater(() -> layoutEditor.setTabIcon(tab, itemId)))
+			.build();
+	}
+
+	// Views a virtual tab (as clicking its overlay button does): make it the current bank tab and re-lay-out.
+	private void viewTab(int tab)
+	{
+		client.setVarbit(VarbitID.BANK_CURRENTTAB, tab);
+		bankSearch.layoutBank();
+	}
+
+	// Collapses a virtual tab into the all-items view (moves its items to the main tab, drops the tab), then
+	// shows the main view since the tab you were on is gone.
+	private void collapseVirtualTab(int tab)
+	{
+		layoutEditor.collapseTab(tab);
+		client.setVarbit(VarbitID.BANK_CURRENTTAB, BankTemplate.MAIN_TAB);
+		bankSearch.layoutBank();
+	}
+
+	// Removes a tab's placeholder slots: items you don't own (shown faded) and any native placeholder items.
+	private void removeTabPlaceholders(int tab)
+	{
+		final BankTemplate template = layoutEditor.liveTemplate();
+		if (template == null)
+		{
+			return;
+		}
+		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		synchronized (template)
+		{
+			template.editableTab(tab).removeIf(v ->
+			{
+				if (v == null || v <= 0 || v == BankTemplate.FILLER)
+				{
+					return false;
+				}
+				if (client.getItemDefinition(v).getPlaceholderTemplateId() != -1)
+				{
+					return true;
+				}
+				return bank == null || bank.count(itemManager.canonicalize(v)) <= 0;
+			});
+		}
+		templateManager.saveUserTemplate(template);
+		requestBankRebuild();
+		panel.rebuild();
 	}
 
 	@Subscribe

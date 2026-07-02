@@ -71,8 +71,9 @@ final class TemplatePreview
 		{
 			final TabLayout tab = tabs.get(i);
 			final boolean isMain = tab.getTab() == BankTemplate.MAIN_TAB;
-			// A bank tab's icon is its first item (that's how the game determines it).
-			final int iconId = isMain ? 0 : firstItem(tab.getLayout());
+			// A bank tab's icon is a custom one if the template set it, else its first item (the game default).
+			final int custom = isMain ? 0 : template.getTabIcon(tab.getTab());
+			final int iconId = isMain ? 0 : custom > 0 ? custom : firstItem(tab.getLayout());
 			final JButton b = new JButton(isMain ? "Main" : iconId > 0 ? "" : Integer.toString(tab.getTab()));
 			if (iconId > 0)
 			{

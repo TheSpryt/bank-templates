@@ -11,6 +11,8 @@ class TabLayout
 {
 	private int tab;
 	private List<Integer> layout = new ArrayList<>();
+	// A chosen icon item id for this tab's button; 0 means "use the tab's first item" (the default).
+	private int customIconId;
 
 	TabLayout()
 	{
@@ -25,6 +27,16 @@ class TabLayout
 	int getTab()
 	{
 		return tab;
+	}
+
+	int getCustomIconId()
+	{
+		return customIconId;
+	}
+
+	void setCustomIconId(int customIconId)
+	{
+		this.customIconId = customIconId;
 	}
 
 	/**
