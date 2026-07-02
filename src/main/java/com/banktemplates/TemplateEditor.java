@@ -422,9 +422,10 @@ final class TemplateEditor
 
 	private JButton tabButton(String text, int t, boolean active)
 	{
-		// Numbered tabs show their icon (the tab's first item), like the real bank; the main view keeps
-		// its text label. Empty numbered tabs fall back to the text label too.
-		final int iconId = t == BankTemplate.MAIN_TAB ? 0 : firstItem(t);
+		// Numbered tabs show their icon (a custom one if chosen, else the tab's first item), like the real
+		// bank; the main view keeps its text label. Empty numbered tabs fall back to the text label too.
+		final int custom = t == BankTemplate.MAIN_TAB ? 0 : template.getTabIcon(t);
+		final int iconId = t == BankTemplate.MAIN_TAB ? 0 : custom > 0 ? custom : firstItem(t);
 		final JButton b = new JButton(iconId > 0 ? "" : text);
 		b.putClientProperty(TAB_PROP, t);
 		if (iconId > 0)
@@ -463,10 +464,16 @@ final class TemplateEditor
 		b.addMouseListener(new MouseAdapter()
 		{
 			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				maybeTabIconPopup(e, t);
+			}
+
+			@Override
 			public void mouseReleased(MouseEvent e)
 			{
 				glass.stop();
-				if (t == BankTemplate.MAIN_TAB)
+				if (maybeTabIconPopup(e, t) || t == BankTemplate.MAIN_TAB)
 				{
 					return;
 				}
@@ -484,6 +491,24 @@ final class TemplateEditor
 			}
 		});
 		return b;
+	}
+
+	// Right-click a numbered tab -> pick a custom icon for it, or reset to using its first item.
+	private boolean maybeTabIconPopup(MouseEvent e, int t)
+	{
+		if (!e.isPopupTrigger() || t == BankTemplate.MAIN_TAB)
+		{
+			return false;
+		}
+		final JPopupMenu menu = new JPopupMenu();
+		menu.add(item("Set custom icon...", () ->
+			ItemSearch.open(dialog, itemIndex, id -> editor.setTabIcon(t, id), true)));
+		if (template.getTabIcon(t) > 0)
+		{
+			menu.add(item("Use first item", () -> editor.setTabIcon(t, 0)));
+		}
+		menu.show(e.getComponent(), e.getX(), e.getY());
+		return true;
 	}
 
 	// The icon for a tab is its first real item (filler/empty slots are skipped), or 0 if none.
