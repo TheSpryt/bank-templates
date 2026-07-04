@@ -5,6 +5,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Dimension;
+import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
@@ -17,6 +18,8 @@ import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JViewport;
+import javax.swing.Scrollable;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
@@ -75,7 +78,7 @@ final class ItemSearch
 		final SearchBar field = new SearchBar();
 		field.setPreferredSize(new Dimension(100, 30));
 
-		final JPanel results = new JPanel();
+		final JPanel results = new ResultsPanel();
 		results.setLayout(new BoxLayout(results, BoxLayout.Y_AXIS));
 		results.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
@@ -167,6 +170,42 @@ final class ItemSearch
 		}
 		row.addActionListener(e -> onPick.accept(id));
 		return row;
+	}
+
+	// Results list that fills the scroll viewport when its content is shorter than the viewport, so a short
+	// result set (e.g. a couple of matches) doesn't leave a tall, scrollable empty region below it. When the
+	// content is taller than the viewport it scrolls normally. Also tracks the viewport width so rows fill it.
+	private static final class ResultsPanel extends JPanel implements Scrollable
+	{
+		@Override
+		public Dimension getPreferredScrollableViewportSize()
+		{
+			return getPreferredSize();
+		}
+
+		@Override
+		public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction)
+		{
+			return 16;
+		}
+
+		@Override
+		public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction)
+		{
+			return visibleRect.height;
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportWidth()
+		{
+			return true;
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportHeight()
+		{
+			return getParent() instanceof JViewport && getParent().getHeight() > getPreferredSize().height;
+		}
 	}
 
 	private static JLabel message(String text)
