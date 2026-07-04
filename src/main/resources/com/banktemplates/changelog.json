@@ -2,7 +2,8 @@
   {
     "version": "1.5.4",
     "notes": [
-      "Layout editor: the Add-item search no longer lists duplicate entries for items the game keeps several copies of (for example, three identical 'Law rune' results). Each item now appears once, matched to the real item so it applies and counts correctly."
+      "Layout editor: the Add-item search no longer lists duplicate entries for items the game keeps several copies of (for example, three identical 'Law rune' results). Each item now appears once, matched to the real item so it applies and counts correctly.",
+      "Layout editor: the Add-item search results no longer leave a tall empty area you can scroll through when only a few items match - the list now fits the results."
     ]
   },
   {
