@@ -1153,12 +1153,24 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		}
 		currentStepSig = "P:" + currentTab + ":" + i;
 
-		// Pick ONE mode for the whole tab so the user only toggles swap/insert once: whichever sorts this
-		// tab in fewer drags. The same drag (move the wanted item into slot i) works in either mode.
+		// Longest run of items already in the right relative order - the scaffold an optimal insert sort keeps
+		// in place, moving only the items around it. Also drives the mode choice below.
+		final int[] perm = permutation(current, target);
+		final boolean[] keep = lisKeep(perm);
+
+		// Pick ONE mode for the whole tab so the user only toggles swap/insert once: whichever sorts this tab
+		// in fewer drags (min swaps = n - cycles; min inserts = n - the kept run).
 		if (planTab != currentTab || !template.getName().equals(planTemplate))
 		{
-			final int[] perm = permutation(current, target);
-			planSwap = (perm.length - cycleCount(perm)) <= simulateInsertCost(perm);
+			int kept = 0;
+			for (boolean b : keep)
+			{
+				if (b)
+				{
+					kept++;
+				}
+			}
+			planSwap = (perm.length - cycleCount(perm)) <= (perm.length - kept);
 			planTab = currentTab;
 			planTemplate = template.getName();
 		}
@@ -1167,8 +1179,22 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		final int neededMode = swap ? 0 : 1;          // BANK_INSERTMODE: 0 = swap, 1 = insert
 		final boolean modeOk = client.getVarbitValue(VarbitID.BANK_INSERTMODE) == neededMode;
 
-		final Widget from = widgets.get(j);
-		final Widget to = widgets.get(i);
+		// By default bring the item this slot wants into it (from j to i). But in insert mode, if the item
+		// currently sitting in slot i is itself out of place (not part of the kept run) - e.g. one you just
+		// dragged to the wrong spot - guide THAT item straight to its own correct slot instead. That single
+		// insert slides the shifted run back into place, rather than nudging each item over one slot to make
+		// room for it. Gated on insert mode (the slide only works there) and on j being reachable above, so
+		// tabSorted still agrees on whether a move exists. (#27)
+		int fromIdx = j;
+		int toIdx = i;
+		if (!swap && i < keep.length && !keep[i])
+		{
+			fromIdx = i;
+			toIdx = perm[i];
+		}
+
+		final Widget from = widgets.get(fromIdx);
+		final Widget to = widgets.get(toIdx);
 		final Color highlight = config.reorgHighlightColor();
 
 		drawGhost(graphics, from.getItemId(), to.getBounds());
@@ -1403,34 +1429,49 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		return cycles;
 	}
 
-	// Moves the insert guide makes (greedy: bring each slot's correct item to it).
-	private static int simulateInsertCost(int[] perm)
+	// Marks the indices of `perm` that lie on ONE longest strictly-increasing subsequence: the items already
+	// in the correct relative order, which an optimal insert sort leaves in place while moving everything else
+	// into the gaps between them. n - (kept count) is therefore the minimum number of insert-drags to sort.
+	// perm is a true permutation of 0..n-1 (each item maps to a distinct target slot), so ties never arise.
+	private static boolean[] lisKeep(int[] perm)
 	{
-		final List<Integer> a = new ArrayList<>();
-		for (int v : perm)
+		final int n = perm.length;
+		final boolean[] keep = new boolean[n];
+		if (n == 0)
 		{
-			a.add(v);
+			return keep;
 		}
-		int moves = 0;
-		for (int i = 0; i < a.size(); i++)
+		final int[] tail = new int[n];   // tail[l] = index into perm of the smallest tail of a length-(l+1) run
+		final int[] prev = new int[n];   // predecessor index, for reconstructing the run
+		int len = 0;
+		for (int i = 0; i < n; i++)
 		{
-			if (a.get(i) == i)
+			int lo = 0;
+			int hi = len;
+			while (lo < hi)
 			{
-				continue;
+				final int mid = (lo + hi) >>> 1;
+				if (perm[tail[mid]] < perm[i])
+				{
+					lo = mid + 1;
+				}
+				else
+				{
+					hi = mid;
+				}
 			}
-			int j = i + 1;
-			while (j < a.size() && a.get(j) != i)
+			prev[i] = lo > 0 ? tail[lo - 1] : -1;
+			tail[lo] = i;
+			if (lo == len)
 			{
-				j++;
+				len++;
 			}
-			if (j >= a.size())
-			{
-				break;
-			}
-			a.add(i, a.remove(j));
-			moves++;
 		}
-		return moves;
+		for (int k = tail[len - 1]; k >= 0; k = prev[k])
+		{
+			keep[k] = true;
+		}
+		return keep;
 	}
 
 	private void drawTag(Graphics2D g, Rectangle b, String text, Color color)
