@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.5.3",
+    "notes": [
+      "Reorganise helper (step-by-step): if you drag an item into the wrong slot while sorting, the guide now sends that one item straight to its correct spot in a single insert, instead of nudging every item after it over one slot at a time to make room. Correcting a slip - or sorting a bank that is only slightly out of order - now takes far fewer drags."
+    ]
+  },
+  {
     "version": "1.5.2",
     "notes": [
       "Bank tabs: choose a custom icon for any tab instead of it defaulting to the tab's first item. Right-click a tab - in the layout editor or in-bank - and pick 'Set icon' (search for the item in the chatbox), or 'Reset icon' to go back to the first item. Handy when another plugin's tab-naming clashes with the default icon.",
