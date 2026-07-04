@@ -147,7 +147,17 @@ class ItemIndex
 				buildChunk(end, acc);
 				return;
 			}
-			index = acc.toArray(new Entry[0]);
+			// The cache holds several distinct, non-placeholder, non-noted copies of some items under one name
+			// (e.g. three "Law rune"s - a real tradeable one plus leftover/minigame duplicates). Keep only the
+			// first of each name; because we index in ascending id order, that's the base game item (id 563 for
+			// Law rune), not a later duplicate whose id might not variation-map to the item in your bank. Items
+			// with genuinely different names ("Arclight" vs "Arclight (or)") are untouched.
+			final java.util.Map<String, Entry> unique = new java.util.LinkedHashMap<>();
+			for (Entry e : acc)
+			{
+				unique.putIfAbsent(e.lower, e);
+			}
+			index = unique.values().toArray(new Entry[0]);
 			final List<Runnable> fire;
 			synchronized (this)
 			{
