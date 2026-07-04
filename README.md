@@ -5,7 +5,7 @@
 **Save, apply, and share bank layouts. Your real bank is never touched.**
 
 [![Plugin Hub installs](https://img.shields.io/endpoint?url=https://api.runelite.net/pluginhub/shields/installs/plugin/bank-templates&label=installs&color=brightgreen)](https://runelite.net/plugin-hub/show/bank-templates)
-[![Version](https://img.shields.io/badge/version-1.4.1-blue)](https://github.com/TheSpryt/bank-templates/releases)
+[![Version](https://img.shields.io/badge/version-1.5.3-blue)](https://github.com/TheSpryt/bank-templates/releases)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-orange)](LICENSE)
 [![RuneLite](https://img.shields.io/badge/RuneLite-Plugin%20Hub-yellow)](https://runelite.net/plugin-hub)
 
@@ -76,9 +76,10 @@ plugin only shows you what to do. Pick any combination of three display styles:
 - 👣 **Step-by-step** - walks you through one move at a time, with the instruction in the bank's title
   bar and the destination slot highlighted. It moves each item to its tab as you reach it (creating new
   tabs inline), then sorts each tab into place, choosing swap or insert to keep the number of drags down.
-  It also helps you set up: reserving slots for items you don't own yet with the game's **Bank Fillers**
-  (telling you the exact number to enter, with a **Skip** option), and creating extra tabs by dragging
-  onto the **+**.
+  Drag an item to the wrong slot and it sends that one item straight back to its correct spot in a single
+  insert, rather than nudging its neighbours over one at a time. It also helps you set up: reserving slots
+  for items you don't own yet with the game's **Bank Fillers** (telling you the exact number to enter,
+  with a **Skip** option), and creating extra tabs by dragging onto the **+**.
 
 Item kits and alternate versions of an item (charged/uncharged, degraded, recoloured, and so on) count
 as the same item, so the helper won't flag a slot just because you hold a different variant.
