@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.5.4",
+    "notes": [
+      "Layout editor: the Add-item search no longer lists duplicate entries for items the game keeps several copies of (for example, three identical 'Law rune' results). Each item now appears once, matched to the real item so it applies and counts correctly."
+    ]
+  },
+  {
     "version": "1.5.3",
     "notes": [
       "Reorganise helper (step-by-step): if you drag an item into the wrong slot while sorting, the guide now sends that one item straight to its correct spot in a single insert, instead of nudging every item after it over one slot at a time to make room. Correcting a slip - or sorting a bank that is only slightly out of order - now takes far fewer drags."
