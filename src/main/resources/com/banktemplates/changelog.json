@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.5.5",
+    "notes": [
+      "Preview: you can now import a template's Main (all-items) view, not just its numbered tabs - select the Main tab in a preview and click 'Import this tab'. Importing into an existing template replaces that template's main view (you're asked to confirm first when it already holds items); importing into a new template makes it that template's main view. As with numbered tabs, any item it brings in that already sits in another tab is moved into the main view."
+    ]
+  },
+  {
     "version": "1.5.4",
     "notes": [
       "Layout editor: the Add-item search no longer lists duplicate entries for items the game keeps several copies of (for example, three identical 'Law rune' results). Each item now appears once, matched to the real item so it applies and counts correctly.",
