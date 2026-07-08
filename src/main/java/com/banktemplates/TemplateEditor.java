@@ -352,9 +352,36 @@ final class TemplateEditor
 
 		left.add(button("Add item", () -> ItemSearch.open(parent, itemIndex, id ->
 		{
-			clientThread.invoke(() -> editor.addItemOrReport(tab, id, msg ->
+			// An item can only live in one bank tab. If the picked item is already in the layout, don't add a
+			// duplicate: if it's in this same tab there's nothing to do, and if it's in another tab, offer to
+			// move the original here instead. Otherwise add it normally.
+			clientThread.invoke(() ->
+			{
+				final int[] loc = editor.find(id);
+				if (loc == null)
+				{
+					editor.addItem(tab, id);
+					return;
+				}
+				final String name = editor.displayName(id);
+				if (loc[0] == tab)
+				{
+					SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(dialog,
+						name + " is already in this tab.", "Already in tab", JOptionPane.INFORMATION_MESSAGE));
+					return;
+				}
+				final String from = editor.tabLabel(loc[0]);
 				SwingUtilities.invokeLater(() ->
-					JOptionPane.showMessageDialog(dialog, msg, "Already in layout", JOptionPane.INFORMATION_MESSAGE))));
+				{
+					final int choice = JOptionPane.showConfirmDialog(dialog,
+						name + " is already in " + from + ". Move it to this tab?",
+						"Move item", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+					if (choice == JOptionPane.OK_OPTION)
+					{
+						clientThread.invoke(() -> editor.moveToTab(loc[0], loc[1], tab));
+					}
+				});
+			});
 		})));
 		left.add(button("Add filler", () -> editor.addItem(tab, BankTemplate.FILLER)));
 		left.add(button("Add row", () -> editor.addRow(tab)));

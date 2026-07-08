@@ -64,7 +64,8 @@ final class TemplatePreview
 		final JPanel tabBar = new JPanel(new WrapLayout(FlowLayout.LEFT, 3, 2));
 		tabBar.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		final List<JButton> tabButtons = new ArrayList<>();
-		// "Import this tab" copies the currently viewed numbered tab elsewhere; disabled on the main view.
+		// "Import this tab" copies the currently viewed tab - a numbered tab or the main "all items" view -
+		// into one of your templates.
 		final TabLayout[] current = {null};
 		final JButton importBtn = onImportTab == null ? null : new JButton("Import this tab");
 		for (int i = 0; i < tabs.size(); i++)
@@ -94,10 +95,6 @@ final class TemplatePreview
 				}
 				b.setBackground(ColorScheme.BRAND_ORANGE);
 				current[0] = tab;
-				if (importBtn != null)
-				{
-					importBtn.setEnabled(!isMain);
-				}
 				gridHolder.removeAll();
 				gridHolder.add(grid(itemManager, clientThread, BankTemplate.toArray(tab.getLayout()), columnsRef[0]), BorderLayout.NORTH);
 				gridHolder.revalidate();
@@ -140,7 +137,7 @@ final class TemplatePreview
 			importBtn.setToolTipText("Copy the tab in view into one of your templates (or a new one).");
 			importBtn.addActionListener(e ->
 			{
-				if (current[0] != null && current[0].getTab() != BankTemplate.MAIN_TAB)
+				if (current[0] != null)
 				{
 					onImportTab.accept(current[0]);
 				}
