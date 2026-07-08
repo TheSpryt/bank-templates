@@ -232,11 +232,18 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 				{
 					continue;
 				}
-				if (!targetTab.containsKey(canon))
+				// An item listed in two template tabs can only physically live in one, so the first tab to
+				// list it claims it. Skip the later tab's orphaned copy entirely - crucially without advancing
+				// this tab's rank - otherwise every item after it in this tab is ranked one slot too far and
+				// gets a wrong-slot label, even though the step-by-step packing (which skips the absent item)
+				// considers the tab correctly sorted. That mismatch is what made the labels disagree with the
+				// "Bank matches the template" header.
+				if (targetTab.containsKey(canon))
 				{
-					targetTab.put(canon, tl.getTab());
-					targetRank.put(canon, rank);
+					continue;
 				}
+				targetTab.put(canon, tl.getTab());
+				targetRank.put(canon, rank);
 				rank++;
 			}
 		}

@@ -1674,14 +1674,16 @@ public class BankTemplatesPanel extends PluginPanel
 	}
 
 	// Copies one tab from a previewed template into a template of the user's choice (an existing one, or a
-	// brand-new one), appending it as that template's next free numbered tab. Lets you mix tabs from
-	// different templates without rebuilding them by hand. Source identity doesn't matter - only the layout.
+	// brand-new one). A numbered tab is appended as the destination's next free numbered tab; the main
+	// ("all items") view replaces the destination's main view. Lets you mix tabs from different templates
+	// without rebuilding them by hand. Source identity doesn't matter - only the layout.
 	private void importTabInto(TabLayout source)
 	{
-		if (source == null || source.getTab() == BankTemplate.MAIN_TAB)
+		if (source == null)
 		{
 			return;
 		}
+		final boolean isMain = source.getTab() == BankTemplate.MAIN_TAB;
 		final List<Integer> layout = new ArrayList<>(source.getLayout());
 
 		final List<BankTemplate> dests = templateManager.getUserTemplates();
@@ -1711,8 +1713,16 @@ public class BankTemplatesPanel extends PluginPanel
 			final BankTemplate t = new BankTemplate();
 			t.setName(uniqueName(capName(input)));
 			t.setColumns(BankTemplatesPlugin.ITEMS_PER_ROW);
-			t.putTab(BankTemplate.MAIN_TAB, new ArrayList<>());
-			t.putTab(1, layout);
+			if (isMain)
+			{
+				// The main view becomes the new template's main view.
+				t.putTab(BankTemplate.MAIN_TAB, layout);
+			}
+			else
+			{
+				t.putTab(BankTemplate.MAIN_TAB, new ArrayList<>());
+				t.putTab(1, layout);
+			}
 			if (templateManager.saveUserTemplate(t))
 			{
 				rebuildOnEdt();
@@ -1731,6 +1741,34 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			return;
 		}
+
+		if (isMain)
+		{
+			// The main view replaces the destination's main view. Confirm first when that would discard
+			// existing main-view items, since the replace is destructive.
+			if (hasRealItems(dest.tabLayout(BankTemplate.MAIN_TAB))
+				&& JOptionPane.showConfirmDialog(this,
+					"Replace the main view of \"" + dest.getName() + "\" with this one? "
+						+ "Its current main-view items will be removed.",
+					"Replace main view", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE)
+					!= JOptionPane.OK_OPTION)
+			{
+				return;
+			}
+			dest.putTab(BankTemplate.MAIN_TAB, layout);
+			// An item can only live in one bank tab, so release any item this view brings in from wherever
+			// it already sat in the destination's numbered tabs - it "moves" to the main view.
+			final int released = releaseDuplicates(dest, BankTemplate.MAIN_TAB, layout);
+			templateManager.saveUserTemplate(dest);
+			rebuildOnEdt();
+			final String extra = released > 0
+				? " Moved " + released + " item" + (released == 1 ? "" : "s") + " out of other tabs (they can't be in two tabs at once)."
+				: "";
+			JOptionPane.showMessageDialog(this, "Replaced the main view of \"" + dest.getName() + "\"." + extra,
+				"Imported tab", JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+
 		final int free = nextFreeTab(dest.definedTabs());
 		if (free < 0)
 		{
@@ -1793,6 +1831,23 @@ public class BankTemplatesPanel extends PluginPanel
 			}
 		}
 		return released;
+	}
+
+	// Whether a tab layout holds at least one real item (not empty, not filler). Null layout -> false.
+	private static boolean hasRealItems(int[] layout)
+	{
+		if (layout == null)
+		{
+			return false;
+		}
+		for (int v : layout)
+		{
+			if (v > 0 && v != BankTemplate.FILLER)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// The first numbered tab (1-9) a template doesn't already define, or -1 when all nine are taken.
