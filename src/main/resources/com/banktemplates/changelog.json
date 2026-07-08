@@ -4,7 +4,8 @@
     "notes": [
       "Preview: you can now import a template's Main (all-items) view, not just its numbered tabs - select the Main tab in a preview and click 'Import this tab'. Importing into an existing template replaces that template's main view (you're asked to confirm first when it already holds items); importing into a new template makes it that template's main view. As with numbered tabs, any item it brings in that already sits in another tab is moved into the main view.",
       "Reorganise helper: fixed items being tagged with the wrong slot (and the guide showing no move for them) when a template lists the same item in two tabs. The duplicate no longer throws off the position labels for the rest of that tab, so the labels now agree with the 'Bank matches the template' state.",
-      "Layout editor: adding an item that's already in another tab now offers to move it to the tab you're editing, rather than silently refusing - an item can only live in one bank tab, so templates can no longer end up with the same item in two tabs. (Adding one that's already in the current tab just tells you so.)"
+      "Layout editor: adding an item that's already in another tab now offers to move it to the tab you're editing, rather than silently refusing - an item can only live in one bank tab, so templates can no longer end up with the same item in two tabs. (Adding one that's already in the current tab just tells you so.)",
+      "Community repository: if browsing can't reach the server, the message now simply asks you to restart your client and try again."
     ]
   },
   {

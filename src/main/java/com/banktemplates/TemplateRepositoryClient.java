@@ -144,6 +144,11 @@ public class TemplateRepositoryClient
 		return REPO_URL;
 	}
 
+	// Shown when a browse request can't connect or the server errors - deliberately generic and pointing at
+	// a client restart, since the usual causes (a dropped connection, a stale client session, or the server
+	// having moved) clear on one. Kept in 1.5.6 so existing clients already show it when 1.6 relocates the API.
+	private static final String CONNECT_ERROR = "Couldn't connect to the template repository. Please restart your client and try again.";
+
 	void search(String query, String sort, int offset, Consumer<Page> onSuccess, Consumer<String> onError)
 	{
 		if (!isEnabled())
@@ -176,7 +181,7 @@ public class TemplateRepositoryClient
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
-				onError.accept("Could not reach the repository.");
+				onError.accept(CONNECT_ERROR);
 			}
 
 			@Override
@@ -186,7 +191,7 @@ public class TemplateRepositoryClient
 				{
 					if (!r.isSuccessful() || r.body() == null)
 					{
-						onError.accept("Repository returned an error (" + r.code() + ").");
+						onError.accept(CONNECT_ERROR);
 						return;
 					}
 					final Page page = gson.fromJson(r.body().string(), PAGE_TYPE);
@@ -194,7 +199,7 @@ public class TemplateRepositoryClient
 				}
 				catch (IOException | JsonSyntaxException e)
 				{
-					onError.accept("Could not read the repository response.");
+					onError.accept(CONNECT_ERROR);
 				}
 			}
 		});
