@@ -750,9 +750,35 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		final int tab = currentTab;
 		javax.swing.SwingUtilities.invokeLater(() ->
 			ItemSearch.open(client.getCanvas(), itemIndex, id ->
-				clientThread.invoke(() -> layoutEditor.addItemOrReport(tab, id, msg ->
-					javax.swing.SwingUtilities.invokeLater(() -> javax.swing.JOptionPane.showMessageDialog(
-						null, msg, "Already in layout", javax.swing.JOptionPane.INFORMATION_MESSAGE))))));
+				clientThread.invoke(() ->
+				{
+					// An item can only live in one bank tab: don't add a duplicate. Already in this tab -> nothing
+					// to do; already in another tab -> offer to move the original here; otherwise add it.
+					final int[] loc = layoutEditor.find(id);
+					if (loc == null)
+					{
+						layoutEditor.addItem(tab, id);
+						return;
+					}
+					final String name = layoutEditor.displayName(id);
+					if (loc[0] == tab)
+					{
+						javax.swing.SwingUtilities.invokeLater(() -> javax.swing.JOptionPane.showMessageDialog(
+							null, name + " is already in this tab.", "Already in tab", javax.swing.JOptionPane.INFORMATION_MESSAGE));
+						return;
+					}
+					final String from = layoutEditor.tabLabel(loc[0]);
+					javax.swing.SwingUtilities.invokeLater(() ->
+					{
+						final int choice = javax.swing.JOptionPane.showConfirmDialog(null,
+							name + " is already in " + from + ". Move it to this tab?",
+							"Move item", javax.swing.JOptionPane.OK_CANCEL_OPTION, javax.swing.JOptionPane.QUESTION_MESSAGE);
+						if (choice == javax.swing.JOptionPane.OK_OPTION)
+						{
+							clientThread.invoke(() -> layoutEditor.moveToTab(loc[0], loc[1], tab));
+						}
+					});
+				})));
 	}
 
 	@Override
