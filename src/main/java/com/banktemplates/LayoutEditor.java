@@ -200,39 +200,6 @@ public class LayoutEditor
 	}
 
 	/**
-	 * Appends a real item to a tab, or - if it's already in the layout - reports where via {@code onDup}
-	 * (with a user-facing message) and adds nothing. Fillers are always added. Must run on the client
-	 * thread (it reads the item name). {@code onDup} is invoked on the client thread.
-	 */
-	void addItemOrReport(int tab, int itemId, Consumer<String> onDup)
-	{
-		if (itemId == BankTemplate.FILLER)
-		{
-			addItem(tab, itemId);
-			return;
-		}
-		if (itemId <= 0)
-		{
-			return;
-		}
-		final BankTemplate t = liveTemplate();
-		if (t == null)
-		{
-			return;
-		}
-		final int[] loc = locate(t, itemId);
-		if (loc != null)
-		{
-			if (onDup != null)
-			{
-				onDup.accept(itemName(itemId) + " is already in " + describe(t, loc[0], loc[1]) + ".");
-			}
-			return;
-		}
-		edit(tab, slots -> addOrFill(slots, itemId));
-	}
-
-	/**
 	 * Replaces the slot at {@code pos} in {@code tab} with a real item, or - if that item is already
 	 * elsewhere in the layout - reports where via {@code onDup} (with a user-facing message) and changes
 	 * nothing. Fillers replace unconditionally. Must run on the client thread (it reads the item name).
@@ -309,6 +276,25 @@ public class LayoutEditor
 		{
 			return "That item";
 		}
+	}
+
+	/** The [tab, pos] where {@code itemId} already sits in the layout, or null if it isn't present. Client thread. */
+	int[] find(int itemId)
+	{
+		final BankTemplate t = liveTemplate();
+		return t == null ? null : locate(t, itemId);
+	}
+
+	/** Display name for an item id (client thread - reads the item composition). */
+	String displayName(int itemId)
+	{
+		return itemName(itemId);
+	}
+
+	/** "the Main tab" / "Tab N", for a tab number. */
+	String tabLabel(int tab)
+	{
+		return tab == BankTemplate.MAIN_TAB ? "the Main tab" : "Tab " + tab;
 	}
 
 	/** True if the current edit session has changes that differ from the pre-edit snapshot. */
