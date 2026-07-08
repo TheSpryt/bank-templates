@@ -45,8 +45,9 @@ public class TemplateRepositoryClient
 	}.getType();
 	// Salt so the value sent to the server is a derived hash, not the raw RuneLite account hash.
 	private static final String SALT = "bank-templates-v1:";
-	// The community repository endpoint. Not a user setting (the plugin has to call it regardless).
-	private static final String REPO_URL = "https://bank-templates-repo.spryt.workers.dev";
+	// Default community repository host. Served by the exchange-insights.gg Worker (routes under
+	// /api/bank-templates/*); overridable via the "Repository URL" setting for self-hosting.
+	private static final String DEFAULT_REPO_URL = "https://exchange-insights.gg";
 	// Obfuscation only: this key ships in the open-source plugin, so it cannot authenticate requests. It
 	// just signs write requests (X-BT-TS / X-BT-Sig = HMAC of "<ts>.<body>") to deter casual non-plugin
 	// calls. The Worker checks it only when its REQUIRE_SIG flag is on, and its SIG_SECRET env must equal
@@ -139,9 +140,13 @@ public class TemplateRepositoryClient
 		}
 	}
 
+	// Repository base, from the (optional) setting, falling back to the default host. Any trailing
+	// slashes are stripped so path building stays clean.
 	private String baseUrl()
 	{
-		return REPO_URL;
+		final String configured = config.repositoryUrl();
+		final String url = configured == null ? "" : configured.trim();
+		return (url.isEmpty() ? DEFAULT_REPO_URL : url).replaceAll("/+$", "");
 	}
 
 	// Shown when a browse request can't connect or the server errors - deliberately generic and pointing at
@@ -157,7 +162,7 @@ public class TemplateRepositoryClient
 			return;
 		}
 
-		final HttpUrl base = HttpUrl.parse(baseUrl() + "/api/templates");
+		final HttpUrl base = HttpUrl.parse(baseUrl() + "/api/bank-templates/templates");
 		if (base == null)
 		{
 			onError.accept("The repository URL is invalid.");
@@ -210,7 +215,7 @@ public class TemplateRepositoryClient
 	{
 		final String bodyJson = gson.toJson(payload(template, author, anonymous));
 		final Request.Builder rb = new Request.Builder()
-			.url(baseUrl() + "/api/templates")
+			.url(baseUrl() + "/api/bank-templates/templates")
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
 		send(rb.build(), body ->
@@ -225,7 +230,7 @@ public class TemplateRepositoryClient
 	{
 		final String bodyJson = gson.toJson(payload(template, author, anonymous));
 		final Request.Builder rb = new Request.Builder()
-			.url(baseUrl() + "/api/templates/" + repoId)
+			.url(baseUrl() + "/api/bank-templates/templates/" + repoId)
 			.put(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
 		send(rb.build(), body -> onSuccess.run(), onError);
@@ -233,7 +238,7 @@ public class TemplateRepositoryClient
 
 	void delete(long repoId, Runnable onSuccess, Consumer<String> onError)
 	{
-		final HttpUrl url = HttpUrl.parse(baseUrl() + "/api/templates/" + repoId)
+		final HttpUrl url = HttpUrl.parse(baseUrl() + "/api/bank-templates/templates/" + repoId)
 			.newBuilder().addQueryParameter("clientId", clientId()).build();
 		// A 404 means the template is already gone from the server, which is exactly what delete wants -
 		// treat it as success so the local copy can be cleaned up too.
@@ -264,7 +269,7 @@ public class TemplateRepositoryClient
 		body.addProperty("clientId", clientId());
 		final String bodyJson = gson.toJson(body);
 		final Request.Builder rb = new Request.Builder()
-			.url(baseUrl() + "/api/templates/" + repoId + "/" + subPath)
+			.url(baseUrl() + "/api/bank-templates/templates/" + repoId + "/" + subPath)
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
 		final Request request = rb.build();
@@ -297,7 +302,7 @@ public class TemplateRepositoryClient
 		body.addProperty("clientId", clientId());
 		final String bodyJson = gson.toJson(body);
 		final Request.Builder rb = new Request.Builder()
-			.url(baseUrl() + "/api/templates/" + repoId + "/report")
+			.url(baseUrl() + "/api/bank-templates/templates/" + repoId + "/report")
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
 		send(rb.build(), b -> onSuccess.run(), onError);
