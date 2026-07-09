@@ -156,6 +156,8 @@ public class BankTemplatesPlugin extends Plugin
 		{
 			claimedAccountHash = accountHash;
 			repositoryClient.claimTemplates();
+			// Pull this account's website-made templates (incl. private) into My Templates.
+			panel.syncWebTemplates();
 		}
 	}
 

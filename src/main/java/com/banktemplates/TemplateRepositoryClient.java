@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 import javax.crypto.Mac;
@@ -339,6 +340,54 @@ public class TemplateRepositoryClient
 		}
 		payload.add("tabs", gson.toJsonTree(template.getTabs()));
 		return payload;
+	}
+
+	// Fetch the templates this account's linked Exchange Insights user made on the website (including ones
+	// saved privately, never shared), so they can be pulled into My Templates in-game. The server resolves
+	// them from the verified account hash via the account link; returns an empty list when the character
+	// isn't linked to an Exchange Insights account. No-op when logged out.
+	void fetchForAccount(Consumer<List<RemoteTemplate>> onDone)
+	{
+		if (!isEnabled() || accountHashRaw == null || !hasIdentity())
+		{
+			onDone.accept(Collections.emptyList());
+			return;
+		}
+		final JsonObject body = new JsonObject();
+		body.addProperty("clientId", clientId());
+		body.addProperty("accountHash", accountHashRaw);
+		final String bodyJson = gson.toJson(body);
+		final Request.Builder rb = new Request.Builder()
+			.url(baseUrl() + "/api/bank-templates/for-account")
+			.post(RequestBody.create(JSON, bodyJson));
+		addSig(rb, bodyJson);
+		okHttpClient.newCall(rb.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				onDone.accept(Collections.emptyList());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					if (!r.isSuccessful() || r.body() == null)
+					{
+						onDone.accept(Collections.emptyList());
+						return;
+					}
+					final Page page = gson.fromJson(r.body().string(), PAGE_TYPE);
+					onDone.accept(page != null && page.templates != null ? page.templates : Collections.emptyList());
+				}
+				catch (IOException | JsonSyntaxException e)
+				{
+					onDone.accept(Collections.emptyList());
+				}
+			}
+		});
 	}
 
 	// Best-effort backfill: link this account's already-shared templates to its Exchange Insights profile

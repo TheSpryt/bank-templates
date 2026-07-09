@@ -1559,6 +1559,46 @@ public class BankTemplatesPanel extends PluginPanel
 		return n;
 	}
 
+	// Pull the linked Exchange Insights account's website-made templates (including private ones never
+	// shared) into My Templates. Matched by repo id so running this on each login never duplicates them.
+	// They're read-only copies (owned=false); edits are made on the website and sync down on next login.
+	void syncWebTemplates()
+	{
+		repositoryClient.fetchForAccount(remotes -> SwingUtilities.invokeLater(() ->
+		{
+			if (remotes == null || remotes.isEmpty())
+			{
+				return;
+			}
+			final Set<Long> have = new HashSet<>();
+			for (BankTemplate t : templateManager.getUserTemplates())
+			{
+				if (t.getRepoId() != null)
+				{
+					have.add(t.getRepoId());
+				}
+			}
+			boolean added = false;
+			for (RemoteTemplate rt : remotes)
+			{
+				if (rt.id <= 0 || have.contains(rt.id))
+				{
+					continue;
+				}
+				final BankTemplate t = rt.toTemplate();
+				t.setRepoId(rt.id);
+				t.setOwned(false);
+				t.setName(uniqueName(capName(t.getName())));
+				templateManager.saveUserTemplate(t);
+				added = true;
+			}
+			if (added)
+			{
+				rebuildOnEdt();
+			}
+		}));
+	}
+
 	private String capName(String s)
 	{
 		if (s == null)
