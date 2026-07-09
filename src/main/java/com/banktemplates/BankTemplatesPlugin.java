@@ -138,8 +138,25 @@ public class BankTemplatesPlugin extends Plugin
 		mouseManager.registerMouseListener(layoutEditorOverlay);
 		mouseManager.registerMouseListener(reorgHelperOverlay);
 
-		repositoryClient.setIdentity(client.getAccountHash());
+		updateRepoIdentity(client.getAccountHash());
 		requestBankRebuild();
+	}
+
+	// The last account hash we backfilled the profile link for, so we only send one claim per account
+	// per session (on login or an account switch) rather than on every game-state change.
+	private long claimedAccountHash = -1;
+
+	// Point the repository client at the current account and, the first time we see a given account this
+	// session, ask the server to link that account's existing shared templates to its Exchange Insights
+	// profile (a no-op for accounts that aren't linked, and idempotent otherwise).
+	private void updateRepoIdentity(long accountHash)
+	{
+		repositoryClient.setIdentity(accountHash);
+		if (accountHash != -1 && accountHash != claimedAccountHash)
+		{
+			claimedAccountHash = accountHash;
+			repositoryClient.claimTemplates();
+		}
 	}
 
 	@Override
@@ -180,7 +197,7 @@ public class BankTemplatesPlugin extends Plugin
 		final GameState state = event.getGameState();
 		if (state == GameState.LOGGED_IN)
 		{
-			repositoryClient.setIdentity(client.getAccountHash());
+			updateRepoIdentity(client.getAccountHash());
 			// Load this account's cached bank counts (and pick up an account switch) without needing the bank open.
 			panel.refreshOwnedCanon();
 		}
