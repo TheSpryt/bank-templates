@@ -1241,18 +1241,20 @@ public class BankTemplatesPanel extends PluginPanel
 			label.setText(full);
 			return label;
 		}
+		// Walk code points (not chars) so a surrogate pair - e.g. an emoji in a remote name - is never
+		// split in half, and measure the accumulated prefix as a string for correct kerned widths.
 		final int ellW = fm.stringWidth("\u2026");
 		final StringBuilder sb = new StringBuilder();
-		int w = 0;
-		for (int i = 0; i < full.length(); i++)
+		for (int i = 0; i < full.length(); )
 		{
-			final int cw = fm.charWidth(full.charAt(i));
-			if (w + cw + ellW > maxWidth)
+			final int cp = full.codePointAt(i);
+			final int next = i + Character.charCount(cp);
+			if (fm.stringWidth(full.substring(0, next)) + ellW > maxWidth)
 			{
 				break;
 			}
-			sb.append(full.charAt(i));
-			w += cw;
+			sb.append(full, i, next);
+			i = next;
 		}
 		label.setText(sb.toString().trim() + "\u2026");
 		label.setToolTipText(full);
@@ -1338,10 +1340,8 @@ public class BankTemplatesPanel extends PluginPanel
 		text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
 		text.setOpaque(false);
 
-		final JLabel name = new JLabel(nameText);
-		name.setFont(FontManager.getRunescapeFont());
-		name.setForeground(nameColor);
-		name.setAlignmentX(Component.LEFT_ALIGNMENT);
+		// Imported templates keep their remote name, so clamp it exactly like the Browse cards do.
+		final JLabel name = clampedLabel(nameText, FontManager.getRunescapeFont(), nameColor, CARD_NAME_MAX_WIDTH);
 		text.add(name);
 
 		final JLabel meta = new JLabel(metaText);
