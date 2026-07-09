@@ -7,6 +7,8 @@ import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Window;
@@ -1220,6 +1222,42 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private static final Color UPVOTE_COLOR = new Color(110, 190, 110);
 	private static final Color DOWNVOTE_COLOR = new Color(220, 110, 110);
+	// The narrow side panel can't fit long names (e.g. auto-generated Exchange Insights display names),
+	// so clamp them with an ellipsis and show the full text on hover.
+	private static final int CARD_NAME_MAX_WIDTH = 205;
+	private static final int CARD_AUTHOR_MAX_WIDTH = 118;
+
+	// A left-aligned label whose text is ellipsised to fit maxWidth px; the full text shows in a tooltip.
+	private static JLabel clampedLabel(String text, Font font, Color fg, int maxWidth)
+	{
+		final JLabel label = new JLabel();
+		label.setFont(font);
+		label.setForeground(fg);
+		label.setAlignmentX(Component.LEFT_ALIGNMENT);
+		final String full = text == null ? "" : text;
+		final FontMetrics fm = label.getFontMetrics(font);
+		if (fm.stringWidth(full) <= maxWidth)
+		{
+			label.setText(full);
+			return label;
+		}
+		final int ellW = fm.stringWidth("\u2026");
+		final StringBuilder sb = new StringBuilder();
+		int w = 0;
+		for (int i = 0; i < full.length(); i++)
+		{
+			final int cw = fm.charWidth(full.charAt(i));
+			if (w + cw + ellW > maxWidth)
+			{
+				break;
+			}
+			sb.append(full.charAt(i));
+			w += cw;
+		}
+		label.setText(sb.toString().trim() + "\u2026");
+		label.setToolTipText(full);
+		return label;
+	}
 
 	// Browse card title: name + imports (▲, green) and reports (▼, red) shown as up/down votes.
 	private JPanel remoteTitleBlock(RemoteTemplate rt)
@@ -1228,10 +1266,7 @@ public class BankTemplatesPanel extends PluginPanel
 		text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
 		text.setOpaque(false);
 
-		final JLabel name = new JLabel(rt.name);
-		name.setFont(FontManager.getRunescapeFont());
-		name.setForeground(Color.WHITE);
-		name.setAlignmentX(Component.LEFT_ALIGNMENT);
+		final JLabel name = clampedLabel(rt.name, FontManager.getRunescapeFont(), Color.WHITE, CARD_NAME_MAX_WIDTH);
 		text.add(name);
 
 		final JPanel votes = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
@@ -1241,9 +1276,7 @@ public class BankTemplatesPanel extends PluginPanel
 		votes.add(voteLabel("<html><span style='font-family:Dialog'>&#9660;</span>&nbsp;" + rt.reports + "</html>", DOWNVOTE_COLOR));
 
 		final String by = rt.anonymous || rt.author == null || rt.author.isEmpty() ? "Anonymous" : rt.author;
-		final JLabel author = new JLabel("by " + by);
-		author.setFont(FontManager.getRunescapeSmallFont());
-		author.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		final JLabel author = clampedLabel("by " + by, FontManager.getRunescapeSmallFont(), ColorScheme.LIGHT_GRAY_COLOR, CARD_AUTHOR_MAX_WIDTH);
 		votes.add(author);
 
 		text.add(votes);
