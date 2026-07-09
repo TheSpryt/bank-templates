@@ -2,7 +2,8 @@
   {
     "version": "1.6.0",
     "notes": [
-      "Community repository: the plugin now talks to the community server at exchange-insights.gg. Browsing, sharing and importing templates work exactly as before - nothing you need to do. Self-hosters can point at their own server with the new 'Repository URL' setting."
+      "Community repository: the plugin now talks to the community server at exchange-insights.gg. Browsing, sharing and importing templates work exactly as before - nothing you need to do. Self-hosters can point at their own server with the new 'Repository URL' setting.",
+      "Templates you share can now show your Exchange Insights profile on the exchange-insights.gg website (your icon, background and badge) if you've linked that account to Exchange Insights. It's entirely optional - nothing is shared for anonymous uploads, and you don't need an Exchange Insights account to use the plugin."
     ]
   },
   {
