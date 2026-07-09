@@ -2,7 +2,7 @@
   {
     "version": "1.6.0",
     "notes": [
-      "We've partnered with Exchange Insights (exchange-insights.gg) to power customising your bank templates in the browser, away from the client! Head to exchange-insights.gg to browse the whole community repository and, when signed in, build and edit your own templates right on the web. In the plugin, browsing, sharing and importing work exactly as before - nothing you need to do; self-hosters can point at their own server with the new 'Repository URL' setting.",
+      "We've partnered with Exchange Insights (exchange-insights.gg) to power customising your bank templates in the browser, away from the client! Head to exchange-insights.gg to browse the whole community repository and, when signed in, build and edit your own templates right on the web - there's a new 'Browse on web' button in the Browse panel. In the plugin, browsing, sharing and importing work exactly as before, nothing you need to do.",
       "Templates you share can now show your Exchange Insights profile on the website (your icon, background and badge) if you've linked that account to Exchange Insights. It's entirely optional - nothing is shared for anonymous uploads, and you don't need an Exchange Insights account to use the plugin."
     ]
   },
