@@ -62,6 +62,11 @@ public class TemplateRepositoryClient
 	// logged out, so sharing/reporting/deleting is tied to the account and survives client restarts.
 	private volatile String identity;
 
+	// The raw account hash (String of client.getAccountHash()) - the same value Exchange Insights stores
+	// in linked_accounts.account_hash. Sent alongside the salted clientId so a shared template can resolve
+	// to the uploader's EI profile on the website. Null when logged out.
+	private volatile String accountHashRaw;
+
 	@Inject
 	TemplateRepositoryClient(OkHttpClient okHttpClient, Gson gson, BankTemplatesConfig config)
 	{
@@ -78,6 +83,7 @@ public class TemplateRepositoryClient
 	/** Updates the account identity. Pass the value of {@code client.getAccountHash()} (-1 when logged out). */
 	void setIdentity(long accountHash)
 	{
+		accountHashRaw = accountHash == -1 ? null : String.valueOf(accountHash);
 		identity = accountHash == -1 ? null : sha256(SALT + accountHash);
 	}
 
@@ -325,8 +331,48 @@ public class TemplateRepositoryClient
 		payload.addProperty("anonymous", anonymous);
 		payload.addProperty("columns", template.getColumns());
 		payload.addProperty("clientId", clientId());
+		// Raw account hash (matches Exchange Insights linked_accounts.account_hash) so a shared template
+		// resolves to the uploader's EI profile on the website. Omitted for anonymous shares. The server
+		// only trusts it when it verifies against clientId, so it can't be used to impersonate another
+		// account, and never leaves the plugin for anonymous uploads.
+		if (!anonymous && accountHashRaw != null)
+		{
+			payload.addProperty("accountHash", accountHashRaw);
+		}
 		payload.add("tabs", gson.toJsonTree(template.getTabs()));
 		return payload;
+	}
+
+	// Best-effort backfill: link this account's already-shared templates to its Exchange Insights profile
+	// (for templates uploaded before the accountHash field existed). The server verifies accountHash
+	// against clientId, so this only ever stamps the caller's own uploads. No-op when logged out.
+	void claimTemplates()
+	{
+		if (!isEnabled() || accountHashRaw == null || !hasIdentity())
+		{
+			return;
+		}
+		final JsonObject body = new JsonObject();
+		body.addProperty("clientId", clientId());
+		body.addProperty("accountHash", accountHashRaw);
+		final String bodyJson = gson.toJson(body);
+		final Request.Builder rb = new Request.Builder()
+			.url(baseUrl() + "/api/bank-templates/claim")
+			.post(RequestBody.create(JSON, bodyJson));
+		addSig(rb, bodyJson);
+		okHttpClient.newCall(rb.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				response.close();
+			}
+		});
 	}
 
 	private void send(Request request, Consumer<String> onSuccess, Consumer<String> onError)
