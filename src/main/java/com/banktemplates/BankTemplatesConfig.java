@@ -75,18 +75,6 @@ public interface BankTemplatesConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "repositoryUrl",
-		name = "Repository URL",
-		description = "Base URL of the community repository API. Leave the default unless you self-host.",
-		position = 1,
-		section = repositorySection
-	)
-	default String repositoryUrl()
-	{
-		return "https://exchange-insights.gg";
-	}
-
-	@ConfigItem(
 		keyName = "applyLayout",
 		name = "Apply template to bank",
 		description = "Virtually arrange your bank items to match the active template when the bank is open. Your real bank is never changed.",

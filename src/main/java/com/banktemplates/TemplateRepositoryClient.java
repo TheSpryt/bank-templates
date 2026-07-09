@@ -150,9 +150,7 @@ public class TemplateRepositoryClient
 	// slashes are stripped so path building stays clean.
 	private String baseUrl()
 	{
-		final String configured = config.repositoryUrl();
-		final String url = configured == null ? "" : configured.trim();
-		return (url.isEmpty() ? DEFAULT_REPO_URL : url).replaceAll("/+$", "");
+		return DEFAULT_REPO_URL;
 	}
 
 	// Shown when a browse request can't connect or the server errors - deliberately generic and pointing at

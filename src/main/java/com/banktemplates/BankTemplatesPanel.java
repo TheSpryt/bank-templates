@@ -53,6 +53,7 @@ import net.runelite.client.game.ItemVariationMapping;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.util.LinkBrowser;
 
 @Slf4j
 @Singleton
@@ -695,6 +696,8 @@ public class BankTemplatesPanel extends PluginPanel
 
 		listContainer.add(buildSortRow());
 		listContainer.add(Box.createVerticalStrut(6));
+		listContainer.add(buildBrowseOnWebRow());
+		listContainer.add(Box.createVerticalStrut(6));
 
 		if (browseStatus != null)
 		{
@@ -723,6 +726,21 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 
 		listContainer.add(buildPaginationRow());
+	}
+
+	private JPanel buildBrowseOnWebRow()
+	{
+		final JButton web = new JButton("Browse on web");
+		web.setFocusPainted(false);
+		web.setToolTipText("Open the community bank templates on exchange-insights.gg in your browser");
+		web.addActionListener(e -> LinkBrowser.browse("https://exchange-insights.gg/tools/osrs-bank-templates"));
+
+		final JPanel row = new JPanel(new BorderLayout());
+		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.add(web, BorderLayout.CENTER);
+		return row;
 	}
 
 	private JPanel buildSortRow()
