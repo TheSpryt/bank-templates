@@ -678,6 +678,11 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			buttons.add(iconButton("Report", "Report the shared version of this template", () -> reportRepo(template.getRepoId())));
 		}
+		// A shared or imported template has a page on the site; link straight to it.
+		if (template.getRepoId() != null)
+		{
+			buttons.add(iconButton("Web", "Open this template on exchange-insights.gg", () -> openOnWeb(template.getRepoId())));
+		}
 		if (!template.isPreset())
 		{
 			buttons.add(iconButton("Del", "Delete this template", () -> deleteLocal(template)));
@@ -743,6 +748,12 @@ public class BankTemplatesPanel extends PluginPanel
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
 		row.add(web, BorderLayout.CENTER);
 		return row;
+	}
+
+	// Open a single template's page on the site (?t=<repoId> deep-links straight to it).
+	private void openOnWeb(long repoId)
+	{
+		LinkBrowser.browse("https://exchange-insights.gg/tools/osrs-bank-templates?t=" + repoId);
 	}
 
 	private JPanel buildSortRow()
@@ -853,6 +864,7 @@ public class BankTemplatesPanel extends PluginPanel
 
 		final JPanel buttons = buttonRow();
 		buttons.add(iconButton("View", "Preview this template", () -> showPreview(rt.toTemplate())));
+		buttons.add(iconButton("Web", "Open this template on exchange-insights.gg", () -> openOnWeb(rt.id)));
 		buttons.add(iconButton("Import", "Save a copy to My Templates", () -> importRemote(rt)));
 		buttons.add(iconButton("Report", "Report this template", () -> reportRepo(rt.id, this::loadBrowse)));
 		if (ownsRemote(rt.id))
