@@ -475,6 +475,12 @@ public class TemplateRepositoryClient
 	static class SyncResult
 	{
 		boolean linked;
+		// Whether the server ran the push/write pass this call (false when the per-account rate-limit gap
+		// skipped it, so the plugin should retry a pending change).
+		boolean applied;
+		// The account's private-sync setting; when false the server never applies the plugin's pushes, so
+		// there's no point retrying them (the website->plugin pull still runs).
+		boolean privateSync;
 		List<WebTemplate> templates;
 	}
 

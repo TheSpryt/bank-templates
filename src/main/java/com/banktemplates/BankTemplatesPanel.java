@@ -27,6 +27,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -123,6 +125,17 @@ public class BankTemplatesPanel extends PluginPanel
 	// the first sync has answered, so the "link your account" note only shows once we actually know.
 	private Boolean webSyncLinked;
 
+	// Duplex sync scheduling. A single self-rescheduling task drives sync: it runs on login, ~1.5s after any
+	// local change (debounced), and every SYNC_POLL_MS as a backstop to pull website-side changes down. On a
+	// failed or rate-limited push it retries with backoff so a change is never lost to a brief outage.
+	private static final long SYNC_DEBOUNCE_MS = 1_500;
+	private static final long SYNC_RETRY_MIN_MS = 4_000;
+	private static final long SYNC_POLL_MS = 90_000;
+	private ScheduledFuture<?> pendingSyncTask;
+	private volatile long changeSeq; // bumped on each local change
+	private long syncedSeq; // highest changeSeq confirmed pushed to the website
+	private long syncBackoffMs;
+
 	private final List<RemoteTemplate> browseResults = new ArrayList<>();
 	private String browseStatus;
 	private String browseSort = "imported";
@@ -156,6 +169,10 @@ public class BankTemplatesPanel extends PluginPanel
 		this.ownedCache = new OwnedBankCache(gson);
 		this.latestUpdate = Changelog.latest(gson);
 		this.allUpdates = Changelog.all(gson);
+
+		// A genuine local template change (save/delete/rename) schedules a debounced duplex sync so it's
+		// pushed to the website without waiting for the next login.
+		templateManager.setChangeListener(this::requestSync);
 
 		// Open onto the Updates tab the first time after an update, but only until the user has seen these
 		// notes - after that, default to My Templates.
@@ -1259,6 +1276,7 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			configManager.setConfiguration(BankTemplatesConfig.GROUP, "enableRepository", true);
 			newSearch();
+			syncWebTemplates(); // start the duplex sync loop now that the repo is on
 		});
 		panel.add(enable);
 		return panel;
@@ -1644,11 +1662,54 @@ public class BankTemplatesPanel extends PluginPanel
 	// list, which we mirror back. Net effect: create or edit on either side and it shows on both; delete on
 	// the website and it's removed in-game. Requires an Exchange Insights account linked via the Exchange
 	// Insights plugin - webSyncLinked tracks that so the panel can explain it.
+	// Kick a sync now (called on login / account switch, and when the repository is first enabled). Starts
+	// the self-rescheduling sync loop if it isn't already running.
 	void syncWebTemplates()
 	{
-		// The editable set that participates in duplex: your own local templates, excluding presets and
-		// public community shares (owned=true keeps the existing clientId-owned share flow). Give each a
-		// stable client key up front so the server can correlate it across syncs.
+		scheduleSync(0);
+	}
+
+	// A local change happened: push it up soon (debounced so a burst of edits collapses into one sync).
+	void requestSync()
+	{
+		changeSeq++;
+		scheduleSync(SYNC_DEBOUNCE_MS);
+	}
+
+	// Stop the sync loop (plugin shutdown).
+	synchronized void stopSync()
+	{
+		if (pendingSyncTask != null)
+		{
+			pendingSyncTask.cancel(false);
+			pendingSyncTask = null;
+		}
+	}
+
+	// (Re)arm the single pending sync task, replacing any already scheduled one so the soonest wins.
+	private synchronized void scheduleSync(long delayMs)
+	{
+		if (pendingSyncTask != null)
+		{
+			pendingSyncTask.cancel(false);
+		}
+		pendingSyncTask = executor.schedule(
+			() -> SwingUtilities.invokeLater(this::runSync), Math.max(0, delayMs), TimeUnit.MILLISECONDS);
+	}
+
+	// One sync pass. Gathers the editable set (imports + in-plugin creations, minus public shares), giving
+	// each a stable client key, and sends it up; the result handler mirrors the authoritative set back and
+	// schedules the next pass. Runs on the EDT so it reads the template store safely.
+	private void runSync()
+	{
+		if (!repositoryClient.isEnabled())
+		{
+			// Loop idles while the repository is off; enabling it (or logging in) kicks it again.
+			return;
+		}
+		// Snapshot the change counter before gathering, so afterSync knows exactly which changes this pass
+		// covers - a change that arrives mid-sync bumps the counter and is retried, never dropped.
+		final long startSeq = changeSeq;
 		final List<BankTemplate> local = new ArrayList<>();
 		for (BankTemplate t : templateManager.getUserTemplates())
 		{
@@ -1658,108 +1719,157 @@ public class BankTemplatesPanel extends PluginPanel
 				local.add(t);
 			}
 		}
+		repositoryClient.sync(local, result -> SwingUtilities.invokeLater(() -> applySyncResult(result, startSeq)));
+	}
 
-		repositoryClient.sync(local, result -> SwingUtilities.invokeLater(() ->
+	private void applySyncResult(TemplateRepositoryClient.SyncResult result, long startSeq)
+	{
+		if (result != null && result.linked)
 		{
-			if (result == null)
+			// Suppress change events for the whole reconcile so sync's own writes (renames, removals) don't
+			// re-trigger a sync in an endless loop.
+			templateManager.setSuppressChangeEvents(true);
+			try
 			{
-				return; // sync failed (network/unverified) - change nothing
+				reconcile(result);
 			}
-			webSyncLinked = result.linked;
-			if (!result.linked)
+			finally
 			{
-				rebuildOnEdt(); // not linked: leave everything local, just refresh the note
-				return;
+				templateManager.setSuppressChangeEvents(false);
 			}
-
-			final List<TemplateRepositoryClient.WebTemplate> remote =
-				result.templates != null ? result.templates : Collections.<TemplateRepositoryClient.WebTemplate>emptyList();
-
-			// Index the current duplex set so each returned row updates its existing local copy in place.
-			final Map<String, BankTemplate> byKey = new HashMap<>();
-			final Map<Long, BankTemplate> byWebId = new HashMap<>();
-			for (BankTemplate t : templateManager.getUserTemplates())
-			{
-				if (t.isPreset() || t.isOwned())
-				{
-					continue;
-				}
-				if (t.getClientKey() != null)
-				{
-					byKey.put(t.getClientKey(), t);
-				}
-				if (t.getWebId() != null)
-				{
-					byWebId.put(t.getWebId(), t);
-				}
-			}
-
-			final BankTemplate active = templateManager.getActive();
-			final String activeName = active != null ? active.getName() : null;
-
-			final Set<Long> seenIds = new HashSet<>();
-			final Set<String> seenKeys = new HashSet<>();
-			for (TemplateRepositoryClient.WebTemplate wt : remote)
-			{
-				if (wt.id <= 0)
-				{
-					continue;
-				}
-				seenIds.add(wt.id);
-				if (wt.clientKey != null)
-				{
-					seenKeys.add(wt.clientKey);
-				}
-				BankTemplate localCopy = wt.clientKey != null ? byKey.get(wt.clientKey) : null;
-				if (localCopy == null)
-				{
-					localCopy = byWebId.get(wt.id);
-				}
-				if (localCopy != null)
-				{
-					applyRemote(localCopy, wt);
-				}
-				else
-				{
-					final BankTemplate t = wt.toTemplate();
-					t.setOwned(false);
-					t.setWebSynced(true);
-					t.setWebId(wt.id);
-					t.setClientKey(wt.clientKey);
-					t.setUpdatedAt(wt.updatedAt);
-					t.setName(uniqueName(capName(t.getName())));
-					templateManager.saveSyncedTemplate(t);
-				}
-			}
-
-			// Remove local copies that were web-backed (had a webId) but are gone from the authoritative set -
-			// they were deleted on the website. A template that was never synced up (webId still null - e.g.
-			// one the server declined at the private cap) is never touched, so nothing local is ever lost.
-			for (BankTemplate t : new ArrayList<>(templateManager.getUserTemplates()))
-			{
-				if (t.isPreset() || t.isOwned() || t.getWebId() == null)
-				{
-					continue;
-				}
-				final boolean stillThere = seenIds.contains(t.getWebId())
-					|| (t.getClientKey() != null && seenKeys.contains(t.getClientKey()));
-				if (!stillThere)
-				{
-					templateManager.deleteUserTemplate(t);
-				}
-			}
-
-			if (activeName != null && templateManager.getActive() == null)
-			{
-				final BankTemplate again = templateManager.findByName(activeName);
-				if (again != null)
-				{
-					templateManager.setActive(again);
-					onActiveChanged.run();
-				}
-			}
+			webSyncLinked = true;
 			rebuildOnEdt();
-		}));
+		}
+		else if (result != null)
+		{
+			webSyncLinked = false; // linked=false: leave everything local, just refresh the note
+			rebuildOnEdt();
+		}
+		// result == null: sync failed (network/unverified) - change nothing.
+		afterSync(result, startSeq);
+	}
+
+	// Mirror the authoritative website set back into the local store (called with change events suppressed).
+	private void reconcile(TemplateRepositoryClient.SyncResult result)
+	{
+		final List<TemplateRepositoryClient.WebTemplate> remote =
+			result.templates != null ? result.templates : Collections.<TemplateRepositoryClient.WebTemplate>emptyList();
+
+		// Index the current duplex set so each returned row updates its existing local copy in place.
+		final Map<String, BankTemplate> byKey = new HashMap<>();
+		final Map<Long, BankTemplate> byWebId = new HashMap<>();
+		for (BankTemplate t : templateManager.getUserTemplates())
+		{
+			if (t.isPreset() || t.isOwned())
+			{
+				continue;
+			}
+			if (t.getClientKey() != null)
+			{
+				byKey.put(t.getClientKey(), t);
+			}
+			if (t.getWebId() != null)
+			{
+				byWebId.put(t.getWebId(), t);
+			}
+		}
+
+		final BankTemplate active = templateManager.getActive();
+		final String activeName = active != null ? active.getName() : null;
+
+		final Set<Long> seenIds = new HashSet<>();
+		final Set<String> seenKeys = new HashSet<>();
+		for (TemplateRepositoryClient.WebTemplate wt : remote)
+		{
+			if (wt.id <= 0)
+			{
+				continue;
+			}
+			seenIds.add(wt.id);
+			if (wt.clientKey != null)
+			{
+				seenKeys.add(wt.clientKey);
+			}
+			BankTemplate localCopy = wt.clientKey != null ? byKey.get(wt.clientKey) : null;
+			if (localCopy == null)
+			{
+				localCopy = byWebId.get(wt.id);
+			}
+			if (localCopy != null)
+			{
+				applyRemote(localCopy, wt);
+			}
+			else
+			{
+				final BankTemplate t = wt.toTemplate();
+				t.setOwned(false);
+				t.setWebSynced(true);
+				t.setWebId(wt.id);
+				t.setClientKey(wt.clientKey);
+				t.setUpdatedAt(wt.updatedAt);
+				t.setName(uniqueName(capName(t.getName())));
+				templateManager.saveSyncedTemplate(t);
+			}
+		}
+
+		// Remove local copies that were web-backed (had a webId) but are gone from the authoritative set -
+		// they were deleted on the website. A template that was never synced up (webId still null - e.g.
+		// one the server declined at the private cap) is never touched, so nothing local is ever lost.
+		for (BankTemplate t : new ArrayList<>(templateManager.getUserTemplates()))
+		{
+			if (t.isPreset() || t.isOwned() || t.getWebId() == null)
+			{
+				continue;
+			}
+			final boolean stillThere = seenIds.contains(t.getWebId())
+				|| (t.getClientKey() != null && seenKeys.contains(t.getClientKey()));
+			if (!stillThere)
+			{
+				templateManager.deleteUserTemplate(t);
+			}
+		}
+
+		if (activeName != null && templateManager.getActive() == null)
+		{
+			final BankTemplate again = templateManager.findByName(activeName);
+			if (again != null)
+			{
+				templateManager.setActive(again);
+				onActiveChanged.run();
+			}
+		}
+	}
+
+	// Decide when the next sync runs: retry-with-backoff after a failure, a short retry when a change was
+	// rate-limited and still needs pushing, otherwise the slow poll that pulls website-side changes down.
+	private void afterSync(TemplateRepositoryClient.SyncResult result, long startSeq)
+	{
+		long next;
+		if (result == null)
+		{
+			// Failure/offline: back off up to the poll interval, but keep trying so a queued change lands.
+			syncBackoffMs = syncBackoffMs <= 0 ? SYNC_RETRY_MIN_MS : Math.min(syncBackoffMs * 2, SYNC_POLL_MS);
+			next = syncBackoffMs;
+		}
+		else
+		{
+			syncBackoffMs = 0;
+			if (result.applied)
+			{
+				// This pass pushed everything up to the snapshot; later changes (changeSeq > startSeq) remain.
+				syncedSeq = Math.max(syncedSeq, startSeq);
+			}
+			if (!result.linked || !result.privateSync)
+			{
+				// Pushes can't (not linked) or won't (private sync off) apply - stop retrying them; the slow
+				// poll still pulls website-side changes down.
+				syncedSeq = Math.max(syncedSeq, changeSeq);
+			}
+			// A rate-limited push (linked + privateSync + !applied) advances neither, so it retries soon.
+			final boolean pending = changeSeq > syncedSeq;
+			next = pending ? SYNC_RETRY_MIN_MS : SYNC_POLL_MS;
+		}
+		scheduleSync(next);
 	}
 
 	// Give a template a stable client key (and nothing else) so the server can correlate it across syncs.
