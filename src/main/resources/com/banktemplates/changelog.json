@@ -2,8 +2,8 @@
   {
     "version": "1.6.2",
     "notes": [
-      "My templates now stays fully in sync with your Exchange Insights website templates: renaming, editing or deleting a template on the website now updates or removes its in-game copy on your next login, instead of leaving a stale duplicate behind.",
-      "Fixed website-synced templates that could show up without a name (nameless cards left behind by an earlier version are now cleaned up automatically)."
+      "My templates now syncs both ways with your Exchange Insights website templates. Templates you import or make in-game show up in your website My Templates, and ones you create or edit on the website appear in-game - edit on either side and both stay in step (most recent edit wins), delete on either side and it's removed from both. Requires a free Exchange Insights account linked via the Exchange Insights plugin.",
+      "Fixed website-synced templates that could show up without a name, or linger as stale duplicates after being renamed or deleted on the website (nameless cards left behind by an earlier version are now cleaned up automatically)."
     ]
   },
   {

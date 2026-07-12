@@ -40,11 +40,22 @@ public class BankTemplate
 	private boolean owned;
 	// Whether this template was shared anonymously - remembered so re-sharing (Update) keeps the choice.
 	private boolean sharedAnonymously;
-	// True for read-only copies pulled down from the linked Exchange Insights account's website "My
-	// Templates" (see BankTemplatesPanel#syncWebTemplates). Distinguishes them from browse-imported
-	// community templates, which share the same owned=false + repoId shape, so sync can safely mirror the
-	// website set (rename/edit/delete) without ever touching a template you imported from Browse.
+	// True once this template is backed by a row in the linked Exchange Insights account's website "My
+	// Templates" (see BankTemplatesPanel#syncWebTemplates). Distinguishes duplex-synced templates from
+	// browse-imported community templates, which share the same owned=false + repoId shape.
 	private boolean webSynced;
+	// The website row id this template corresponds to in the user's own "My Templates" (duplex sync). Kept
+	// separate from repoId, which is the COMMUNITY source id (the template you imported from, or your public
+	// share) - a template can be both an import (repoId) and your own private web copy (webId) at once.
+	private Long webId;
+	// A stable, client-generated id for a template that originated in-game (an import or an in-plugin
+	// creation). Sent up on sync so the server can match this local copy to the web row it creates for it,
+	// on this and every later sync, without ever duplicating it.
+	private String clientKey;
+	// Wall-clock ms of the last local (in-game) edit, for last-write-wins duplex reconciliation. Only bumped
+	// by genuine user edits (import, create, layout edit, rename) - never when sync writes the server's copy
+	// back down, which would otherwise ping-pong the template between the two sides.
+	private long updatedAt;
 
 	public BankTemplate()
 	{
@@ -88,6 +99,36 @@ public class BankTemplate
 	public void setWebSynced(boolean webSynced)
 	{
 		this.webSynced = webSynced;
+	}
+
+	public Long getWebId()
+	{
+		return webId;
+	}
+
+	public void setWebId(Long webId)
+	{
+		this.webId = webId;
+	}
+
+	public String getClientKey()
+	{
+		return clientKey;
+	}
+
+	public void setClientKey(String clientKey)
+	{
+		this.clientKey = clientKey;
+	}
+
+	public long getUpdatedAt()
+	{
+		return updatedAt;
+	}
+
+	public void setUpdatedAt(long updatedAt)
+	{
+		this.updatedAt = updatedAt;
 	}
 
 	public String getName()
@@ -375,6 +416,9 @@ public class BankTemplate
 		c.owned = owned;
 		c.sharedAnonymously = sharedAnonymously;
 		c.webSynced = webSynced;
+		c.webId = webId;
+		c.clientKey = clientKey;
+		c.updatedAt = updatedAt;
 		c.preset = preset;
 		c.tabs = new ArrayList<>();
 		for (TabLayout t : tabs)

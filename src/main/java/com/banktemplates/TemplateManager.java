@@ -208,10 +208,25 @@ public class TemplateManager
 	}
 
 	/**
-	 * Saves a user template (creating or overwriting by name) and writes it to disk asynchronously.
-	 * Returns false if the name collides with a preset.
+	 * Saves a user template as a genuine edit: stamps {@code updatedAt} to now (so duplex sync knows this
+	 * side changed more recently) and writes it to disk. Returns false if the name collides with a preset.
 	 */
 	public boolean saveUserTemplate(BankTemplate template)
+	{
+		return saveUserTemplate(template, true);
+	}
+
+	/**
+	 * Saves a template written by duplex sync from the authoritative website copy, WITHOUT bumping
+	 * {@code updatedAt} - the caller has already set it to the server's value, and touching it would make
+	 * the copy look freshly edited in-game and push it straight back up.
+	 */
+	public boolean saveSyncedTemplate(BankTemplate template)
+	{
+		return saveUserTemplate(template, false);
+	}
+
+	private boolean saveUserTemplate(BankTemplate template, boolean markEdited)
 	{
 		if (template == null || template.getName() == null || template.getName().trim().isEmpty())
 		{
@@ -231,6 +246,10 @@ public class TemplateManager
 			}
 		}
 
+		if (markEdited)
+		{
+			template.setUpdatedAt(System.currentTimeMillis());
+		}
 		userTemplates.put(name, template);
 		writeAsync(template);
 		return true;
