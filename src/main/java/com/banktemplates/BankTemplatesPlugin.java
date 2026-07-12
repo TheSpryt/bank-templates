@@ -180,6 +180,10 @@ public class BankTemplatesPlugin extends Plugin
 		overlayManager.remove(reorgHelperOverlay);
 		clientToolbar.removeNavigation(navButton);
 		navButton = null;
+		if (panel != null)
+		{
+			panel.stopSync();
+		}
 		requestBankRebuild();
 	}
 

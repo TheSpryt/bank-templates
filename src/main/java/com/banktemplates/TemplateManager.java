@@ -53,6 +53,12 @@ public class TemplateManager
 
 	private BankTemplate active;
 
+	// Notified after a genuine user change to the templates (save/delete/rename) so the panel can push it to
+	// the website. Not fired for sync-driven writes: those run with suppressChangeEvents set, so mirroring
+	// the website back down can never trigger another sync in a loop.
+	private Runnable changeListener;
+	private boolean suppressChangeEvents;
+
 	@Inject
 	TemplateManager(Gson gson, ConfigManager configManager, ScheduledExecutorService executor)
 	{
@@ -66,6 +72,26 @@ public class TemplateManager
 		loadPresets();
 		loadUserTemplates();
 		resolveActiveFromConfig();
+	}
+
+	/** Sets the listener notified after a genuine user change (save/delete/rename), for duplex sync. */
+	void setChangeListener(Runnable listener)
+	{
+		this.changeListener = listener;
+	}
+
+	/** While true, sync-driven writes don't notify the change listener (so mirroring can't loop). */
+	void setSuppressChangeEvents(boolean suppress)
+	{
+		this.suppressChangeEvents = suppress;
+	}
+
+	private void fireChanged()
+	{
+		if (!suppressChangeEvents && changeListener != null)
+		{
+			changeListener.run();
+		}
 	}
 
 	private void loadPresets()
@@ -252,6 +278,10 @@ public class TemplateManager
 		}
 		userTemplates.put(name, template);
 		writeAsync(template);
+		if (markEdited)
+		{
+			fireChanged();
+		}
 		return true;
 	}
 
@@ -299,6 +329,12 @@ public class TemplateManager
 		userTemplates.remove(oldName);
 		template.setName(trimmed);
 		userTemplates.put(trimmed, template);
+		// A user rename is a genuine edit, so it wins last-write-wins and pushes up; a sync-driven rename
+		// (suppressed) keeps the server's timestamp so it doesn't bounce straight back.
+		if (!suppressChangeEvents)
+		{
+			template.setUpdatedAt(System.currentTimeMillis());
+		}
 
 		// Write the new file first, then drop the old one - but only if it's a different file (a rename that
 		// only changes case or punctuation can map to the same safe file name, which we must not delete).
@@ -314,6 +350,7 @@ public class TemplateManager
 		{
 			configManager.setConfiguration(BankTemplatesConfig.GROUP, BankTemplatesConfig.ACTIVE_TEMPLATE_KEY, trimmed);
 		}
+		fireChanged();
 		return true;
 	}
 
@@ -330,6 +367,7 @@ public class TemplateManager
 			setActive(null);
 		}
 		deleteAsync(template.getName());
+		fireChanged();
 	}
 
 	private void writeAsync(BankTemplate template)
