@@ -125,7 +125,10 @@ public class TemplateManager
 		try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8))
 		{
 			final BankTemplate t = gson.fromJson(reader, BankTemplate.class);
-			if (t != null && t.getName() != null && !t.getTabs().isEmpty())
+			// A blank name can't be created any more (saveUserTemplate rejects it), but older builds could
+			// persist one, leaving an unusable nameless "ghost" card. Skip those - the name is this file's
+			// storage key, so a blank-named file is unreachable anyway.
+			if (t != null && t.getName() != null && !t.getName().trim().isEmpty() && !t.getTabs().isEmpty())
 			{
 				t.setPreset(false);
 				t.pruneTrailingEmptyTabs();

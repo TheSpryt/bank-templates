@@ -40,6 +40,11 @@ public class BankTemplate
 	private boolean owned;
 	// Whether this template was shared anonymously - remembered so re-sharing (Update) keeps the choice.
 	private boolean sharedAnonymously;
+	// True for read-only copies pulled down from the linked Exchange Insights account's website "My
+	// Templates" (see BankTemplatesPanel#syncWebTemplates). Distinguishes them from browse-imported
+	// community templates, which share the same owned=false + repoId shape, so sync can safely mirror the
+	// website set (rename/edit/delete) without ever touching a template you imported from Browse.
+	private boolean webSynced;
 
 	public BankTemplate()
 	{
@@ -73,6 +78,16 @@ public class BankTemplate
 	public void setSharedAnonymously(boolean sharedAnonymously)
 	{
 		this.sharedAnonymously = sharedAnonymously;
+	}
+
+	public boolean isWebSynced()
+	{
+		return webSynced;
+	}
+
+	public void setWebSynced(boolean webSynced)
+	{
+		this.webSynced = webSynced;
 	}
 
 	public String getName()
@@ -359,6 +374,7 @@ public class BankTemplate
 		c.repoId = repoId;
 		c.owned = owned;
 		c.sharedAnonymously = sharedAnonymously;
+		c.webSynced = webSynced;
 		c.preset = preset;
 		c.tabs = new ArrayList<>();
 		for (TabLayout t : tabs)

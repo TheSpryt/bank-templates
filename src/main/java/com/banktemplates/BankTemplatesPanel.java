@@ -1604,43 +1604,84 @@ public class BankTemplatesPanel extends PluginPanel
 		return n;
 	}
 
-	// Pull the linked Exchange Insights account's website-made templates (including private ones never
-	// shared) into My Templates. Matched by repo id so running this on each login never duplicates them.
-	// They're read-only copies (owned=false); edits are made on the website and sync down on next login.
+	// Mirror the linked Exchange Insights account's website "My Templates" (including private ones never
+	// shared) into the in-game My Templates. These are read-only copies (owned=false, webSynced=true): all
+	// editing happens on the website and syncs down here. Because it's a true mirror - not an add - renames,
+	// edits and deletions made on the website all propagate on the next sync, and duplicates can't build up.
 	void syncWebTemplates()
 	{
 		repositoryClient.fetchForAccount(remotes -> SwingUtilities.invokeLater(() ->
 		{
+			// An empty result is ambiguous: the account may genuinely have no website templates, or the fetch
+			// may have failed (network, rate limit, not linked) - the endpoint can't distinguish them. Only
+			// reconcile when at least one template came back, so a transient failure can never wipe the mirror.
+			// The rare cost: deleting your last website template won't prune its stale in-game copy until you
+			// make another - far better than losing every synced copy on a blip.
 			if (remotes == null || remotes.isEmpty())
 			{
 				return;
 			}
-			final Set<Long> have = new HashSet<>();
-			for (BankTemplate t : templateManager.getUserTemplates())
-			{
-				if (t.getRepoId() != null)
-				{
-					have.add(t.getRepoId());
-				}
-			}
-			boolean added = false;
+
+			final Set<Long> remoteIds = new HashSet<>();
 			for (RemoteTemplate rt : remotes)
 			{
-				if (rt.id <= 0 || have.contains(rt.id))
+				if (rt.id > 0)
+				{
+					remoteIds.add(rt.id);
+				}
+			}
+
+			// Preserve the active selection across the rebuild: deleteUserTemplate clears it, but we re-add
+			// the same names, so restore it afterwards (picking up any layout change made on the website).
+			final BankTemplate active = templateManager.getActive();
+			final String activeName = active != null ? active.getName() : null;
+
+			// Drop the previous mirror before rebuilding it. Two kinds of local template are part of the
+			// mirror: ones already flagged webSynced, and legacy synced copies from before that flag existed -
+			// identified as owned=false imports whose repo id is one of THIS account's own website templates
+			// (so never a template imported from Browse, which keeps a repo id that isn't yours).
+			final List<BankTemplate> stale = new ArrayList<>();
+			for (BankTemplate t : templateManager.getUserTemplates())
+			{
+				if (t.isPreset())
+				{
+					continue;
+				}
+				final boolean legacyMine = !t.isOwned() && t.getRepoId() != null && remoteIds.contains(t.getRepoId());
+				if (t.isWebSynced() || legacyMine)
+				{
+					stale.add(t);
+				}
+			}
+			for (BankTemplate t : stale)
+			{
+				templateManager.deleteUserTemplate(t);
+			}
+
+			for (RemoteTemplate rt : remotes)
+			{
+				if (rt.id <= 0)
 				{
 					continue;
 				}
 				final BankTemplate t = rt.toTemplate();
 				t.setRepoId(rt.id);
 				t.setOwned(false);
+				t.setWebSynced(true);
 				t.setName(uniqueName(capName(t.getName())));
 				templateManager.saveUserTemplate(t);
-				added = true;
 			}
-			if (added)
+
+			if (activeName != null && templateManager.getActive() == null)
 			{
-				rebuildOnEdt();
+				final BankTemplate again = templateManager.findByName(activeName);
+				if (again != null)
+				{
+					templateManager.setActive(again);
+					onActiveChanged.run();
+				}
 			}
+			rebuildOnEdt();
 		}));
 	}
 

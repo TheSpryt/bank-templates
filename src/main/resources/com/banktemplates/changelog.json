@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.6.2",
+    "notes": [
+      "My templates now stays fully in sync with your Exchange Insights website templates: renaming, editing or deleting a template on the website now updates or removes its in-game copy on your next login, instead of leaving a stale duplicate behind.",
+      "Fixed website-synced templates that could show up without a name (nameless cards left behind by an earlier version are now cleaned up automatically)."
+    ]
+  },
+  {
     "version": "1.6.1",
     "notes": [
       "Community templates now have a 'Web' button next to View/Import/Report that opens that exact template on exchange-insights.gg in your browser. Templates you've shared or imported carry the same button in My templates."
