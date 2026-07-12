@@ -18,12 +18,16 @@ import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.swing.BorderFactory;
@@ -114,6 +118,10 @@ public class BankTemplatesPanel extends PluginPanel
 	private volatile Set<Integer> ownedCanon;
 	// The account ownedCanon belongs to, so it's discarded (and reloaded) when the player switches accounts.
 	private volatile long ownedAccountHash = -1;
+
+	// Whether the last duplex sync found this character linked to an Exchange Insights account. null until
+	// the first sync has answered, so the "link your account" note only shows once we actually know.
+	private Boolean webSyncLinked;
 
 	private final List<RemoteTemplate> browseResults = new ArrayList<>();
 	private String browseStatus;
@@ -521,6 +529,15 @@ public class BankTemplatesPanel extends PluginPanel
 			addLocalSection("My templates", userTemplates);
 		}
 
+		// Explain why My templates isn't syncing with the website, when we know the character isn't linked.
+		if (Boolean.FALSE.equals(webSyncLinked) && repositoryClient.isEnabled())
+		{
+			listContainer.add(messageLabel("Your templates sync with the web at exchange-insights.gg when this "
+				+ "character is linked to an Exchange Insights account. Link it in the free Exchange Insights "
+				+ "plugin to create and edit these templates in your browser too."));
+			listContainer.add(Box.createVerticalStrut(6));
+		}
+
 		listContainer.add(Box.createVerticalStrut(8));
 
 		// Reorganise: the mode dropdown and a description of what the selected mode does, in one card.
@@ -678,10 +695,12 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			buttons.add(iconButton("Report", "Report the shared version of this template", () -> reportRepo(template.getRepoId())));
 		}
-		// A shared or imported template has a page on the site; link straight to it.
-		if (template.getRepoId() != null)
+		// A shared, imported or web-synced template has a page on the site; link straight to it. Prefer your
+		// own website copy (webId) over the community source it was imported from.
+		final Long webLinkId = template.getWebId() != null ? template.getWebId() : template.getRepoId();
+		if (webLinkId != null)
 		{
-			buttons.add(iconButton("Web", "Open this template on exchange-insights.gg", () -> openOnWeb(template.getRepoId())));
+			buttons.add(iconButton("Web", "Open this template on exchange-insights.gg", () -> openOnWeb(webLinkId)));
 		}
 		if (!template.isPreset())
 		{
@@ -1149,14 +1168,36 @@ public class BankTemplatesPanel extends PluginPanel
 	private void deleteLocal(BankTemplate template)
 	{
 		final boolean shared = template.isOwned() && template.getRepoId() != null && repositoryClient.isEnabled();
+		// A duplex-synced template lives in your website My Templates too, so deleting it here has to delete
+		// it there - otherwise the next sync just pulls it straight back.
+		final boolean webBacked = !template.isOwned() && template.getWebId() != null && repositoryClient.isEnabled();
 		final String msg = shared
 			? "Delete \"" + template.getName() + "\" locally AND remove it from the community repository?"
-			: "Delete template \"" + template.getName() + "\"?";
+			: webBacked
+				? "Delete \"" + template.getName() + "\" locally AND from your Exchange Insights website My Templates?"
+				: "Delete template \"" + template.getName() + "\"?";
 		final int choice = JOptionPane.showConfirmDialog(this, msg, "Delete template", JOptionPane.YES_NO_OPTION);
 		if (choice != JOptionPane.YES_OPTION)
 		{
 			return;
 		}
+
+		final Runnable removeLocally = () -> SwingUtilities.invokeLater(() ->
+		{
+			templateManager.deleteUserTemplate(template);
+			rebuildOnEdt();
+			onActiveChanged.run();
+		});
+		final Consumer<String> onDeleteError = error -> SwingUtilities.invokeLater(() ->
+		{
+			final int alsoLocal = JOptionPane.showConfirmDialog(this,
+				error + "\n\nDelete the local copy anyway?", "Delete failed",
+				JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+			if (alsoLocal == JOptionPane.YES_OPTION)
+			{
+				removeLocally.run();
+			}
+		});
 
 		if (shared)
 		{
@@ -1164,25 +1205,20 @@ public class BankTemplatesPanel extends PluginPanel
 			{
 				return;
 			}
-			repositoryClient.delete(template.getRepoId(),
-				() -> SwingUtilities.invokeLater(() ->
-				{
-					templateManager.deleteUserTemplate(template);
-					rebuildOnEdt();
-					onActiveChanged.run();
-				}),
-				error -> SwingUtilities.invokeLater(() ->
-				{
-					final int alsoLocal = JOptionPane.showConfirmDialog(this,
-						error + "\n\nDelete the local copy anyway?", "Delete failed",
-						JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-					if (alsoLocal == JOptionPane.YES_OPTION)
-					{
-						templateManager.deleteUserTemplate(template);
-						rebuildOnEdt();
-						onActiveChanged.run();
-					}
-				}));
+			repositoryClient.delete(template.getRepoId(), removeLocally, onDeleteError);
+		}
+		else if (webBacked)
+		{
+			if (!requireLogin())
+			{
+				return;
+			}
+			// If this copy was also imported from someone else's community share, drop that import count too.
+			if (template.getRepoId() != null)
+			{
+				repositoryClient.unimport(template.getRepoId());
+			}
+			repositoryClient.delete(template.getWebId(), removeLocally, onDeleteError);
 		}
 		else
 		{
@@ -1191,9 +1227,7 @@ public class BankTemplatesPanel extends PluginPanel
 			{
 				repositoryClient.unimport(template.getRepoId());
 			}
-			templateManager.deleteUserTemplate(template);
-			rebuildOnEdt();
-			onActiveChanged.run();
+			removeLocally.run();
 		}
 	}
 
@@ -1604,72 +1638,115 @@ public class BankTemplatesPanel extends PluginPanel
 		return n;
 	}
 
-	// Mirror the linked Exchange Insights account's website "My Templates" (including private ones never
-	// shared) into the in-game My Templates. These are read-only copies (owned=false, webSynced=true): all
-	// editing happens on the website and syncs down here. Because it's a true mirror - not an add - renames,
-	// edits and deletions made on the website all propagate on the next sync, and duplicates can't build up.
+	// Duplex "My Templates" sync with the linked Exchange Insights account. The account's editable in-game
+	// templates (imports and in-plugin creations, plus copies previously pulled from the website) are sent
+	// up; the server reconciles them last-write-wins against the website set and returns the authoritative
+	// list, which we mirror back. Net effect: create or edit on either side and it shows on both; delete on
+	// the website and it's removed in-game. Requires an Exchange Insights account linked via the Exchange
+	// Insights plugin - webSyncLinked tracks that so the panel can explain it.
 	void syncWebTemplates()
 	{
-		repositoryClient.fetchForAccount(remotes -> SwingUtilities.invokeLater(() ->
+		// The editable set that participates in duplex: your own local templates, excluding presets and
+		// public community shares (owned=true keeps the existing clientId-owned share flow). Give each a
+		// stable client key up front so the server can correlate it across syncs.
+		final List<BankTemplate> local = new ArrayList<>();
+		for (BankTemplate t : templateManager.getUserTemplates())
 		{
-			// An empty result is ambiguous: the account may genuinely have no website templates, or the fetch
-			// may have failed (network, rate limit, not linked) - the endpoint can't distinguish them. Only
-			// reconcile when at least one template came back, so a transient failure can never wipe the mirror.
-			// The rare cost: deleting your last website template won't prune its stale in-game copy until you
-			// make another - far better than losing every synced copy on a blip.
-			if (remotes == null || remotes.isEmpty())
+			if (!t.isPreset() && !t.isOwned())
 			{
+				ensureSyncKey(t);
+				local.add(t);
+			}
+		}
+
+		repositoryClient.sync(local, result -> SwingUtilities.invokeLater(() ->
+		{
+			if (result == null)
+			{
+				return; // sync failed (network/unverified) - change nothing
+			}
+			webSyncLinked = result.linked;
+			if (!result.linked)
+			{
+				rebuildOnEdt(); // not linked: leave everything local, just refresh the note
 				return;
 			}
 
-			final Set<Long> remoteIds = new HashSet<>();
-			for (RemoteTemplate rt : remotes)
+			final List<TemplateRepositoryClient.WebTemplate> remote =
+				result.templates != null ? result.templates : Collections.<TemplateRepositoryClient.WebTemplate>emptyList();
+
+			// Index the current duplex set so each returned row updates its existing local copy in place.
+			final Map<String, BankTemplate> byKey = new HashMap<>();
+			final Map<Long, BankTemplate> byWebId = new HashMap<>();
+			for (BankTemplate t : templateManager.getUserTemplates())
 			{
-				if (rt.id > 0)
+				if (t.isPreset() || t.isOwned())
 				{
-					remoteIds.add(rt.id);
+					continue;
+				}
+				if (t.getClientKey() != null)
+				{
+					byKey.put(t.getClientKey(), t);
+				}
+				if (t.getWebId() != null)
+				{
+					byWebId.put(t.getWebId(), t);
 				}
 			}
 
-			// Preserve the active selection across the rebuild: deleteUserTemplate clears it, but we re-add
-			// the same names, so restore it afterwards (picking up any layout change made on the website).
 			final BankTemplate active = templateManager.getActive();
 			final String activeName = active != null ? active.getName() : null;
 
-			// Drop the previous mirror before rebuilding it. Two kinds of local template are part of the
-			// mirror: ones already flagged webSynced, and legacy synced copies from before that flag existed -
-			// identified as owned=false imports whose repo id is one of THIS account's own website templates
-			// (so never a template imported from Browse, which keeps a repo id that isn't yours).
-			final List<BankTemplate> stale = new ArrayList<>();
-			for (BankTemplate t : templateManager.getUserTemplates())
+			final Set<Long> seenIds = new HashSet<>();
+			final Set<String> seenKeys = new HashSet<>();
+			for (TemplateRepositoryClient.WebTemplate wt : remote)
 			{
-				if (t.isPreset())
+				if (wt.id <= 0)
 				{
 					continue;
 				}
-				final boolean legacyMine = !t.isOwned() && t.getRepoId() != null && remoteIds.contains(t.getRepoId());
-				if (t.isWebSynced() || legacyMine)
+				seenIds.add(wt.id);
+				if (wt.clientKey != null)
 				{
-					stale.add(t);
+					seenKeys.add(wt.clientKey);
 				}
-			}
-			for (BankTemplate t : stale)
-			{
-				templateManager.deleteUserTemplate(t);
+				BankTemplate localCopy = wt.clientKey != null ? byKey.get(wt.clientKey) : null;
+				if (localCopy == null)
+				{
+					localCopy = byWebId.get(wt.id);
+				}
+				if (localCopy != null)
+				{
+					applyRemote(localCopy, wt);
+				}
+				else
+				{
+					final BankTemplate t = wt.toTemplate();
+					t.setOwned(false);
+					t.setWebSynced(true);
+					t.setWebId(wt.id);
+					t.setClientKey(wt.clientKey);
+					t.setUpdatedAt(wt.updatedAt);
+					t.setName(uniqueName(capName(t.getName())));
+					templateManager.saveSyncedTemplate(t);
+				}
 			}
 
-			for (RemoteTemplate rt : remotes)
+			// Remove local copies that were web-backed (had a webId) but are gone from the authoritative set -
+			// they were deleted on the website. A template that was never synced up (webId still null - e.g.
+			// one the server declined at the private cap) is never touched, so nothing local is ever lost.
+			for (BankTemplate t : new ArrayList<>(templateManager.getUserTemplates()))
 			{
-				if (rt.id <= 0)
+				if (t.isPreset() || t.isOwned() || t.getWebId() == null)
 				{
 					continue;
 				}
-				final BankTemplate t = rt.toTemplate();
-				t.setRepoId(rt.id);
-				t.setOwned(false);
-				t.setWebSynced(true);
-				t.setName(uniqueName(capName(t.getName())));
-				templateManager.saveUserTemplate(t);
+				final boolean stillThere = seenIds.contains(t.getWebId())
+					|| (t.getClientKey() != null && seenKeys.contains(t.getClientKey()));
+				if (!stillThere)
+				{
+					templateManager.deleteUserTemplate(t);
+				}
 			}
 
 			if (activeName != null && templateManager.getActive() == null)
@@ -1683,6 +1760,47 @@ public class BankTemplatesPanel extends PluginPanel
 			}
 			rebuildOnEdt();
 		}));
+	}
+
+	// Give a template a stable client key (and nothing else) so the server can correlate it across syncs.
+	// updatedAt is deliberately left untouched: only a genuine user edit (saveUserTemplate) stamps it, so a
+	// pre-existing copy with no timestamp reads as "oldest" and pulls the website version down rather than
+	// overwriting it.
+	private void ensureSyncKey(BankTemplate t)
+	{
+		if (t.getClientKey() == null || t.getClientKey().isEmpty())
+		{
+			t.setClientKey(java.util.UUID.randomUUID().toString());
+			templateManager.saveSyncedTemplate(t);
+		}
+	}
+
+	// Overwrite a local copy with the authoritative website version (content the server returned already
+	// won last-write-wins). Writes the server's updatedAt so it isn't mistaken for a fresh local edit and
+	// pushed straight back. Re-keys via rename when the name changed so the manager's name-keyed store stays
+	// consistent.
+	private void applyRemote(BankTemplate localCopy, TemplateRepositoryClient.WebTemplate wt)
+	{
+		final BankTemplate fresh = wt.toTemplate();
+		localCopy.setDescription(fresh.getDescription());
+		localCopy.restoreTabsFrom(fresh); // copies tabs + columns
+		localCopy.setWebId(wt.id);
+		localCopy.setWebSynced(true);
+		if (wt.clientKey != null)
+		{
+			localCopy.setClientKey(wt.clientKey);
+		}
+		localCopy.setUpdatedAt(wt.updatedAt);
+
+		final String newName = capName(wt.name);
+		if (!newName.isEmpty() && !newName.equals(localCopy.getName()) && templateManager.findByName(newName) == null)
+		{
+			templateManager.renameTemplate(localCopy, newName); // re-keys + persists
+		}
+		else
+		{
+			templateManager.saveSyncedTemplate(localCopy);
+		}
 	}
 
 	private String capName(String s)

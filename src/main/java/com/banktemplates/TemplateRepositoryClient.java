@@ -1,6 +1,7 @@
 package com.banktemplates;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
 import com.google.gson.reflect.TypeToken;
@@ -243,8 +244,16 @@ public class TemplateRepositoryClient
 
 	void delete(long repoId, Runnable onSuccess, Consumer<String> onError)
 	{
-		final HttpUrl url = HttpUrl.parse(baseUrl() + "/api/bank-templates/templates/" + repoId)
-			.newBuilder().addQueryParameter("clientId", clientId()).build();
+		final HttpUrl.Builder ub = HttpUrl.parse(baseUrl() + "/api/bank-templates/templates/" + repoId)
+			.newBuilder().addQueryParameter("clientId", clientId());
+		// A duplex-synced template is owned by web:<id>, not by the plugin's clientId, so the server needs
+		// the verified account hash to authorise deleting it. Harmless for clientId-owned public shares -
+		// the server matches clientId first.
+		if (accountHashRaw != null)
+		{
+			ub.addQueryParameter("accountHash", accountHashRaw);
+		}
+		final HttpUrl url = ub.build();
 		// A 404 means the template is already gone from the server, which is exactly what delete wants -
 		// treat it as success so the local copy can be cleaned up too.
 		sendAllowingNotFound(new Request.Builder().url(url).delete().build(), body -> onSuccess.run(), onError);
@@ -388,6 +397,114 @@ public class TemplateRepositoryClient
 				}
 			}
 		});
+	}
+
+	// Duplex "My Templates" sync. Sends this account's in-game editable templates (imports and in-plugin
+	// creations, plus copies previously pulled from the website), each tagged with its stable clientKey,
+	// the website id it already knows (webId, as "repoId"), and its local updatedAt. The server reconciles
+	// them last-write-wins against the account's website templates and returns the authoritative set to
+	// mirror back. onDone gets null on any failure (nothing is changed locally) and a result with
+	// linked=false when the character isn't linked to an Exchange Insights account. No-op when logged out.
+	void sync(List<BankTemplate> local, Consumer<SyncResult> onDone)
+	{
+		if (!isEnabled() || accountHashRaw == null || !hasIdentity())
+		{
+			onDone.accept(null);
+			return;
+		}
+		final JsonObject body = new JsonObject();
+		body.addProperty("clientId", clientId());
+		body.addProperty("accountHash", accountHashRaw);
+		final JsonArray arr = new JsonArray();
+		for (BankTemplate t : local)
+		{
+			final JsonObject o = new JsonObject();
+			o.addProperty("clientKey", t.getClientKey());
+			// The website id we already know for this template. Falls back to repoId so a copy synced by an
+			// older plugin build (which stored the web id in repoId, with no webId/clientKey) is matched to
+			// its existing row instead of being re-inserted as a duplicate. A community-import repoId simply
+			// won't match any of this owner's rows server-side, so it's treated as new (as intended).
+			final Long candidateWebId = t.getWebId() != null ? t.getWebId() : t.getRepoId();
+			if (candidateWebId != null)
+			{
+				o.addProperty("repoId", candidateWebId);
+			}
+			o.addProperty("name", t.getName());
+			o.addProperty("description", t.getDescription() == null ? "" : t.getDescription());
+			o.addProperty("columns", t.getColumns());
+			o.addProperty("updatedAt", t.getUpdatedAt());
+			o.add("tabs", gson.toJsonTree(t.getTabs()));
+			arr.add(o);
+		}
+		body.add("templates", arr);
+		final String bodyJson = gson.toJson(body);
+		final Request.Builder rb = new Request.Builder()
+			.url(baseUrl() + "/api/bank-templates/sync")
+			.post(RequestBody.create(JSON, bodyJson));
+		addSig(rb, bodyJson);
+		okHttpClient.newCall(rb.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				onDone.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					if (!r.isSuccessful() || r.body() == null)
+					{
+						onDone.accept(null);
+						return;
+					}
+					onDone.accept(gson.fromJson(r.body().string(), SyncResult.class));
+				}
+				catch (IOException | JsonSyntaxException e)
+				{
+					onDone.accept(null);
+				}
+			}
+		});
+	}
+
+	// The website's authoritative My Templates set for a duplex sync. linked=false means the character
+	// isn't tied to an Exchange Insights account, so there's nothing to sync.
+	static class SyncResult
+	{
+		boolean linked;
+		List<WebTemplate> templates;
+	}
+
+	// One website "My Templates" row as returned by /sync. Mirrors the JSON the Worker sends.
+	static class WebTemplate
+	{
+		long id;
+		String name;
+		String description;
+		int columns;
+		List<TabLayout> tabs;
+		String status;
+		String clientKey;
+		long updatedAt;
+
+		BankTemplate toTemplate()
+		{
+			final BankTemplate t = new BankTemplate();
+			t.setName(name);
+			t.setDescription(description);
+			t.setColumns(columns);
+			if (tabs != null)
+			{
+				for (TabLayout tl : tabs)
+				{
+					t.putTab(tl.getTab(), tl.getLayout());
+				}
+			}
+			return t;
+		}
 	}
 
 	// Best-effort backfill: link this account's already-shared templates to its Exchange Insights profile
