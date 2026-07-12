@@ -1441,12 +1441,19 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private JPanel cardPanel(boolean active)
 	{
-		final JPanel card = new JPanel(new BorderLayout(0, 2));
+		// Cap the card's max height to its own preferred height so the vertical BoxLayout it sits in can't
+		// stretch it to fill leftover space (which left a tall gap in the card before the list filled out).
+		// Width still stretches to the panel.
+		final JPanel card = new JPanel(new BorderLayout(0, 2))
+		{
+			@Override
+			public Dimension getMaximumSize()
+			{
+				return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+			}
+		};
 		card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		card.setBorder(active ? ACTIVE_BORDER : CARD_BORDER);
-		// Tall enough for the name plus a button row that wraps to two lines (My Templates cards can carry
-		// Enable/Edit/Share/Report/Web/Del). The card only grows to its content, so simpler cards stay short.
-		card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 150));
 		card.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		if (!active)
