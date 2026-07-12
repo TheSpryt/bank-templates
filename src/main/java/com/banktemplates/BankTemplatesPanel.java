@@ -684,23 +684,14 @@ public class BankTemplatesPanel extends PluginPanel
 		final boolean active = templateManager.isActive(template);
 		final JPanel card = cardPanel(active);
 
-		// Title above buttons in a vertical stack. Previously the title sat in BorderLayout CENTER with the
-		// buttons in SOUTH; once a template gained enough buttons to wrap onto a second row (e.g. the Web
-		// button appearing after it syncs to the website), the wrapping row squeezed the title's height to
-		// zero and the name vanished. Stacking guarantees the name always keeps its own row.
-		final JPanel content = new JPanel();
-		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-		content.setOpaque(false);
-		content.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-		final JPanel title = titleBlock(template.getName(), localMeta(template),
-			active ? ColorScheme.BRAND_ORANGE : Color.WHITE);
-		title.setAlignmentX(Component.LEFT_ALIGNMENT);
-		content.add(title);
-		content.add(Box.createVerticalStrut(4));
+		// Title in NORTH, buttons in SOUTH. NORTH always gets its full preferred height, so the name can't
+		// be squeezed out; SOUTH gives the button row the card's full width, so WrapLayout wraps correctly
+		// and every button (including Del on the second row) is shown. Putting the title in CENTER instead
+		// let a wrapping button row collapse the title's height to zero and hide the name after sync.
+		card.add(titleBlock(template.getName(), localMeta(template),
+			active ? ColorScheme.BRAND_ORANGE : Color.WHITE), BorderLayout.NORTH);
 
 		final JPanel buttons = buttonRow();
-		buttons.setAlignmentX(Component.LEFT_ALIGNMENT);
 		buttons.add(activeOrUse(active, template));
 		// One button does both: presets are read-only (View); your own templates open the editor (which
 		// previews and edits in one window).
@@ -737,8 +728,7 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			buttons.add(iconButton("Del", "Delete this template", () -> deleteLocal(template)));
 		}
-		content.add(buttons);
-		card.add(content, BorderLayout.CENTER);
+		card.add(buttons, BorderLayout.SOUTH);
 		return card;
 	}
 
