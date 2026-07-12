@@ -683,10 +683,24 @@ public class BankTemplatesPanel extends PluginPanel
 	{
 		final boolean active = templateManager.isActive(template);
 		final JPanel card = cardPanel(active);
-		card.add(titleBlock(template.getName(), localMeta(template),
-			active ? ColorScheme.BRAND_ORANGE : Color.WHITE), BorderLayout.CENTER);
+
+		// Title above buttons in a vertical stack. Previously the title sat in BorderLayout CENTER with the
+		// buttons in SOUTH; once a template gained enough buttons to wrap onto a second row (e.g. the Web
+		// button appearing after it syncs to the website), the wrapping row squeezed the title's height to
+		// zero and the name vanished. Stacking guarantees the name always keeps its own row.
+		final JPanel content = new JPanel();
+		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+		content.setOpaque(false);
+		content.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		final JPanel title = titleBlock(template.getName(), localMeta(template),
+			active ? ColorScheme.BRAND_ORANGE : Color.WHITE);
+		title.setAlignmentX(Component.LEFT_ALIGNMENT);
+		content.add(title);
+		content.add(Box.createVerticalStrut(4));
 
 		final JPanel buttons = buttonRow();
+		buttons.setAlignmentX(Component.LEFT_ALIGNMENT);
 		buttons.add(activeOrUse(active, template));
 		// One button does both: presets are read-only (View); your own templates open the editor (which
 		// previews and edits in one window).
@@ -723,7 +737,8 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			buttons.add(iconButton("Del", "Delete this template", () -> deleteLocal(template)));
 		}
-		card.add(buttons, BorderLayout.SOUTH);
+		content.add(buttons);
+		card.add(content, BorderLayout.CENTER);
 		return card;
 	}
 
@@ -1439,7 +1454,9 @@ public class BankTemplatesPanel extends PluginPanel
 		final JPanel card = new JPanel(new BorderLayout(0, 2));
 		card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		card.setBorder(active ? ACTIVE_BORDER : CARD_BORDER);
-		card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 110));
+		// Tall enough for the name plus a button row that wraps to two lines (My Templates cards can carry
+		// Enable/Edit/Share/Report/Web/Del). The card only grows to its content, so simpler cards stay short.
+		card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 150));
 		card.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		if (!active)
