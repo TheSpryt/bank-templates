@@ -21,6 +21,11 @@ Jagex's third-party client rules. You can snapshot your current bank as a templa
 the community's, build layouts for items you don't even own yet, and get guided help reorganising your
 *real* bank to match.
 
+> **Free forever.** Every feature this plugin has now - and everything we keep adding to it - stays
+> free, with no ads and nothing paywalled. [Exchange Insights](https://exchange-insights.gg) membership
+> is a separate, optional thing for going further on the website (bank-value tracking and more);
+> linking an account is opt-in and never changes the free plugin.
+
 ## ✨ Highlights
 
 - 📸 **Capture your bank** into a reusable, shareable template in one click.

@@ -46,7 +46,7 @@ import net.runelite.client.util.ImageUtil;
 @Slf4j
 @PluginDescriptor(
 	name = "Bank Templates",
-	description = "Create, share and apply bank layout templates that virtually arrange your bank.",
+	description = "Create, share and apply bank layout templates that virtually arrange your bank. Free forever.",
 	tags = {"bank", "layout", "template", "organise", "organize", "tabs", "placeholder", "sort"}
 )
 public class BankTemplatesPlugin extends Plugin
@@ -314,18 +314,23 @@ public class BankTemplatesPlugin extends Plugin
 		{
 			return;
 		}
+		// [id, qty, tab] triples, sliced into tabs the same way BankCapture does (container is ordered
+		// tab 1..9 then the main view; per-tab counts live in the BANK_TAB_1..9 varbits). Tab 0 = main.
+		final Item[] all = bank.getItems();
 		final List<int[]> items = new ArrayList<>();
 		long checksum = 7;
-		for (Item item : bank.getItems())
+		int idx = 0;
+		for (int tab = 1; tab <= 9; tab++)
 		{
-			// Empty slots and placeholders (quantity 0) carry no ownership information - skip.
-			if (item == null || item.getId() <= 0 || item.getQuantity() <= 0)
+			final int count = client.getVarbitValue(BankCapture.TAB_COUNT_VARBITS[tab - 1]);
+			for (int k = 0; k < count && idx < all.length; k++, idx++)
 			{
-				continue;
+				checksum = addSnapshotItem(items, all[idx], tab, checksum);
 			}
-			items.add(new int[]{item.getId(), item.getQuantity()});
-			checksum = checksum * 31 + item.getId();
-			checksum = checksum * 31 + item.getQuantity();
+		}
+		for (; idx < all.length; idx++)
+		{
+			checksum = addSnapshotItem(items, all[idx], 0, checksum);
 		}
 		if (items.isEmpty() || checksum == lastBankSnapshotChecksum)
 		{
@@ -333,7 +338,24 @@ public class BankTemplatesPlugin extends Plugin
 		}
 		lastBankSnapshotChecksum = checksum;
 		lastBankSnapshotAt = now;
-		repositoryClient.sendBankSnapshot(items);
+		// The response carries the bank's live GE value - surface it in the side panel (the free teaser
+		// for bank-value tracking on the website).
+		repositoryClient.sendBankSnapshot(items,
+			value -> javax.swing.SwingUtilities.invokeLater(() -> panel.setBankValue(value)));
+	}
+
+	// Adds one bank stack to the snapshot (skipping empty slots and placeholders, which have quantity 0)
+	// and folds it into the change-detection checksum.
+	private static long addSnapshotItem(List<int[]> items, Item item, int tab, long checksum)
+	{
+		if (item == null || item.getId() <= 0 || item.getQuantity() <= 0)
+		{
+			return checksum;
+		}
+		items.add(new int[]{item.getId(), item.getQuantity(), tab});
+		checksum = checksum * 31 + item.getId();
+		checksum = checksum * 31 + item.getQuantity();
+		return checksum * 31 + tab;
 	}
 
 	@Subscribe

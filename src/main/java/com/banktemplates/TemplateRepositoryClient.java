@@ -774,11 +774,12 @@ public class TemplateRepositoryClient
 		String handle;
 	}
 
-	// Opt-in bank snapshot for bank-value tracking (item ids + quantities only). Same self-authorization
-	// as sync/claim: clientId + raw account hash + request signature; the server only stores snapshots
-	// for characters linked to an Exchange Insights account, so this is a no-op for everyone else.
-	// Fire-and-forget: a lost snapshot is re-sent on the next bank change.
-	void sendBankSnapshot(List<int[]> items)
+	// Opt-in bank snapshot for bank-value tracking ([itemId, quantity, tab] triples). Same
+	// self-authorization as sync/claim: clientId + raw account hash + request signature; the server only
+	// stores snapshots for characters linked to an Exchange Insights account, so this is a no-op for
+	// everyone else. Best-effort: a lost snapshot is re-sent on the next bank change. On success the
+	// server returns the bank's live GE value, delivered to onValue (off the Swing thread).
+	void sendBankSnapshot(List<int[]> items, Consumer<Long> onValue)
 	{
 		if (!isEnabled() || accountHashRaw == null || !hasIdentity() || items == null || items.isEmpty())
 		{
@@ -803,9 +804,31 @@ public class TemplateRepositoryClient
 			@Override
 			public void onResponse(Call call, Response response)
 			{
-				response.close();
+				try (Response r = response)
+				{
+					if (!r.isSuccessful() || r.body() == null)
+					{
+						return;
+					}
+					final SnapshotResult res = gson.fromJson(r.body().string(), SnapshotResult.class);
+					if (res != null && res.ok && res.totalValue != null && onValue != null)
+					{
+						onValue.accept(res.totalValue);
+					}
+				}
+				catch (IOException | JsonSyntaxException e)
+				{
+				}
 			}
 		});
+	}
+
+	// /api/bank-templates/bank-snapshot response.
+	static class SnapshotResult
+	{
+		boolean ok;
+		boolean linked;
+		Long totalValue;
 	}
 
 	// Best-effort backfill: link this account's already-shared templates to its Exchange Insights profile

@@ -348,6 +348,15 @@ public class BankTemplatesPanel extends PluginPanel
 			{
 				final String who = linkedHandle != null && !linkedHandle.isEmpty() ? " as " + linkedHandle : "";
 				accountRow.add(statusLabel("✓ Account linked" + who, new Color(95, 175, 95)));
+				// Free teaser from the opt-in bank-value sync: the ingest response reports the bank's live
+				// GE value, and the website tracks it over time.
+				if (bankValue >= 0)
+				{
+					final JLabel bv = statusLabel("Bank value: " + fmtGp(bankValue) + " gp", ColorScheme.LIGHT_GRAY_COLOR);
+					bv.setToolTipText("Your bank at live GE mid prices, updated as it changes. Track it over time at exchange-insights.gg.");
+					accountRow.add(Box.createVerticalStrut(3));
+					accountRow.add(bv);
+				}
 			}
 			else
 			{
@@ -526,6 +535,34 @@ public class BankTemplatesPanel extends PluginPanel
 		JOptionPane.showMessageDialog(this,
 			"Your account is linked. Your bank templates now sync with exchange-insights.gg.",
 			"Account linked", JOptionPane.INFORMATION_MESSAGE);
+	}
+
+	// Latest bank value reported by the snapshot sync (gp at live GE mid prices); -1 until the first sync.
+	private long bankValue = -1;
+
+	// Called (on the EDT) when a bank snapshot lands and the server reports the bank's live value.
+	void setBankValue(long value)
+	{
+		bankValue = value;
+		refreshAccountRow();
+	}
+
+	// Compact gp formatting for the panel (214.3M, 1.20B, 53,120), matching how players talk about gp.
+	private static String fmtGp(long gp)
+	{
+		if (gp >= 1_000_000_000L)
+		{
+			return String.format(Locale.ROOT, "%.2fB", gp / 1_000_000_000.0);
+		}
+		if (gp >= 10_000_000L)
+		{
+			return String.format(Locale.ROOT, "%.1fM", gp / 1_000_000.0);
+		}
+		if (gp >= 1_000_000L)
+		{
+			return String.format(Locale.ROOT, "%.2fM", gp / 1_000_000.0);
+		}
+		return String.format(Locale.ROOT, "%,d", gp);
 	}
 
 	// Fetch the linked Exchange Insights handle for the status row, when a token is set. Best-effort: a

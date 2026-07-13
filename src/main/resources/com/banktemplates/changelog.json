@@ -2,7 +2,9 @@
   {
     "version": "1.6.3",
     "notes": [
-      "Bank value sync: characters linked to a (free) Exchange Insights account now send a snapshot of the bank's contents (item IDs and quantities only - no placement, notes or anything else) to exchange-insights.gg when it changes, powering bank-value tracking on the website. Nothing is ever sent for unlinked characters. Turn it off any time with 'Sync bank value' in the Exchange Insights account settings section - that stops new snapshots, and deleting your Exchange Insights account removes the stored data."
+      "Bank value sync: characters linked to a (free) Exchange Insights account now send a snapshot of the bank's contents (item IDs and quantities only - no placement, notes or anything else) to exchange-insights.gg when it changes, powering bank-value tracking on the website. Nothing is ever sent for unlinked characters. Turn it off any time with 'Sync bank value' in the Exchange Insights account settings section - that stops new snapshots, and deleting your Exchange Insights account removes the stored data.",
+      "Once a linked character's bank has synced, the side panel shows your bank's live GE value at the top - bank-value tracking over time is coming to the website.",
+      "Bank Templates is free forever: every feature the plugin has stays free, with no ads and nothing paywalled. An Exchange Insights account is a separate, optional extra and never changes the free plugin."
     ]
   },
   {
