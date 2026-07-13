@@ -61,6 +61,27 @@ public interface BankTemplatesConfig extends Config
 	)
 	String repositorySection = "repository";
 
+	@ConfigSection(
+		name = "Exchange Insights account",
+		description = "Link this character to your Exchange Insights account so your bank templates sync between the game and the website.",
+		position = 4,
+		closedByDefault = true
+	)
+	String accountSection = "eiAccount";
+
+	@ConfigItem(
+		keyName = "eiAccountToken",
+		name = "Account token",
+		description = "Paste your Exchange Insights account token to link this character. Get it free at exchange-insights.gg (Account → RuneLite plugin). Templates you make then sync to your website My Templates and back. This works alongside the Exchange Insights plugin - you can set the same token in both.",
+		position = 0,
+		section = accountSection,
+		secret = true
+	)
+	default String eiAccountToken()
+	{
+		return "";
+	}
+
 	@ConfigItem(
 		keyName = "enableRepository",
 		name = "Enable community repository",

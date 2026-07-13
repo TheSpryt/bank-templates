@@ -5,6 +5,7 @@ import java.awt.image.BufferedImage;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
+import net.runelite.api.Player;
 import net.runelite.api.GameState;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuAction;
@@ -97,6 +98,13 @@ public class BankTemplatesPlugin extends Plugin
 
 	@Inject
 	private BankTemplatesPanel panel;
+
+	@Inject
+	private BankTemplatesConfig config;
+
+	// The account hash we've already sent an Exchange Insights identity link for this session, so linking
+	// happens once per character per session (and can retry until the player's name has loaded).
+	private long eiLinkedHash = -1;
 
 	private NavigationButton navButton;
 
@@ -206,6 +214,7 @@ public class BankTemplatesPlugin extends Plugin
 			updateRepoIdentity(client.getAccountHash());
 			// Load this account's cached bank counts (and pick up an account switch) without needing the bank open.
 			panel.refreshOwnedCanon();
+			maybeLinkEiAccount();
 		}
 		else if (state == GameState.LOGIN_SCREEN)
 		{
@@ -403,8 +412,46 @@ public class BankTemplatesPlugin extends Plugin
 	{
 		if (BankTemplatesConfig.GROUP.equals(event.getGroup()))
 		{
+			// Pasting/changing the Exchange Insights token should link right away, without a relog.
+			if ("eiAccountToken".equals(event.getKey()))
+			{
+				eiLinkedHash = -1;
+				maybeLinkEiAccount();
+			}
 			requestBankRebuild();
 		}
+	}
+
+	// Link the logged-in character to the Exchange Insights account whose token is set in the config, so
+	// bank templates sync to that account. Idempotent + ownership-safe server-side, and does nothing until
+	// a token is set, the community repository is enabled, and a character is logged in - so it coexists
+	// with the Exchange Insights plugin (both may send the same link). Runs once per character per session.
+	private void maybeLinkEiAccount()
+	{
+		final String token = config.eiAccountToken() == null ? "" : config.eiAccountToken().trim();
+		final long hash = client.getAccountHash();
+		if (token.isEmpty() || !repositoryClient.isEnabled() || hash == -1 || hash == eiLinkedHash)
+		{
+			return;
+		}
+		// Wait (on the client thread) until the local player's name has loaded, then link exactly once.
+		clientThread.invokeLater(() ->
+		{
+			if (client.getAccountHash() != hash)
+			{
+				return true; // logged out / switched before the name loaded - abandon this attempt
+			}
+			final Player p = client.getLocalPlayer();
+			if (p == null || p.getName() == null || p.getName().isEmpty())
+			{
+				return false; // not ready yet - retry next tick
+			}
+			eiLinkedHash = hash;
+			repositoryClient.linkEiAccount(token, hash, p.getName(),
+				panel::syncWebTemplates, // linked - kick a sync now that the account resolves
+				error -> {});
+			return true;
+		});
 	}
 
 	/** Rebuilds the bank interface so the active template (or normal view) is re-applied. */
