@@ -566,6 +566,209 @@ public class TemplateRepositoryClient
 		});
 	}
 
+	// ---- one-click device link ----------------------------------------------------------------------
+	// The plugin starts a link (server returns a short user code + verification URL to open in the browser,
+	// and a device secret to poll with), the signed-in browser approves it, and the issued account token is
+	// handed back on the next poll. Public endpoints (no HMAC signature): link/start is unauthenticated by
+	// design and link/poll self-authorizes via the one-time device secret. Same flow the Exchange Insights
+	// plugin uses, so linking either way (or via a pasted token) is interchangeable.
+
+	// Begin a device link for the logged-in character. onStart receives the code/secret/verification URL.
+	void startDeviceLink(long accountHash, String rsn, Consumer<LinkStart> onStart, Consumer<String> onError)
+	{
+		final JsonObject body = new JsonObject();
+		body.addProperty("accountHash", Long.toString(accountHash));
+		if (rsn != null && !rsn.isEmpty())
+		{
+			body.addProperty("accountName", rsn);
+		}
+		final Request request = new Request.Builder()
+			.url(baseUrl() + "/api/plugin/link/start")
+			.post(RequestBody.create(JSON, gson.toJson(body)))
+			.build();
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				if (onError != null)
+				{
+					onError.accept("Couldn't reach the server to start linking.");
+				}
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					if (r.isSuccessful() && r.body() != null)
+					{
+						final LinkStart s = gson.fromJson(r.body().string(), LinkStart.class);
+						if (s != null && s.deviceSecret != null && s.verificationUrl != null)
+						{
+							if (onStart != null)
+							{
+								onStart.accept(s);
+							}
+							return;
+						}
+					}
+					if (onError != null)
+					{
+						onError.accept("The server didn't start the link. Please try again.");
+					}
+				}
+				catch (IOException | JsonSyntaxException e)
+				{
+					if (onError != null)
+					{
+						onError.accept("The server didn't start the link. Please try again.");
+					}
+				}
+			}
+		});
+	}
+
+	// Poll a pending device link once. On approval, the result carries the freshly-issued account token
+	// (handed out exactly once); other statuses are pending/denied/expired/invalid/claimed.
+	void pollDeviceLink(String deviceSecret, Consumer<LinkPoll> onResult, Consumer<String> onError)
+	{
+		final JsonObject body = new JsonObject();
+		body.addProperty("deviceSecret", deviceSecret);
+		final Request request = new Request.Builder()
+			.url(baseUrl() + "/api/plugin/link/poll")
+			.post(RequestBody.create(JSON, gson.toJson(body)))
+			.build();
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				if (onError != null)
+				{
+					onError.accept("connection lost");
+				}
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					if (r.isSuccessful() && r.body() != null)
+					{
+						final LinkPoll p = gson.fromJson(r.body().string(), LinkPoll.class);
+						if (p != null)
+						{
+							if (onResult != null)
+							{
+								onResult.accept(p);
+							}
+							return;
+						}
+					}
+					if (onError != null)
+					{
+						onError.accept("bad response");
+					}
+				}
+				catch (IOException | JsonSyntaxException e)
+				{
+					if (onError != null)
+					{
+						onError.accept("bad response");
+					}
+				}
+			}
+		});
+	}
+
+	// Verify a stored token and return the linked Exchange Insights handle (may be null), for the panel's
+	// "linked as" status line. GET /api/plugin/ping with the token as a bearer.
+	void pingLink(String token, Consumer<String> onHandle, Consumer<String> onError)
+	{
+		if (token == null || token.trim().isEmpty())
+		{
+			if (onError != null)
+			{
+				onError.accept("no token");
+			}
+			return;
+		}
+		final Request request = new Request.Builder()
+			.url(baseUrl() + "/api/plugin/ping")
+			.header("Authorization", "Bearer " + token.trim())
+			.get()
+			.build();
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				if (onError != null)
+				{
+					onError.accept("offline");
+				}
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					if (r.isSuccessful() && r.body() != null)
+					{
+						final Ping p = gson.fromJson(r.body().string(), Ping.class);
+						if (p != null && p.ok)
+						{
+							if (onHandle != null)
+							{
+								onHandle.accept(p.handle);
+							}
+							return;
+						}
+					}
+					if (onError != null)
+					{
+						onError.accept(r.code() == 401 ? "revoked" : "error");
+					}
+				}
+				catch (IOException | JsonSyntaxException e)
+				{
+					if (onError != null)
+					{
+						onError.accept("error");
+					}
+				}
+			}
+		});
+	}
+
+	// /api/plugin/link/start response.
+	static class LinkStart
+	{
+		String userCode;
+		String deviceSecret;
+		String verificationUrl;
+		long expiresAt;
+		int pollSeconds;
+	}
+
+	// /api/plugin/link/poll response.
+	static class LinkPoll
+	{
+		String status;
+		String token;
+	}
+
+	// /api/plugin/ping response.
+	static class Ping
+	{
+		boolean ok;
+		String handle;
+	}
+
 	// Best-effort backfill: link this account's already-shared templates to its Exchange Insights profile
 	// (for templates uploaded before the accountHash field existed). The server verifies accountHash
 	// against clientId, so this only ever stamps the caller's own uploads. No-op when logged out.

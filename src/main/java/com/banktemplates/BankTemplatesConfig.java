@@ -69,11 +69,26 @@ public interface BankTemplatesConfig extends Config
 	)
 	String accountSection = "eiAccount";
 
+	// Momentary action, not a stored preference: ticking it starts the one-click browser link and the panel
+	// clears it straight back to false. Kept as a config item so it's available from the settings screen as
+	// well as the side-panel button.
+	@ConfigItem(
+		keyName = "linkAccountInBrowser",
+		name = "Link account in browser",
+		description = "One-click linking: opens exchange-insights.gg in your browser to approve linking this character - no token to copy. Be logged into OSRS and signed in on the website first. Ticking this starts the link (it clears itself once done). Requires the community repository to be enabled.",
+		position = 0,
+		section = accountSection
+	)
+	default boolean linkAccountInBrowser()
+	{
+		return false;
+	}
+
 	@ConfigItem(
 		keyName = "eiAccountToken",
 		name = "Account token",
-		description = "Paste your Exchange Insights account token to link this character. Get it free at exchange-insights.gg (Account → RuneLite plugin). Templates you make then sync to your website My Templates and back. This works alongside the Exchange Insights plugin - you can set the same token in both.",
-		position = 0,
+		description = "Alternative to the one-click link above: paste your Exchange Insights account token to link this character. Get it free at exchange-insights.gg (Account → RuneLite plugin). Templates you make then sync to your website My Templates and back. This works alongside the Exchange Insights plugin - you can set the same token in both.",
+		position = 1,
 		section = accountSection,
 		secret = true
 	)

@@ -104,6 +104,9 @@ public class BankTemplatesPanel extends PluginPanel
 	private final JPanel listContainer = new ListPanel();
 	private final SearchBar searchBar = new SearchBar();
 	private final JPanel tabsPanel = new JPanel();
+	// Account link status/action row, pinned at the very top of the header (rebuilt in place as the link
+	// state changes: a "Link account" button, a "Linking…" note, or a "linked as …" confirmation).
+	private final JPanel accountRow = new JPanel();
 	private final JButton localTab = new JButton("My Templates");
 	private final JButton browseTab = new JButton("Browse");
 	private final JButton updatesTab = new JButton("Updates");
@@ -124,6 +127,16 @@ public class BankTemplatesPanel extends PluginPanel
 	// Whether the last duplex sync found this character linked to an Exchange Insights account. null until
 	// the first sync has answered, so the "link your account" note only shows once we actually know.
 	private Boolean webSyncLinked;
+
+	// One-click device-link state. `linking` is true from the moment the browser is opened until the poll
+	// loop resolves (approved/denied/expired/timeout); linkedHandle is the Exchange Insights handle shown in
+	// the status row once known (from a token ping). linkPollTask is the self-rescheduling poll, cancelled on
+	// shutdown. All touched only on the EDT except linking (read from the poll thread).
+	private volatile boolean linking;
+	private String linkedHandle;
+	private ScheduledFuture<?> linkPollTask;
+	// Total time we'll wait for the browser approval before giving up (the server code lives ~10 minutes).
+	private static final long LINK_WINDOW_MS = 10 * 60 * 1_000L;
 
 	// Duplex sync scheduling. A single self-rescheduling task drives sync: it runs on login, ~1.5s after any
 	// local change (debounced), and every SYNC_POLL_MS as a backstop to pull website-side changes down. On a
@@ -217,6 +230,10 @@ public class BankTemplatesPanel extends PluginPanel
 			south.add(updatesTab, BorderLayout.CENTER);
 			add(south, BorderLayout.SOUTH);
 		}
+
+		// If a token is already stored (from a previous session or the Exchange Insights plugin), resolve the
+		// linked handle so the top-of-panel status can show "linked as …" straight away.
+		refreshLinkStatus();
 	}
 
 	void setOnActiveChanged(Runnable r)
@@ -232,6 +249,13 @@ public class BankTemplatesPanel extends PluginPanel
 		header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
 		header.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		header.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+
+		// Account link status/action, at the very top of the panel menu. Populated by refreshAccountRow().
+		accountRow.setLayout(new BoxLayout(accountRow, BoxLayout.Y_AXIS));
+		accountRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		accountRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		header.add(accountRow);
+		refreshAccountRow();
 
 		tabsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		tabsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -285,6 +309,242 @@ public class BankTemplatesPanel extends PluginPanel
 		header.add(searchBar);
 
 		return header;
+	}
+
+	// True if a linked account should be shown: either the last sync confirmed the link, or (before any sync)
+	// a token is set so we optimistically treat it as linked - the next sync corrects this if it's stale.
+	private boolean isLinkedForDisplay()
+	{
+		return Boolean.TRUE.equals(webSyncLinked) || (webSyncLinked == null && hasEiToken());
+	}
+
+	private boolean hasEiToken()
+	{
+		final String t = config.eiAccountToken();
+		return t != null && !t.trim().isEmpty();
+	}
+
+	private JLabel statusLabel(String text, Color color)
+	{
+		final JLabel l = new JLabel(text);
+		l.setForeground(color);
+		l.setFont(FontManager.getRunescapeSmallFont());
+		l.setAlignmentX(Component.LEFT_ALIGNMENT);
+		return l;
+	}
+
+	// (Re)draw the top-of-panel account row for the current link state. Only shown when the community
+	// repository is enabled (all third-party server contact, including linking, is behind that opt-in).
+	private void refreshAccountRow()
+	{
+		accountRow.removeAll();
+		if (repositoryClient.isEnabled())
+		{
+			if (linking)
+			{
+				accountRow.add(statusLabel("Linking… approve it in your browser", ColorScheme.BRAND_ORANGE));
+			}
+			else if (isLinkedForDisplay())
+			{
+				final String who = linkedHandle != null && !linkedHandle.isEmpty() ? " as " + linkedHandle : "";
+				accountRow.add(statusLabel("✓ Account linked" + who, new Color(95, 175, 95)));
+			}
+			else
+			{
+				final JButton link = styledButton("Link Exchange Insights account");
+				link.setToolTipText("One-click: opens exchange-insights.gg to approve linking this character - no token to copy.");
+				link.setAlignmentX(Component.LEFT_ALIGNMENT);
+				link.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+				link.addActionListener(e -> startOneClickLink());
+				accountRow.add(link);
+			}
+			accountRow.add(Box.createVerticalStrut(8));
+		}
+		accountRow.revalidate();
+		accountRow.repaint();
+	}
+
+	// Kick off the one-click device link (from the top-of-panel button or the config toggle). Requires the
+	// community repository to be enabled and a logged-in character; reads the account identity on the client
+	// thread before starting.
+	void startOneClickLink()
+	{
+		if (!repositoryClient.isEnabled())
+		{
+			JOptionPane.showMessageDialog(this,
+				"Turn on the community repository in the plugin settings first, then link your account.",
+				"Enable the repository", JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+		if (linking)
+		{
+			return; // a link is already in progress
+		}
+		clientThread.invokeLater(() ->
+		{
+			final long hash = client.getAccountHash();
+			final Player local = client.getLocalPlayer();
+			final String name = local != null ? local.getName() : null;
+			SwingUtilities.invokeLater(() -> beginLink(hash, name));
+		});
+	}
+
+	private void beginLink(long accountHash, String rsn)
+	{
+		if (accountHash == -1 || rsn == null || rsn.isEmpty())
+		{
+			JOptionPane.showMessageDialog(this,
+				"Log into OSRS first (so the plugin knows which character to link), then try again.",
+				"Not logged in", JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+		linking = true;
+		refreshAccountRow();
+		repositoryClient.startDeviceLink(accountHash, rsn,
+			start -> SwingUtilities.invokeLater(() -> onLinkStarted(start)),
+			error -> SwingUtilities.invokeLater(() ->
+			{
+				linking = false;
+				refreshAccountRow();
+				JOptionPane.showMessageDialog(this, error, "Couldn't start linking", JOptionPane.WARNING_MESSAGE);
+			}));
+	}
+
+	private void onLinkStarted(TemplateRepositoryClient.LinkStart start)
+	{
+		if (!linking)
+		{
+			return; // cancelled before the server answered
+		}
+		LinkBrowser.browse(start.verificationUrl);
+		final long deadline = System.currentTimeMillis() + LINK_WINDOW_MS;
+		final long intervalMs = Math.max(2, start.pollSeconds) * 1_000L;
+		scheduleLinkPoll(start.deviceSecret, deadline, intervalMs);
+	}
+
+	private synchronized void scheduleLinkPoll(String deviceSecret, long deadline, long intervalMs)
+	{
+		if (linkPollTask != null)
+		{
+			linkPollTask.cancel(false);
+		}
+		linkPollTask = executor.schedule(
+			() -> pollOnce(deviceSecret, deadline, intervalMs), intervalMs, TimeUnit.MILLISECONDS);
+	}
+
+	// One poll tick (executor thread). Stops on timeout; otherwise asks the server and routes the answer.
+	private void pollOnce(String deviceSecret, long deadline, long intervalMs)
+	{
+		if (!linking)
+		{
+			return;
+		}
+		if (System.currentTimeMillis() > deadline)
+		{
+			SwingUtilities.invokeLater(() ->
+			{
+				if (linking)
+				{
+					linking = false;
+					refreshAccountRow();
+					JOptionPane.showMessageDialog(this,
+						"The link request timed out. Click Link account to try again.",
+						"Link timed out", JOptionPane.INFORMATION_MESSAGE);
+				}
+			});
+			return;
+		}
+		repositoryClient.pollDeviceLink(deviceSecret,
+			poll -> SwingUtilities.invokeLater(() -> handlePoll(poll, deviceSecret, deadline, intervalMs)),
+			err -> reschedulePoll(deviceSecret, deadline, intervalMs)); // transient error - keep trying until the deadline
+	}
+
+	private void reschedulePoll(String deviceSecret, long deadline, long intervalMs)
+	{
+		if (linking && System.currentTimeMillis() <= deadline)
+		{
+			scheduleLinkPoll(deviceSecret, deadline, intervalMs);
+		}
+		else if (linking)
+		{
+			SwingUtilities.invokeLater(() ->
+			{
+				linking = false;
+				refreshAccountRow();
+			});
+		}
+	}
+
+	private void handlePoll(TemplateRepositoryClient.LinkPoll poll, String deviceSecret, long deadline, long intervalMs)
+	{
+		if (!linking)
+		{
+			return;
+		}
+		final String status = poll != null && poll.status != null ? poll.status : "";
+		switch (status)
+		{
+			case "approved":
+				finishLink(poll.token);
+				break;
+			case "pending":
+				reschedulePoll(deviceSecret, deadline, intervalMs);
+				break;
+			case "denied":
+				linking = false;
+				refreshAccountRow();
+				JOptionPane.showMessageDialog(this,
+					"The link was denied in the browser. Nothing was linked.",
+					"Not linked", JOptionPane.INFORMATION_MESSAGE);
+				break;
+			default: // expired / invalid / claimed
+				linking = false;
+				refreshAccountRow();
+				JOptionPane.showMessageDialog(this,
+					"The link request is no longer valid. Click Link account to try again.",
+					"Link expired", JOptionPane.INFORMATION_MESSAGE);
+				break;
+		}
+	}
+
+	private void finishLink(String token)
+	{
+		linking = false;
+		if (token != null && !token.isEmpty())
+		{
+			// Persist the issued token so the link survives restarts and future logins re-assert identity, and
+			// so the same token can be pasted into the Exchange Insights plugin if the player wants both. Setting
+			// it fires onConfigChanged(eiAccountToken) in the plugin, which (idempotently) re-links identity too.
+			configManager.setConfiguration(BankTemplatesConfig.GROUP, "eiAccountToken", token);
+		}
+		webSyncLinked = true;
+		linkedHandle = null;
+		refreshLinkStatus(); // fetch the handle for the "linked as …" label
+		refreshAccountRow();
+		syncWebTemplates();  // pull this account's website templates down now
+		rebuildOnEdt();
+		JOptionPane.showMessageDialog(this,
+			"Your account is linked. Your bank templates now sync with exchange-insights.gg.",
+			"Account linked", JOptionPane.INFORMATION_MESSAGE);
+	}
+
+	// Fetch the linked Exchange Insights handle for the status row, when a token is set. Best-effort: a
+	// failure (offline, revoked) just leaves the row without a name.
+	void refreshLinkStatus()
+	{
+		if (!hasEiToken())
+		{
+			return;
+		}
+		repositoryClient.pingLink(config.eiAccountToken(),
+			handle -> SwingUtilities.invokeLater(() ->
+			{
+				linkedHandle = handle;
+				refreshAccountRow();
+			}),
+			err ->
+			{
+			});
 	}
 
 	private void switchMode(String newMode)
@@ -395,6 +655,9 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		listContainer.revalidate();
 		listContainer.repaint();
+		// Keep the top-of-panel link status in step with the latest sync result (webSyncLinked) and the
+		// repository-enabled state, both of which can change between rebuilds.
+		refreshAccountRow();
 	}
 
 	// ---- Updates ----------------------------------------------------------------------------
@@ -550,9 +813,9 @@ public class BankTemplatesPanel extends PluginPanel
 		if (Boolean.FALSE.equals(webSyncLinked) && repositoryClient.isEnabled())
 		{
 			listContainer.add(messageLabel("Your templates sync with the web at exchange-insights.gg when this "
-				+ "character is linked to an Exchange Insights account. Link it by pasting your free account token "
-				+ "in this plugin's settings (Exchange Insights account section) - then create and edit these "
-				+ "templates in your browser too."));
+				+ "character is linked to a free Exchange Insights account. Link it in one click with the "
+				+ "\"Link Exchange Insights account\" button at the top of this panel (or paste your account token in "
+				+ "the plugin's settings) - then create and edit these templates in your browser too."));
 			listContainer.add(Box.createVerticalStrut(6));
 		}
 
@@ -1691,7 +1954,7 @@ public class BankTemplatesPanel extends PluginPanel
 		scheduleSync(SYNC_DEBOUNCE_MS);
 	}
 
-	// Stop the sync loop (plugin shutdown).
+	// Stop the sync loop and any in-flight account link poll (plugin shutdown).
 	synchronized void stopSync()
 	{
 		if (pendingSyncTask != null)
@@ -1699,6 +1962,12 @@ public class BankTemplatesPanel extends PluginPanel
 			pendingSyncTask.cancel(false);
 			pendingSyncTask = null;
 		}
+		if (linkPollTask != null)
+		{
+			linkPollTask.cancel(false);
+			linkPollTask = null;
+		}
+		linking = false;
 	}
 
 	// (Re)arm the single pending sync task, replacing any already scheduled one so the soonest wins.

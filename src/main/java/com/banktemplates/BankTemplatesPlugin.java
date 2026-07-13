@@ -102,6 +102,9 @@ public class BankTemplatesPlugin extends Plugin
 	@Inject
 	private BankTemplatesConfig config;
 
+	@Inject
+	private ConfigManager configManager;
+
 	// The account hash we've already sent an Exchange Insights identity link for this session, so linking
 	// happens once per character per session (and can retry until the player's name has loaded).
 	private long eiLinkedHash = -1;
@@ -417,6 +420,15 @@ public class BankTemplatesPlugin extends Plugin
 			{
 				eiLinkedHash = -1;
 				maybeLinkEiAccount();
+				// Refresh the side panel's linked-as status for the new token.
+				javax.swing.SwingUtilities.invokeLater(panel::refreshLinkStatus);
+			}
+			// The "Link account in browser" toggle is a momentary action: reset it straight back to false and
+			// start the one-click device link from the panel (which owns the browser + poll flow).
+			else if ("linkAccountInBrowser".equals(event.getKey()) && Boolean.parseBoolean(event.getNewValue()))
+			{
+				configManager.setConfiguration(BankTemplatesConfig.GROUP, "linkAccountInBrowser", false);
+				javax.swing.SwingUtilities.invokeLater(panel::startOneClickLink);
 			}
 			requestBankRebuild();
 		}
