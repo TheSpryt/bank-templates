@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.6.3",
+    "notes": [
+      "Bank value sync: characters linked to a (free) Exchange Insights account now send a snapshot of the bank's contents (item IDs and quantities only - no placement, notes or anything else) to exchange-insights.gg when it changes, powering bank-value tracking on the website. Nothing is ever sent for unlinked characters. Turn it off any time with 'Sync bank value' in the Exchange Insights account settings section - that stops new snapshots, and deleting your Exchange Insights account removes the stored data."
+    ]
+  },
+  {
     "version": "1.6.2",
     "notes": [
       "My templates now syncs both ways with your Exchange Insights website templates. Templates you import or make in-game show up in your website My Templates, and ones you create or edit on the website appear in-game - edit on either side and both stay in step (most recent edit wins), delete on either side and it's removed from both.",

@@ -2,11 +2,17 @@ package com.banktemplates;
 
 import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.Player;
 import net.runelite.api.GameState;
+import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
@@ -105,9 +111,20 @@ public class BankTemplatesPlugin extends Plugin
 	@Inject
 	private ConfigManager configManager;
 
+	@Inject
+	private ScheduledExecutorService executor;
+
 	// The account hash we've already sent an Exchange Insights identity link for this session, so linking
 	// happens once per character per session (and can retry until the player's name has loaded).
 	private long eiLinkedHash = -1;
+
+	// Opt-in bank snapshot sync (bank-value tracking): bank changes arrive in bursts while the bank is
+	// open, so debounce, then read once and only send when the contents actually changed.
+	private static final long BANK_SNAPSHOT_DEBOUNCE_MS = 5_000;
+	private static final long BANK_SNAPSHOT_MIN_INTERVAL_MS = 60_000;
+	private ScheduledFuture<?> pendingBankSnapshot;
+	private long lastBankSnapshotChecksum;
+	private long lastBankSnapshotAt;
 
 	private NavigationButton navButton;
 
@@ -166,6 +183,8 @@ public class BankTemplatesPlugin extends Plugin
 		if (accountHash != -1 && accountHash != claimedAccountHash)
 		{
 			claimedAccountHash = accountHash;
+			// A different character's bank is a different snapshot - never suppress it as "unchanged".
+			lastBankSnapshotChecksum = 0;
 			repositoryClient.claimTemplates();
 			// Pull this account's website-made templates (incl. private) into My Templates.
 			panel.syncWebTemplates();
@@ -175,6 +194,14 @@ public class BankTemplatesPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
+		synchronized (this)
+		{
+			if (pendingBankSnapshot != null)
+			{
+				pendingBankSnapshot.cancel(false);
+				pendingBankSnapshot = null;
+			}
+		}
 		eventBus.unregister(bankValuePreRenderer);
 		if (layoutEditor.isEditing())
 		{
@@ -246,7 +273,67 @@ public class BankTemplatesPlugin extends Plugin
 		if (event.getContainerId() == InventoryID.BANK)
 		{
 			panel.refreshOwnedCanon();
+			scheduleBankSnapshot(BANK_SNAPSHOT_DEBOUNCE_MS);
 		}
+	}
+
+	// (Re)arm the debounced snapshot send, replacing any pending one so a burst of bank changes
+	// collapses into a single read + send once things settle.
+	private synchronized void scheduleBankSnapshot(long delayMs)
+	{
+		if (!config.syncBankSnapshot() || !repositoryClient.isEnabled())
+		{
+			return;
+		}
+		if (pendingBankSnapshot != null)
+		{
+			pendingBankSnapshot.cancel(false);
+		}
+		pendingBankSnapshot = executor.schedule(
+			() -> clientThread.invoke(this::sendBankSnapshotNow), delayMs, TimeUnit.MILLISECONDS);
+	}
+
+	// Reads the bank and sends the snapshot (client thread - container reads aren't safe elsewhere).
+	// Skips silently when nothing changed since the last send; the server additionally only stores
+	// snapshots for characters linked to an Exchange Insights account.
+	private void sendBankSnapshotNow()
+	{
+		if (!config.syncBankSnapshot() || !repositoryClient.isEnabled() || !repositoryClient.hasIdentity())
+		{
+			return;
+		}
+		final long now = System.currentTimeMillis();
+		if (now - lastBankSnapshotAt < BANK_SNAPSHOT_MIN_INTERVAL_MS)
+		{
+			// Too soon - re-arm for the remainder of the window so the change still lands.
+			scheduleBankSnapshot(BANK_SNAPSHOT_MIN_INTERVAL_MS - (now - lastBankSnapshotAt));
+			return;
+		}
+		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank == null)
+		{
+			return;
+		}
+		final List<int[]> items = new ArrayList<>();
+		long checksum = 7;
+		for (Item item : bank.getItems())
+		{
+			// Empty slots and placeholders (quantity 0) carry no ownership information - skip.
+			if (item == null || item.getId() <= 0 || item.getQuantity() <= 0)
+			{
+				continue;
+			}
+			items.add(new int[]{item.getId(), item.getQuantity()});
+			checksum = checksum * 31 + item.getId();
+			checksum = checksum * 31 + item.getQuantity();
+		}
+		if (items.isEmpty() || checksum == lastBankSnapshotChecksum)
+		{
+			return;
+		}
+		lastBankSnapshotChecksum = checksum;
+		lastBankSnapshotAt = now;
+		repositoryClient.sendBankSnapshot(items);
 	}
 
 	@Subscribe

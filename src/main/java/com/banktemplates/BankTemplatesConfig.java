@@ -98,6 +98,18 @@ public interface BankTemplatesConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "syncBankSnapshot",
+		name = "Sync bank value",
+		description = "For characters linked to an Exchange Insights account: send a snapshot of your bank's contents (item IDs and quantities only - no placement, notes or anything else) to exchange-insights.gg when it changes, powering bank-value tracking on the website. Never sent for unlinked characters. Turning this off stops new snapshots; data already sent stays with your Exchange Insights account until you delete that account.",
+		position = 2,
+		section = accountSection
+	)
+	default boolean syncBankSnapshot()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "enableRepository",
 		name = "Enable community repository",
 		description = "Allow the side panel to browse, import and upload templates from the community repository server.",
