@@ -1,14 +1,9 @@
 [
   {
-    "version": "1.7.0",
-    "notes": [
-      "You can now link this character to your Exchange Insights account straight from Bank Templates - paste your free account token into the new 'Exchange Insights account' settings section, and your templates sync to your website My Templates (and back) without needing the Exchange Insights plugin. Get the token at exchange-insights.gg (Account -> RuneLite plugin). If you use both plugins, set the same token in each - they work together."
-    ]
-  },
-  {
     "version": "1.6.2",
     "notes": [
-      "My templates now syncs both ways with your Exchange Insights website templates. Templates you import or make in-game show up in your website My Templates, and ones you create or edit on the website appear in-game - edit on either side and both stay in step (most recent edit wins), delete on either side and it's removed from both. Requires a free Exchange Insights account linked via the Exchange Insights plugin.",
+      "My templates now syncs both ways with your Exchange Insights website templates. Templates you import or make in-game show up in your website My Templates, and ones you create or edit on the website appear in-game - edit on either side and both stay in step (most recent edit wins), delete on either side and it's removed from both.",
+      "You can now link this character to your Exchange Insights account straight from Bank Templates - paste your free account token into the new 'Exchange Insights account' settings section (get it at exchange-insights.gg, Account -> RuneLite plugin). No separate plugin needed; if you use the Exchange Insights plugin too, set the same token in both - they work together.",
       "Fixed website-synced templates that could show up without a name, or linger as stale duplicates after being renamed or deleted on the website (nameless cards left behind by an earlier version are now cleaned up automatically)."
     ]
   },
