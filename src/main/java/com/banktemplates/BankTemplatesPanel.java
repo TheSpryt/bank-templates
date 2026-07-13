@@ -391,6 +391,10 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			return; // a link is already in progress
 		}
+		// Claim the flag NOW (on the EDT), not in beginLink after the client-thread round-trip - two quick
+		// clicks (or button + config toggle) would otherwise both pass the check and open two browser tabs.
+		linking = true;
+		refreshAccountRow();
 		clientThread.invokeLater(() ->
 		{
 			final long hash = client.getAccountHash();
@@ -404,6 +408,8 @@ public class BankTemplatesPanel extends PluginPanel
 	{
 		if (accountHash == -1 || rsn == null || rsn.isEmpty())
 		{
+			linking = false; // release the flag claimed in startOneClickLink
+			refreshAccountRow();
 			JOptionPane.showMessageDialog(this,
 				"Log into OSRS first (so the plugin knows which character to link), then try again.",
 				"Not logged in", JOptionPane.INFORMATION_MESSAGE);
@@ -592,7 +598,9 @@ public class BankTemplatesPanel extends PluginPanel
 	// failure (offline, revoked) just leaves the row without a name.
 	void refreshLinkStatus()
 	{
-		if (!hasEiToken())
+		// All third-party server contact stays behind the community-repository opt-in - including this
+		// token ping (it sends the stored bearer token).
+		if (!repositoryClient.isEnabled() || !hasEiToken())
 		{
 			return;
 		}
@@ -2004,19 +2012,26 @@ public class BankTemplatesPanel extends PluginPanel
 	// the self-rescheduling sync loop if it isn't already running.
 	void syncWebTemplates()
 	{
+		syncStopped = false; // an explicit kick (login, repo enabled) restarts a stopped loop
 		scheduleSync(0);
 	}
 
 	// A local change happened: push it up soon (debounced so a burst of edits collapses into one sync).
 	void requestSync()
 	{
+		syncStopped = false;
 		changeSeq++;
 		scheduleSync(SYNC_DEBOUNCE_MS);
 	}
 
+	// True after stopSync: cancel(false) can't stop an already-executing pass, and afterSync re-arms the
+	// next poll - this flag stops a disabled plugin's in-flight pass from resurrecting the loop.
+	private volatile boolean syncStopped;
+
 	// Stop the sync loop and any in-flight account link poll (plugin shutdown).
 	synchronized void stopSync()
 	{
+		syncStopped = true;
 		if (pendingSyncTask != null)
 		{
 			pendingSyncTask.cancel(false);
@@ -2033,6 +2048,10 @@ public class BankTemplatesPanel extends PluginPanel
 	// (Re)arm the single pending sync task, replacing any already scheduled one so the soonest wins.
 	private synchronized void scheduleSync(long delayMs)
 	{
+		if (syncStopped)
+		{
+			return;
+		}
 		if (pendingSyncTask != null)
 		{
 			pendingSyncTask.cancel(false);

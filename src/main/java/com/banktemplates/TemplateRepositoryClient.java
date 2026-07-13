@@ -777,9 +777,11 @@ public class TemplateRepositoryClient
 	// Opt-in bank snapshot for bank-value tracking ([itemId, quantity, tab] triples). Same
 	// self-authorization as sync/claim: clientId + raw account hash + request signature; the server only
 	// stores snapshots for characters linked to an Exchange Insights account, so this is a no-op for
-	// everyone else. Best-effort: a lost snapshot is re-sent on the next bank change. On success the
-	// server returns the bank's live GE value, delivered to onValue (off the Swing thread).
-	void sendBankSnapshot(List<int[]> items, Consumer<Long> onValue)
+	// everyone else. On success the server returns the bank's live GE value, delivered to onValue (off
+	// the Swing thread). Any outcome where the snapshot was NOT stored (network failure, server error,
+	// the server's write gap, not linked) invokes onNotStored so the caller can retry - otherwise the
+	// last snapshot before a logout could be silently lost.
+	void sendBankSnapshot(List<int[]> items, Consumer<Long> onValue, Runnable onNotStored)
 	{
 		if (!isEnabled() || accountHashRaw == null || !hasIdentity() || items == null || items.isEmpty())
 		{
@@ -799,25 +801,45 @@ public class TemplateRepositoryClient
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
+				if (onNotStored != null)
+				{
+					onNotStored.run();
+				}
 			}
 
 			@Override
 			public void onResponse(Call call, Response response)
 			{
+				boolean stored = false;
+				Long value = null;
 				try (Response r = response)
 				{
-					if (!r.isSuccessful() || r.body() == null)
+					if (r.isSuccessful() && r.body() != null)
 					{
-						return;
-					}
-					final SnapshotResult res = gson.fromJson(r.body().string(), SnapshotResult.class);
-					if (res != null && res.ok && res.totalValue != null && onValue != null)
-					{
-						onValue.accept(res.totalValue);
+						final SnapshotResult res = gson.fromJson(r.body().string(), SnapshotResult.class);
+						// totalValue is only present when the server actually wrote the snapshot - a
+						// rate-gap skip or linked=false response omits it.
+						if (res != null && res.ok && res.totalValue != null)
+						{
+							stored = true;
+							value = res.totalValue;
+						}
 					}
 				}
 				catch (IOException | JsonSyntaxException e)
 				{
+					stored = false;
+				}
+				if (stored)
+				{
+					if (onValue != null)
+					{
+						onValue.accept(value);
+					}
+				}
+				else if (onNotStored != null)
+				{
+					onNotStored.run();
 				}
 			}
 		});

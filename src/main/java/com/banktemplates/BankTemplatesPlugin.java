@@ -123,8 +123,13 @@ public class BankTemplatesPlugin extends Plugin
 	private static final long BANK_SNAPSHOT_DEBOUNCE_MS = 5_000;
 	private static final long BANK_SNAPSHOT_MIN_INTERVAL_MS = 60_000;
 	private ScheduledFuture<?> pendingBankSnapshot;
-	private long lastBankSnapshotChecksum;
-	private long lastBankSnapshotAt;
+	// Volatile: written on the client thread, but also reset from other threads (account switch via
+	// startUp, the failed-send retry callback) - visibility matters for the "unchanged" suppression.
+	private volatile long lastBankSnapshotChecksum;
+	private volatile long lastBankSnapshotAt;
+	// True after shutDown: cancel(false) can't stop an already-executing task, and the retry/rate-gap
+	// paths re-arm - this flag stops a disabled plugin from resurrecting the snapshot loop.
+	private volatile boolean snapshotStopped;
 
 	private NavigationButton navButton;
 
@@ -135,6 +140,7 @@ public class BankTemplatesPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+		snapshotStopped = false; // re-enable after a previous shutDown (the panel/plugin are singletons)
 		templateManager.load();
 
 		panel.setOnActiveChanged(this::requestBankRebuild);
@@ -198,6 +204,9 @@ public class BankTemplatesPlugin extends Plugin
 	{
 		synchronized (this)
 		{
+			// The flag (not just the cancel) is what stops an already-executing task's retry/rate-gap
+			// re-arm from resurrecting the loop after the plugin is disabled.
+			snapshotStopped = true;
 			if (pendingBankSnapshot != null)
 			{
 				pendingBankSnapshot.cancel(false);
@@ -283,7 +292,7 @@ public class BankTemplatesPlugin extends Plugin
 	// collapses into a single read + send once things settle.
 	private synchronized void scheduleBankSnapshot(long delayMs)
 	{
-		if (!config.syncBankSnapshot() || !repositoryClient.isEnabled())
+		if (snapshotStopped || !config.syncBankSnapshot() || !repositoryClient.isEnabled())
 		{
 			return;
 		}
@@ -305,8 +314,8 @@ public class BankTemplatesPlugin extends Plugin
 		// promises "never sent for unlinked characters" - merely being logged in isn't consent). While the
 		// link state is still unknown (before the first sync answers), we skip; the next bank change after
 		// confirmation sends normally.
-		if (!config.syncBankSnapshot() || !repositoryClient.isEnabled() || !repositoryClient.hasIdentity()
-			|| !panel.isWebLinked())
+		if (snapshotStopped || !config.syncBankSnapshot() || !repositoryClient.isEnabled()
+			|| !repositoryClient.hasIdentity() || !panel.isWebLinked())
 		{
 			return;
 		}
@@ -347,9 +356,16 @@ public class BankTemplatesPlugin extends Plugin
 		lastBankSnapshotChecksum = checksum;
 		lastBankSnapshotAt = now;
 		// The response carries the bank's live GE value - surface it in the side panel (the free teaser
-		// for bank-value tracking on the website).
+		// for bank-value tracking on the website). If the snapshot was NOT stored (network failure or
+		// the server's write gap), forget the checksum and retry after the min interval so the latest
+		// bank state isn't silently lost (e.g. the last change before a logout).
 		repositoryClient.sendBankSnapshot(items,
-			value -> javax.swing.SwingUtilities.invokeLater(() -> panel.setBankValue(value)));
+			value -> javax.swing.SwingUtilities.invokeLater(() -> panel.setBankValue(value)),
+			() ->
+			{
+				lastBankSnapshotChecksum = 0;
+				scheduleBankSnapshot(BANK_SNAPSHOT_MIN_INTERVAL_MS);
+			});
 	}
 
 	// Adds one bank stack to the snapshot (skipping empty slots and placeholders, which have quantity 0)
