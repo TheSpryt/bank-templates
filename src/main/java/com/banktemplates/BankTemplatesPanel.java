@@ -126,7 +126,9 @@ public class BankTemplatesPanel extends PluginPanel
 
 	// Whether the last duplex sync found this character linked to an Exchange Insights account. null until
 	// the first sync has answered, so the "link your account" note only shows once we actually know.
-	private Boolean webSyncLinked;
+	// Volatile: written on the EDT (sync results), read from the client thread as the bank-snapshot
+	// privacy gate (isWebLinked).
+	private volatile Boolean webSyncLinked;
 
 	// One-click device-link state. `linking` is true from the moment the browser is opened until the poll
 	// loop resolves (approved/denied/expired/timeout); linkedHandle is the Exchange Insights handle shown in
@@ -535,6 +537,27 @@ public class BankTemplatesPanel extends PluginPanel
 		JOptionPane.showMessageDialog(this,
 			"Your account is linked. Your bank templates now sync with exchange-insights.gg.",
 			"Account linked", JOptionPane.INFORMATION_MESSAGE);
+	}
+
+	// Whether the last duplex sync confirmed this character is linked to an Exchange Insights account.
+	// Gates the bank snapshot: contents must never leave the client for unlinked (or not-yet-confirmed)
+	// characters, exactly as the setting's description promises.
+	boolean isWebLinked()
+	{
+		return Boolean.TRUE.equals(webSyncLinked);
+	}
+
+	// Login / account switch: the new character's link state (and bank value) are unknown until its
+	// first sync answers - clearing immediately keeps the snapshot gate closed for the new character
+	// rather than trusting the previous one's state. Safe from any thread.
+	void resetLinkState()
+	{
+		webSyncLinked = null; // volatile - closes the snapshot gate at once
+		SwingUtilities.invokeLater(() ->
+		{
+			bankValue = -1;
+			refreshAccountRow();
+		});
 	}
 
 	// Latest bank value reported by the snapshot sync (gp at live GE mid prices); -1 until the first sync.

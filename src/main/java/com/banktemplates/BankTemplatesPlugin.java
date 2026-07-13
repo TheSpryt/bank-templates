@@ -185,6 +185,8 @@ public class BankTemplatesPlugin extends Plugin
 			claimedAccountHash = accountHash;
 			// A different character's bank is a different snapshot - never suppress it as "unchanged".
 			lastBankSnapshotChecksum = 0;
+			// And its link state is unknown until its first sync answers - close the snapshot gate now.
+			panel.resetLinkState();
 			repositoryClient.claimTemplates();
 			// Pull this account's website-made templates (incl. private) into My Templates.
 			panel.syncWebTemplates();
@@ -298,7 +300,13 @@ public class BankTemplatesPlugin extends Plugin
 	// snapshots for characters linked to an Exchange Insights account.
 	private void sendBankSnapshotNow()
 	{
-		if (!config.syncBankSnapshot() || !repositoryClient.isEnabled() || !repositoryClient.hasIdentity())
+		// panel.isWebLinked() is the privacy gate: bank contents must never leave the client unless the
+		// duplex sync has CONFIRMED this character is linked to an Exchange Insights account (the setting
+		// promises "never sent for unlinked characters" - merely being logged in isn't consent). While the
+		// link state is still unknown (before the first sync answers), we skip; the next bank change after
+		// confirmation sends normally.
+		if (!config.syncBankSnapshot() || !repositoryClient.isEnabled() || !repositoryClient.hasIdentity()
+			|| !panel.isWebLinked())
 		{
 			return;
 		}
