@@ -605,7 +605,10 @@ public class TemplateRepositoryClient
 					if (r.isSuccessful() && r.body() != null)
 					{
 						final LinkStart s = gson.fromJson(r.body().string(), LinkStart.class);
-						if (s != null && s.deviceSecret != null && s.verificationUrl != null)
+						// Defence in depth: only ever open a verification URL on our own (hardcoded) host, so a
+						// tampered response can't redirect the browser somewhere else.
+						if (s != null && s.deviceSecret != null && s.verificationUrl != null
+							&& s.verificationUrl.startsWith(baseUrl() + "/"))
 						{
 							if (onStart != null)
 							{
