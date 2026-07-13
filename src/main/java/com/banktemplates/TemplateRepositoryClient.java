@@ -582,6 +582,8 @@ public class TemplateRepositoryClient
 		{
 			body.addProperty("accountName", rsn);
 		}
+		// Default label for the minted token, so the website's account page names it by the plugin it came from.
+		body.addProperty("label", "Bank Templates plugin");
 		final Request request = new Request.Builder()
 			.url(baseUrl() + "/api/plugin/link/start")
 			.post(RequestBody.create(JSON, gson.toJson(body)))
