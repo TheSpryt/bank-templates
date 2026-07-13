@@ -796,6 +796,14 @@ public class TemplateRepositoryClient
 			.url(baseUrl() + "/api/bank-templates/bank-snapshot")
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
+		// When an account token is configured, present it: the server marks token-backed snapshots as
+		// verified and then refuses unverified writes for this character, so a third party who somehow
+		// learned the raw account hash can no longer forge snapshots into this account's history.
+		final String token = config.eiAccountToken();
+		if (token != null && !token.trim().isEmpty())
+		{
+			rb.header("Authorization", "Bearer " + token.trim());
+		}
 		okHttpClient.newCall(rb.build()).enqueue(new Callback()
 		{
 			@Override
@@ -803,7 +811,7 @@ public class TemplateRepositoryClient
 			{
 				if (onNotStored != null)
 				{
-					onNotStored.run();
+					onNotStored.run(); // network failure - transient, retry
 				}
 			}
 
@@ -811,24 +819,35 @@ public class TemplateRepositoryClient
 			public void onResponse(Call call, Response response)
 			{
 				boolean stored = false;
+				boolean retry = false;
 				Long value = null;
 				try (Response r = response)
 				{
 					if (r.isSuccessful() && r.body() != null)
 					{
 						final SnapshotResult res = gson.fromJson(r.body().string(), SnapshotResult.class);
-						// totalValue is only present when the server actually wrote the snapshot - a
-						// rate-gap skip or linked=false response omits it.
+						// totalValue is only present when the server actually wrote the snapshot.
 						if (res != null && res.ok && res.totalValue != null)
 						{
 							stored = true;
 							value = res.totalValue;
 						}
+						else
+						{
+							// Parsed but not stored: only retry when the server marks the condition
+							// transient (its write gap). Terminal outcomes (not linked, unverified
+							// write refused) must not loop.
+							retry = res != null && Boolean.TRUE.equals(res.retry);
+						}
+					}
+					else
+					{
+						retry = true; // server error - transient
 					}
 				}
 				catch (IOException | JsonSyntaxException e)
 				{
-					stored = false;
+					retry = true;
 				}
 				if (stored)
 				{
@@ -837,7 +856,7 @@ public class TemplateRepositoryClient
 						onValue.accept(value);
 					}
 				}
-				else if (onNotStored != null)
+				else if (retry && onNotStored != null)
 				{
 					onNotStored.run();
 				}
@@ -851,6 +870,9 @@ public class TemplateRepositoryClient
 		boolean ok;
 		boolean linked;
 		Long totalValue;
+		// Whether a not-stored outcome is worth retrying (true for the server's write gap; absent or
+		// false for terminal outcomes like an unverified write being refused).
+		Boolean retry;
 	}
 
 	// Best-effort backfill: link this account's already-shared templates to its Exchange Insights profile
