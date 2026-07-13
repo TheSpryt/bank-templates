@@ -5,7 +5,7 @@
 **Save, apply, and share bank layouts. Your real bank is never touched.**
 
 [![Plugin Hub installs](https://img.shields.io/endpoint?url=https://api.runelite.net/pluginhub/shields/installs/plugin/bank-templates&label=installs&color=brightgreen)](https://runelite.net/plugin-hub/show/bank-templates)
-[![Version](https://img.shields.io/badge/version-1.6.2-blue)](https://github.com/TheSpryt/bank-templates/releases)
+[![Version](https://img.shields.io/badge/version-1.6.3-blue)](https://github.com/TheSpryt/bank-templates/releases)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-orange)](LICENSE)
 [![RuneLite](https://img.shields.io/badge/RuneLite-Plugin%20Hub-yellow)](https://runelite.net/plugin-hub)
 
@@ -184,8 +184,12 @@ attribute ownership and enforce limits. Sharing sends your RuneScape name to cre
 **Share anonymously** and other players see **"Anonymous"** instead (your name is still stored privately
 on the server for moderation). Nothing is sent while the feature is disabled.
 
-The "x / y items" counts are computed entirely on your own machine. Your bank contents are never sent
-anywhere, including for the **Items owned** sort.
+The "x / y items" counts are computed entirely on your own machine, and nothing is sent for the
+**Items owned** sort. For characters **linked to an Exchange Insights account** (and only those), the
+plugin also sends a snapshot of your bank's contents - item IDs and quantities only, no placement or
+notes - to power bank-value tracking on the website. This can be turned off any time with **Sync bank
+value** in settings; turning it off (or unlinking) stops new snapshots, and deleting your Exchange
+Insights account removes the stored data. Unlinked characters never send bank contents anywhere.
 
 ---
 

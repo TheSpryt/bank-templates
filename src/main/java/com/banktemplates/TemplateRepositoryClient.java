@@ -774,6 +774,40 @@ public class TemplateRepositoryClient
 		String handle;
 	}
 
+	// Opt-in bank snapshot for bank-value tracking (item ids + quantities only). Same self-authorization
+	// as sync/claim: clientId + raw account hash + request signature; the server only stores snapshots
+	// for characters linked to an Exchange Insights account, so this is a no-op for everyone else.
+	// Fire-and-forget: a lost snapshot is re-sent on the next bank change.
+	void sendBankSnapshot(List<int[]> items)
+	{
+		if (!isEnabled() || accountHashRaw == null || !hasIdentity() || items == null || items.isEmpty())
+		{
+			return;
+		}
+		final JsonObject body = new JsonObject();
+		body.addProperty("clientId", clientId());
+		body.addProperty("accountHash", accountHashRaw);
+		body.add("items", gson.toJsonTree(items));
+		final String bodyJson = gson.toJson(body);
+		final Request.Builder rb = new Request.Builder()
+			.url(baseUrl() + "/api/bank-templates/bank-snapshot")
+			.post(RequestBody.create(JSON, bodyJson));
+		addSig(rb, bodyJson);
+		okHttpClient.newCall(rb.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				response.close();
+			}
+		});
+	}
+
 	// Best-effort backfill: link this account's already-shared templates to its Exchange Insights profile
 	// (for templates uploaded before the accountHash field existed). The server verifies accountHash
 	// against clientId, so this only ever stamps the caller's own uploads. No-op when logged out.
