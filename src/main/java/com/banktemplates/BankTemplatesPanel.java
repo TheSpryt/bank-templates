@@ -550,8 +550,9 @@ public class BankTemplatesPanel extends PluginPanel
 		if (Boolean.FALSE.equals(webSyncLinked) && repositoryClient.isEnabled())
 		{
 			listContainer.add(messageLabel("Your templates sync with the web at exchange-insights.gg when this "
-				+ "character is linked to an Exchange Insights account. Link it in the free Exchange Insights "
-				+ "plugin to create and edit these templates in your browser too."));
+				+ "character is linked to an Exchange Insights account. Link it by pasting your free account token "
+				+ "in this plugin's settings (Exchange Insights account section) - then create and edit these "
+				+ "templates in your browser too."));
 			listContainer.add(Box.createVerticalStrut(6));
 		}
 

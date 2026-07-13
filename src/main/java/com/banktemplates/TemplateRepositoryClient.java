@@ -513,6 +513,59 @@ public class TemplateRepositoryClient
 		}
 	}
 
+	// Link this character to the Exchange Insights account that owns the given token, by posting its
+	// identity to the same /api/plugin/identity endpoint the Exchange Insights plugin uses. The server
+	// verifies the token, is ownership-safe (can't hijack a character already linked to another account)
+	// and idempotent, so this works fine alongside the Exchange Insights plugin sending the same thing.
+	// onLinked runs on success so the caller can start a sync now that the account is linked.
+	void linkEiAccount(String token, long accountHash, String rsn, Runnable onLinked, Consumer<String> onError)
+	{
+		if (token == null || token.trim().isEmpty() || rsn == null || rsn.isEmpty())
+		{
+			return;
+		}
+		final JsonObject body = new JsonObject();
+		body.addProperty("accountHash", Long.toString(accountHash));
+		body.addProperty("rsn", rsn);
+		final Request request = new Request.Builder()
+			.url(baseUrl() + "/api/plugin/identity")
+			.header("Authorization", "Bearer " + token.trim())
+			.post(RequestBody.create(JSON, gson.toJson(body)))
+			.build();
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				if (onError != null)
+				{
+					onError.accept("Couldn't reach the server to link your account.");
+				}
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					if (r.isSuccessful())
+					{
+						if (onLinked != null)
+						{
+							onLinked.run();
+						}
+					}
+					else if (onError != null)
+					{
+						onError.accept(r.code() == 401
+							? "That Exchange Insights account token is invalid or revoked."
+							: "Couldn't link your account (" + r.code() + ").");
+					}
+				}
+			}
+		});
+	}
+
 	// Best-effort backfill: link this account's already-shared templates to its Exchange Insights profile
 	// (for templates uploaded before the accountHash field existed). The server verifies accountHash
 	// against clientId, so this only ever stamps the caller's own uploads. No-op when logged out.
