@@ -18,7 +18,8 @@ import net.runelite.client.game.ItemManager;
  */
 final class BankCapture
 {
-	private static final int[] TAB_COUNT_VARBITS = {
+	// Package-visible: the bank-snapshot sync slices the container by the same per-tab counts.
+	static final int[] TAB_COUNT_VARBITS = {
 		VarbitID.BANK_TAB_1, VarbitID.BANK_TAB_2, VarbitID.BANK_TAB_3, VarbitID.BANK_TAB_4,
 		VarbitID.BANK_TAB_5, VarbitID.BANK_TAB_6, VarbitID.BANK_TAB_7, VarbitID.BANK_TAB_8,
 		VarbitID.BANK_TAB_9
