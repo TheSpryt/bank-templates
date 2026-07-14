@@ -368,13 +368,20 @@ public class BankTemplatesPlugin extends Plugin
 			});
 	}
 
-	// Adds one bank stack to the snapshot (skipping empty slots and placeholders, which have quantity 0)
-	// and folds it into the change-detection checksum.
-	private static long addSnapshotItem(List<int[]> items, Item item, int tab, long checksum)
+	// Adds one bank stack to the snapshot and folds it into the change-detection checksum. Empty slots
+	// are skipped, and placeholders are skipped BY DEFINITION (getPlaceholderTemplateId), not by their
+	// quantity: the container reports quantity 1 for placeholders in some client states, which used to
+	// leak thousands of placeholder-variant item ids (no icon, no price, not really held) into
+	// snapshots. Runs on the client thread (sendBankSnapshotNow), so the composition read is safe.
+	private long addSnapshotItem(List<int[]> items, Item item, int tab, long checksum)
 	{
 		if (item == null || item.getId() <= 0 || item.getQuantity() <= 0)
 		{
 			return checksum;
+		}
+		if (client.getItemComposition(item.getId()).getPlaceholderTemplateId() != -1)
+		{
+			return checksum; // a placeholder, not a held item
 		}
 		items.add(new int[]{item.getId(), item.getQuantity(), tab});
 		checksum = checksum * 31 + item.getId();
