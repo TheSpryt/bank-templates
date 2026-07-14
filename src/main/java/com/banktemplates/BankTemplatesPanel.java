@@ -322,8 +322,8 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private boolean hasEiToken()
 	{
-		final String t = config.eiAccountToken();
-		return t != null && !t.trim().isEmpty();
+		// Own token or one borrowed live from the Exchange Insights plugin on this client.
+		return repositoryClient.effectiveToken() != null;
 	}
 
 	private JLabel statusLabel(String text, Color color)
@@ -604,7 +604,7 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			return;
 		}
-		repositoryClient.pingLink(config.eiAccountToken(),
+		repositoryClient.pingLink(repositoryClient.effectiveToken(),
 			handle -> SwingUtilities.invokeLater(() ->
 			{
 				linkedHandle = handle;

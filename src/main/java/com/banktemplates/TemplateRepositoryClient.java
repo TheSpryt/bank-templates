@@ -19,6 +19,7 @@ import javax.crypto.spec.SecretKeySpec;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.client.config.ConfigManager;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.HttpUrl;
@@ -69,13 +70,37 @@ public class TemplateRepositoryClient
 	// to the uploader's EI profile on the website. Null when logged out.
 	private volatile String accountHashRaw;
 
+	private final ConfigManager configManager;
+
 	@Inject
-	TemplateRepositoryClient(OkHttpClient okHttpClient, Gson gson, BankTemplatesConfig config)
+	TemplateRepositoryClient(OkHttpClient okHttpClient, Gson gson, BankTemplatesConfig config, ConfigManager configManager)
 	{
 		this.okHttpClient = okHttpClient;
 		this.gson = gson;
 		this.config = config;
+		this.configManager = configManager;
 	}
+
+	/** The bearer token to present to Exchange Insights: this plugin's own configured token when set,
+	 *  otherwise the Exchange Insights plugin's token from this client's local RuneLite config (same
+	 *  user, same account, one credential to revoke). The borrowed value is read live on every use and
+	 *  never copied into our config, so clearing or revoking it in either plugin takes effect here
+	 *  immediately. Nothing is ever fetched from the server - a token only exists locally once the
+	 *  user has linked one of the two plugins themselves. Null when neither plugin has a token. */
+	String effectiveToken()
+	{
+		String t = config.eiAccountToken();
+		if (t != null && !t.trim().isEmpty())
+		{
+			return t.trim();
+		}
+		t = configManager.getConfiguration(EI_PLUGIN_CONFIG_GROUP, EI_PLUGIN_TOKEN_KEY);
+		return t == null || t.trim().isEmpty() ? null : t.trim();
+	}
+
+	// The Exchange Insights plugin's config coordinates (see ExchangeInsightsConfig in that plugin).
+	static final String EI_PLUGIN_CONFIG_GROUP = "exchangeinsights";
+	static final String EI_PLUGIN_TOKEN_KEY = "token";
 
 	boolean isEnabled()
 	{
@@ -796,13 +821,14 @@ public class TemplateRepositoryClient
 			.url(baseUrl() + "/api/bank-templates/bank-snapshot")
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
-		// When an account token is configured, present it: the server marks token-backed snapshots as
+		// When an account token is available (our own config, or borrowed live from the Exchange
+		// Insights plugin on this client), present it: the server marks token-backed snapshots as
 		// verified and then refuses unverified writes for this character, so a third party who somehow
 		// learned the raw account hash can no longer forge snapshots into this account's history.
-		final String token = config.eiAccountToken();
-		if (token != null && !token.trim().isEmpty())
+		final String token = effectiveToken();
+		if (token != null)
 		{
-			rb.header("Authorization", "Bearer " + token.trim());
+			rb.header("Authorization", "Bearer " + token);
 		}
 		okHttpClient.newCall(rb.build()).enqueue(new Callback()
 		{

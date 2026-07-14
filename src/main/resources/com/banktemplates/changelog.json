@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.6.4",
+    "notes": [
+      "Already linked through the Exchange Insights plugin? Bank Templates now picks that up automatically: if you haven't set a token here, the one configured in the Exchange Insights plugin on this client is used, so your account link and verified bank sync just work with zero setup. Your own Bank Templates token still wins if you set one, nothing is copied or stored twice, and clearing or revoking the token in either plugin takes effect in both immediately. Everything stays on your machine - the plugins never fetch a token from anywhere."
+    ]
+  },
+  {
     "version": "1.6.3",
     "notes": [
       "Bank value sync: characters linked to a (free) Exchange Insights account now send a snapshot of the bank's contents (item IDs and quantities only - no placement, notes or anything else) to exchange-insights.gg when it changes, powering bank-value tracking on the website. Nothing is ever sent for unlinked characters. Turn it off any time with 'Sync bank value' in the Exchange Insights account settings section - that stops new snapshots, and deleting your Exchange Insights account removes the stored data.",
