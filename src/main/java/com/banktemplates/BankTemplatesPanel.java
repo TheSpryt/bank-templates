@@ -144,6 +144,10 @@ public class BankTemplatesPanel extends PluginPanel
 	// local change (debounced), and every SYNC_POLL_MS as a backstop to pull website-side changes down. On a
 	// failed or rate-limited push it retries with backoff so a change is never lost to a brief outage.
 	private static final long SYNC_DEBOUNCE_MS = 1_500;
+	// While the side panel is open, poll fast so website-side imports and edits show up in My
+	// Templates within seconds; opening the panel also kicks an immediate sync (lightly throttled).
+	private static final long SYNC_POLL_ACTIVE_MS = 20_000;
+	private static final long ACTIVATE_SYNC_MIN_MS = 10_000;
 	private static final long SYNC_RETRY_MIN_MS = 4_000;
 	private static final long SYNC_POLL_MS = 90_000;
 	private ScheduledFuture<?> pendingSyncTask;
@@ -2114,6 +2118,28 @@ public class BankTemplatesPanel extends PluginPanel
 		scheduleSync(0);
 	}
 
+	// Panel visibility drives the poll cadence: an open panel syncs immediately (throttled) and then
+	// polls fast, so a template imported or edited on the website appears in My Templates in seconds.
+	private volatile boolean panelActive;
+	private volatile long lastSyncStartedAt;
+
+	@Override
+	public void onActivate()
+	{
+		panelActive = true;
+		if (repositoryClient.isEnabled() && !syncStopped
+			&& System.currentTimeMillis() - lastSyncStartedAt > ACTIVATE_SYNC_MIN_MS)
+		{
+			scheduleSync(0);
+		}
+	}
+
+	@Override
+	public void onDeactivate()
+	{
+		panelActive = false;
+	}
+
 	// A local change happened: push it up soon (debounced so a burst of edits collapses into one sync).
 	void requestSync()
 	{
@@ -2168,6 +2194,7 @@ public class BankTemplatesPanel extends PluginPanel
 			// Loop idles while the repository is off; enabling it (or logging in) kicks it again.
 			return;
 		}
+		lastSyncStartedAt = System.currentTimeMillis(); // throttles the open-panel kick in onActivate
 		// Snapshot the change counter before gathering, so afterSync knows exactly which changes this pass
 		// covers - a change that arrives mid-sync bumps the counter and is retried, never dropped.
 		final long startSeq = changeSeq;
@@ -2328,7 +2355,7 @@ public class BankTemplatesPanel extends PluginPanel
 			}
 			// A rate-limited push (linked + privateSync + !applied) advances neither, so it retries soon.
 			final boolean pending = changeSeq > syncedSeq;
-			next = pending ? SYNC_RETRY_MIN_MS : SYNC_POLL_MS;
+			next = pending ? SYNC_RETRY_MIN_MS : (panelActive ? SYNC_POLL_ACTIVE_MS : SYNC_POLL_MS);
 		}
 		scheduleSync(next);
 	}
