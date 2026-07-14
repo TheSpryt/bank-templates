@@ -542,8 +542,10 @@ public class TemplateRepositoryClient
 	// identity to the same /api/plugin/identity endpoint the Exchange Insights plugin uses. The server
 	// verifies the token, is ownership-safe (can't hijack a character already linked to another account)
 	// and idempotent, so this works fine alongside the Exchange Insights plugin sending the same thing.
-	// onLinked runs on success so the caller can start a sync now that the account is linked.
-	void linkEiAccount(String token, long accountHash, String rsn, Runnable onLinked, Consumer<String> onError)
+	// `explicit` marks a deliberate Link click, which lifts a server-side unlink tombstone; the ambient
+	// on-login link omits it so an unlinked character stays unlinked. onLinked runs on success so the
+	// caller can start a sync now that the account is linked.
+	void linkEiAccount(String token, long accountHash, String rsn, boolean explicit, Runnable onLinked, Consumer<String> onError)
 	{
 		if (token == null || token.trim().isEmpty() || rsn == null || rsn.isEmpty())
 		{
@@ -552,6 +554,10 @@ public class TemplateRepositoryClient
 		final JsonObject body = new JsonObject();
 		body.addProperty("accountHash", Long.toString(accountHash));
 		body.addProperty("rsn", rsn);
+		if (explicit)
+		{
+			body.addProperty("explicit", true);
+		}
 		final Request request = new Request.Builder()
 			.url(baseUrl() + "/api/plugin/identity")
 			.header("Authorization", "Bearer " + token.trim())

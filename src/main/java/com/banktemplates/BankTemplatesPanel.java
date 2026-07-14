@@ -503,7 +503,7 @@ public class BankTemplatesPanel extends PluginPanel
 		final String token = repositoryClient.effectiveToken();
 		if (token != null)
 		{
-			repositoryClient.linkEiAccount(token, accountHash, rsn,
+			repositoryClient.linkEiAccount(token, accountHash, rsn, true,
 				() -> SwingUtilities.invokeLater(() -> finishLink(null)),
 				error -> SwingUtilities.invokeLater(() ->
 				{
