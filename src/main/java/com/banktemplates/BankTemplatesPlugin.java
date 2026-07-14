@@ -13,6 +13,7 @@ import net.runelite.api.Client;
 import net.runelite.api.Player;
 import net.runelite.api.GameState;
 import net.runelite.api.Item;
+import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
@@ -368,24 +369,33 @@ public class BankTemplatesPlugin extends Plugin
 			});
 	}
 
-	// Adds one bank stack to the snapshot and folds it into the change-detection checksum. Empty slots
-	// are skipped, and placeholders are skipped BY DEFINITION (getPlaceholderTemplateId), not by their
-	// quantity: the container reports quantity 1 for placeholders in some client states, which used to
-	// leak thousands of placeholder-variant item ids (no icon, no price, not really held) into
-	// snapshots. Runs on the client thread (sendBankSnapshotNow), so the composition read is safe.
+	// Adds one bank slot to the snapshot and folds it into the change-detection checksum. Empty slots
+	// are skipped. Placeholders are detected BY DEFINITION (getPlaceholderTemplateId), never by their
+	// quantity - the container reports quantity 1 for them in some client states, which used to leak
+	// raw placeholder-variant item ids (no icon, no price) into snapshots. A placeholder is sent as
+	// its REAL item's id with quantity 0, so the website can draw the same faded ghost the bank shows.
+	// Runs on the client thread (sendBankSnapshotNow), so the composition read is safe.
 	private long addSnapshotItem(List<int[]> items, Item item, int tab, long checksum)
 	{
 		if (item == null || item.getId() <= 0 || item.getQuantity() <= 0)
 		{
 			return checksum;
 		}
-		if (client.getItemComposition(item.getId()).getPlaceholderTemplateId() != -1)
+		int id = item.getId();
+		int qty = item.getQuantity();
+		final ItemComposition comp = client.getItemComposition(id);
+		if (comp.getPlaceholderTemplateId() != -1)
 		{
-			return checksum; // a placeholder, not a held item
+			id = comp.getPlaceholderId(); // the placeholder variant points back at the real item
+			qty = 0;
+			if (id <= 0)
+			{
+				return checksum;
+			}
 		}
-		items.add(new int[]{item.getId(), item.getQuantity(), tab});
-		checksum = checksum * 31 + item.getId();
-		checksum = checksum * 31 + item.getQuantity();
+		items.add(new int[]{id, qty, tab});
+		checksum = checksum * 31 + id;
+		checksum = checksum * 31 + qty;
 		return checksum * 31 + tab;
 	}
 
