@@ -629,7 +629,9 @@ public class TemplateRepositoryClient
 			{
 				try (Response r = response)
 				{
-					if (r.isSuccessful())
+					// 400 means the character wasn't linked to begin with (stale display) - the
+					// desired end state already holds, so treat it as done, not an error.
+					if (r.isSuccessful() || r.code() == 400)
 					{
 						if (onDone != null)
 						{
