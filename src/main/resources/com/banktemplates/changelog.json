@@ -6,7 +6,7 @@
       "The account link status is now a single button below the search box, colored by status: red 'Link Exchange Insights account' when unlinked, green '✓ Account linked' when linked - and clicking it toggles. Unlinking asks for confirmation, stops new bank snapshots and template sync for that character (stored data stays until you delete your Exchange Insights account), and is remembered, so the automatic linking above never silently relinks a character you chose to unlink. Linking again is one click: instant when a token is already set up, via the browser approval otherwise.",
       "The bank value line under that button now reads 'Your current bank value: ...' and only shows while linked.",
       "My Templates now updates dynamically from the website while the side panel is open: import or edit a template on exchange-insights.gg and it appears in-game within seconds (opening the panel also refreshes immediately). With the panel closed the usual background sync continues as before.",
-      "Bank value sync no longer includes placeholder slots. They could slip into snapshots as phantom quantity-1 items, showing up as blank, unpriceable slots in the website's bank view; your next bank change after updating cleans the stored snapshot up automatically."
+      "Bank value sync now handles placeholder slots properly: they used to slip into snapshots as phantom items with unusable internal ids, showing up as blank slots in the website's bank view. Placeholders are now sent as the real item with a quantity of 0, and the website draws them exactly like the bank does - the item's icon, faded, with a 0 stack count. Your next bank change after updating refreshes the stored snapshot automatically."
     ]
   },
   {
