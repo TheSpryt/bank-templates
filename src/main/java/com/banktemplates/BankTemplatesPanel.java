@@ -252,13 +252,6 @@ public class BankTemplatesPanel extends PluginPanel
 		header.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		header.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
 
-		// Account link status/action, at the very top of the panel menu. Populated by refreshAccountRow().
-		accountRow.setLayout(new BoxLayout(accountRow, BoxLayout.Y_AXIS));
-		accountRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		accountRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-		header.add(accountRow);
-		refreshAccountRow();
-
 		tabsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		tabsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
 		localTab.setFocusPainted(false);
@@ -310,14 +303,32 @@ public class BankTemplatesPanel extends PluginPanel
 		searchBar.setVisible(!UPDATES.equals(mode));
 		header.add(searchBar);
 
+		// Account link/unlink button + bank value line, directly below the search box. Populated by
+		// refreshAccountRow().
+		accountRow.setLayout(new BoxLayout(accountRow, BoxLayout.Y_AXIS));
+		accountRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		accountRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		header.add(accountRow);
+		refreshAccountRow();
+
 		return header;
 	}
 
 	// True if a linked account should be shown: either the last sync confirmed the link, or (before any sync)
 	// a token is set so we optimistically treat it as linked - the next sync corrects this if it's stale.
+	// A character the user explicitly unlinked never shows the optimistic state.
 	private boolean isLinkedForDisplay()
 	{
-		return Boolean.TRUE.equals(webSyncLinked) || (webSyncLinked == null && hasEiToken());
+		if (Boolean.TRUE.equals(webSyncLinked))
+		{
+			return true;
+		}
+		if (webSyncLinked != null || !hasEiToken())
+		{
+			return false;
+		}
+		final Long hash = repositoryClient.currentAccountHash();
+		return hash == null || !repositoryClient.isUnlinkOptedOut(hash);
 	}
 
 	private boolean hasEiToken()
@@ -335,44 +346,114 @@ public class BankTemplatesPanel extends PluginPanel
 		return l;
 	}
 
-	// (Re)draw the top-of-panel account row for the current link state. Only shown when the community
-	// repository is enabled (all third-party server contact, including linking, is behind that opt-in).
+	// (Re)draw the link/unlink button below the search box for the current state. One button, colored
+	// by status - green when linked (click unlinks), red when not (click links) - with the bank value
+	// line underneath when linked. Only shown when the community repository is enabled (all third-party
+	// server contact, including linking, is behind that opt-in).
 	private void refreshAccountRow()
 	{
 		accountRow.removeAll();
 		if (repositoryClient.isEnabled())
 		{
+			accountRow.add(Box.createVerticalStrut(8));
+			final JButton btn;
 			if (linking)
 			{
-				accountRow.add(statusLabel("Linking… approve it in your browser", ColorScheme.BRAND_ORANGE));
+				// The browser hint only applies to the device flow; with a token the link is direct.
+				btn = styledButton(repositoryClient.effectiveToken() != null ? "Linking…" : "Linking… approve it in your browser");
+				btn.setEnabled(false);
+				btn.setBackground(new Color(96, 74, 30));
 			}
 			else if (isLinkedForDisplay())
 			{
 				final String who = linkedHandle != null && !linkedHandle.isEmpty() ? " as " + linkedHandle : "";
-				accountRow.add(statusLabel("✓ Account linked" + who, new Color(95, 175, 95)));
-				// Free teaser from the opt-in bank-value sync: the ingest response reports the bank's live
-				// GE value, and the website tracks it over time.
-				if (bankValue >= 0)
-				{
-					final JLabel bv = statusLabel("Bank value: " + fmtGp(bankValue) + " gp", ColorScheme.LIGHT_GRAY_COLOR);
-					bv.setToolTipText("Your bank at live GE mid prices, updated as it changes. Track it over time at exchange-insights.gg.");
-					accountRow.add(Box.createVerticalStrut(3));
-					accountRow.add(bv);
-				}
+				btn = styledButton("✓ Account linked · Unlink");
+				btn.setBackground(new Color(35, 78, 42));
+				btn.setToolTipText("Linked" + who + ". Click to unlink this character from your Exchange Insights account.");
+				btn.addActionListener(e -> startUnlink());
 			}
 			else
 			{
-				final JButton link = styledButton("Link Exchange Insights account");
-				link.setToolTipText("One-click: opens exchange-insights.gg to approve linking this character - no token to copy.");
-				link.setAlignmentX(Component.LEFT_ALIGNMENT);
-				link.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-				link.addActionListener(e -> startOneClickLink());
-				accountRow.add(link);
+				btn = styledButton("Link Exchange Insights account");
+				btn.setBackground(new Color(94, 44, 44));
+				btn.setToolTipText(repositoryClient.effectiveToken() != null
+					? "Links this character to your Exchange Insights account using your existing token."
+					: "One-click: opens exchange-insights.gg to approve linking this character - no token to copy.");
+				btn.addActionListener(e -> startOneClickLink());
 			}
-			accountRow.add(Box.createVerticalStrut(8));
+			btn.setAlignmentX(Component.LEFT_ALIGNMENT);
+			btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+			accountRow.add(btn);
+			if (!linking && isLinkedForDisplay() && bankValue >= 0)
+			{
+				// Free teaser from the opt-in bank-value sync: the ingest response reports the bank's live
+				// GE value, and the website tracks it over time.
+				final JLabel bv = statusLabel("Your current bank value: " + fmtGp(bankValue) + " gp", ColorScheme.LIGHT_GRAY_COLOR);
+				bv.setToolTipText("Your bank at live GE mid prices, updated as it changes. Track it over time at exchange-insights.gg.");
+				accountRow.add(Box.createVerticalStrut(4));
+				accountRow.add(bv);
+			}
 		}
 		accountRow.revalidate();
 		accountRow.repaint();
+	}
+
+	// Confirm, then unlink the logged-in character from the Exchange Insights account server-side and
+	// remember the choice locally so auto-linking (own or borrowed token) doesn't silently relink it.
+	private void startUnlink()
+	{
+		final int choice = JOptionPane.showConfirmDialog(this,
+			"Unlink this character from your Exchange Insights account?\n\n"
+				+ "New bank snapshots and template sync stop for this character. Anything\n"
+				+ "already stored stays until you delete your Exchange Insights account,\n"
+				+ "and your account token keeps working for everything else.",
+			"Unlink account", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+		if (choice != JOptionPane.OK_OPTION)
+		{
+			return;
+		}
+		final String token = repositoryClient.effectiveToken();
+		clientThread.invokeLater(() ->
+		{
+			final long hash = client.getAccountHash();
+			SwingUtilities.invokeLater(() -> doUnlink(token, hash));
+		});
+	}
+
+	private void doUnlink(String token, long accountHash)
+	{
+		if (accountHash == -1)
+		{
+			JOptionPane.showMessageDialog(this,
+				"Log into OSRS first (so the plugin knows which character to unlink), then try again.",
+				"Not logged in", JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+		// Opt out FIRST so auto-linking can't race the server call and immediately relink.
+		repositoryClient.setUnlinkOptOut(accountHash, true);
+		if (token == null)
+		{
+			// Nothing to tell the server without a token (stale optimistic display) - clear locally.
+			webSyncLinked = false;
+			linkedHandle = null;
+			bankValue = -1;
+			refreshAccountRow();
+			return;
+		}
+		repositoryClient.unlinkEiAccount(token, accountHash,
+			() -> SwingUtilities.invokeLater(() ->
+			{
+				webSyncLinked = false;
+				linkedHandle = null;
+				bankValue = -1;
+				refreshAccountRow();
+				rebuildOnEdt(); // linked-only affordances refresh
+			}),
+			error -> SwingUtilities.invokeLater(() ->
+			{
+				repositoryClient.setUnlinkOptOut(accountHash, false); // nothing was unlinked - don't block auto-link
+				JOptionPane.showMessageDialog(this, error, "Couldn't unlink", JOptionPane.WARNING_MESSAGE);
+			}));
 	}
 
 	// Kick off the one-click device link (from the top-of-panel button or the config toggle). Requires the
@@ -413,6 +494,23 @@ public class BankTemplatesPanel extends PluginPanel
 			JOptionPane.showMessageDialog(this,
 				"Log into OSRS first (so the plugin knows which character to link), then try again.",
 				"Not logged in", JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+		// The user explicitly asked to link: lift any earlier unlink opt-out for this character.
+		repositoryClient.setUnlinkOptOut(accountHash, false);
+		// A token already exists (our own, or borrowed from the Exchange Insights plugin): link
+		// directly, no browser round-trip needed.
+		final String token = repositoryClient.effectiveToken();
+		if (token != null)
+		{
+			repositoryClient.linkEiAccount(token, accountHash, rsn,
+				() -> SwingUtilities.invokeLater(() -> finishLink(null)),
+				error -> SwingUtilities.invokeLater(() ->
+				{
+					linking = false;
+					refreshAccountRow();
+					JOptionPane.showMessageDialog(this, error, "Couldn't link", JOptionPane.WARNING_MESSAGE);
+				}));
 			return;
 		}
 		linking = true;

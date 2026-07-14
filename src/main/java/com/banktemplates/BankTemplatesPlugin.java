@@ -562,6 +562,14 @@ public class BankTemplatesPlugin extends Plugin
 			// Pasting/changing the Exchange Insights token should link right away, without a relog.
 			if ("eiAccountToken".equals(event.getKey()))
 			{
+				// Pasting a token here is an explicit link request: lift any earlier unlink
+				// opt-out for the logged-in character so the link actually happens.
+				final String pasted = event.getNewValue();
+				final long h = client.getAccountHash();
+				if (pasted != null && !pasted.trim().isEmpty() && h != -1)
+				{
+					repositoryClient.setUnlinkOptOut(h, false);
+				}
 				eiLinkedHash = -1;
 				maybeLinkEiAccount();
 				// Refresh the side panel's linked-as status for the new token.
@@ -588,6 +596,11 @@ public class BankTemplatesPlugin extends Plugin
 		final String token = effective == null ? "" : effective;
 		final long hash = client.getAccountHash();
 		if (token.isEmpty() || !repositoryClient.isEnabled() || hash == -1 || hash == eiLinkedHash)
+		{
+			return;
+		}
+		// The user explicitly unlinked this character from the panel: never auto-relink it.
+		if (repositoryClient.isUnlinkOptedOut(hash))
 		{
 			return;
 		}
