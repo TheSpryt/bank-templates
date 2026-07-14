@@ -591,6 +591,116 @@ public class TemplateRepositoryClient
 		});
 	}
 
+	// Unlink this character from the Exchange Insights account that owns the given token (the panel's
+	// Unlink button). Same semantics as the website's account page: new bank snapshots and template
+	// sync stop for the character; anything already stored stays until the account is deleted.
+	void unlinkEiAccount(String token, long accountHash, Runnable onDone, Consumer<String> onError)
+	{
+		if (token == null || token.trim().isEmpty())
+		{
+			return;
+		}
+		final JsonObject body = new JsonObject();
+		body.addProperty("accountHash", Long.toString(accountHash));
+		final Request request = new Request.Builder()
+			.url(baseUrl() + "/api/plugin/unlink")
+			.header("Authorization", "Bearer " + token.trim())
+			.post(RequestBody.create(JSON, gson.toJson(body)))
+			.build();
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				if (onError != null)
+				{
+					onError.accept("Couldn't reach the server to unlink your account.");
+				}
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					if (r.isSuccessful())
+					{
+						if (onDone != null)
+						{
+							onDone.run();
+						}
+					}
+					else if (onError != null)
+					{
+						onError.accept(r.code() == 401
+							? "That Exchange Insights account token is invalid or revoked."
+							: "Couldn't unlink your account (" + r.code() + ").");
+					}
+				}
+			}
+		});
+	}
+
+	// ---- explicit-unlink opt-out ---------------------------------------------------------------------
+	// Characters the user deliberately unlinked from the panel. Auto-linking - including the token
+	// borrowed from the Exchange Insights plugin - must not silently relink them, so their hashes are
+	// remembered in this plugin's config until the user links that character again on purpose.
+	private static final String UNLINK_OPTOUT_KEY = "eiUnlinkedHashes";
+
+	boolean isUnlinkOptedOut(long accountHash)
+	{
+		final String csv = configManager.getConfiguration(BankTemplatesConfig.GROUP, UNLINK_OPTOUT_KEY);
+		if (csv == null || csv.isEmpty())
+		{
+			return false;
+		}
+		final String needle = Long.toString(accountHash);
+		for (final String h : csv.split(","))
+		{
+			if (needle.equals(h.trim()))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	void setUnlinkOptOut(long accountHash, boolean optedOut)
+	{
+		final String needle = Long.toString(accountHash);
+		final String csv = configManager.getConfiguration(BankTemplatesConfig.GROUP, UNLINK_OPTOUT_KEY);
+		final java.util.LinkedHashSet<String> hashes = new java.util.LinkedHashSet<>();
+		if (csv != null && !csv.isEmpty())
+		{
+			for (final String h : csv.split(","))
+			{
+				if (!h.trim().isEmpty())
+				{
+					hashes.add(h.trim());
+				}
+			}
+		}
+		if (optedOut ? !hashes.add(needle) : !hashes.remove(needle))
+		{
+			return; // no change
+		}
+		configManager.setConfiguration(BankTemplatesConfig.GROUP, UNLINK_OPTOUT_KEY, String.join(",", hashes));
+	}
+
+	/** The logged-in character's account hash as set via {@link #setIdentity}, or null when logged out. */
+	Long currentAccountHash()
+	{
+		final String h = accountHashRaw;
+		try
+		{
+			return h == null ? null : Long.valueOf(h);
+		}
+		catch (NumberFormatException e)
+		{
+			return null;
+		}
+	}
+
 	// ---- one-click device link ----------------------------------------------------------------------
 	// The plugin starts a link (server returns a short user code + verification URL to open in the browser,
 	// and a device secret to poll with), the signed-in browser approves it, and the issued account token is
