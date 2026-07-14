@@ -255,7 +255,7 @@ public class BankTemplatesPlugin extends Plugin
 			updateRepoIdentity(client.getAccountHash());
 			// Load this account's cached bank counts (and pick up an account switch) without needing the bank open.
 			panel.refreshOwnedCanon();
-			maybeLinkEiAccount();
+			maybeLinkEiAccount(false);
 		}
 		else if (state == GameState.LOGIN_SCREEN)
 		{
@@ -553,7 +553,7 @@ public class BankTemplatesPlugin extends Plugin
 			&& TemplateRepositoryClient.EI_PLUGIN_TOKEN_KEY.equals(event.getKey()))
 		{
 			eiLinkedHash = -1;
-			maybeLinkEiAccount();
+			maybeLinkEiAccount(false);
 			javax.swing.SwingUtilities.invokeLater(panel::refreshLinkStatus);
 			return;
 		}
@@ -571,7 +571,7 @@ public class BankTemplatesPlugin extends Plugin
 					repositoryClient.setUnlinkOptOut(h, false);
 				}
 				eiLinkedHash = -1;
-				maybeLinkEiAccount();
+				maybeLinkEiAccount(true); // explicit: a pasted token also lifts the server-side tombstone
 				// Refresh the side panel's linked-as status for the new token.
 				javax.swing.SwingUtilities.invokeLater(panel::refreshLinkStatus);
 			}
@@ -590,7 +590,9 @@ public class BankTemplatesPlugin extends Plugin
 	// bank templates sync to that account. Idempotent + ownership-safe server-side, and does nothing until
 	// a token is set, the community repository is enabled, and a character is logged in - so it coexists
 	// with the Exchange Insights plugin (both may send the same link). Runs once per character per session.
-	private void maybeLinkEiAccount()
+	// `explicit` marks a deliberate user action (a pasted token) and lifts the server-side unlink
+	// tombstone; ambient triggers (login, the borrowed token changing) pass false and respect it.
+	private void maybeLinkEiAccount(boolean explicit)
 	{
 		final String effective = repositoryClient.effectiveToken();
 		final String token = effective == null ? "" : effective;
@@ -617,7 +619,7 @@ public class BankTemplatesPlugin extends Plugin
 				return false; // not ready yet - retry next tick
 			}
 			eiLinkedHash = hash;
-			repositoryClient.linkEiAccount(token, hash, p.getName(),
+			repositoryClient.linkEiAccount(token, hash, p.getName(), explicit,
 				panel::syncWebTemplates, // linked - kick a sync now that the account resolves
 				error -> {});
 			return true;
