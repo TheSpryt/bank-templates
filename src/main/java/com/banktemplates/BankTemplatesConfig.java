@@ -87,7 +87,7 @@ public interface BankTemplatesConfig extends Config
 	@ConfigItem(
 		keyName = "eiAccountToken",
 		name = "Account token",
-		description = "Alternative to the one-click link above: paste your Exchange Insights account token to link this character. Get it free at exchange-insights.gg (Account → RuneLite plugin). Templates you make then sync to your website My Templates and back. This works alongside the Exchange Insights plugin - you can set the same token in both.",
+		description = "Alternative to the one-click link above: paste your Exchange Insights account token to link this character. Get it free at exchange-insights.gg (Account → RuneLite plugin). Templates you make then sync to your website My Templates and back. If you leave this empty and the Exchange Insights plugin has a token configured, that one is used automatically.",
 		position = 1,
 		section = accountSection,
 		secret = true

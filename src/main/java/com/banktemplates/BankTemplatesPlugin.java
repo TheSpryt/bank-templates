@@ -546,6 +546,17 @@ public class BankTemplatesPlugin extends Plugin
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
+		// The Exchange Insights plugin's token changed on this client. When we have no token of our
+		// own we borrow that one (see TemplateRepositoryClient.effectiveToken), so re-run the same
+		// link/refresh path as if our own token changed - set, cleared or replaced.
+		if (TemplateRepositoryClient.EI_PLUGIN_CONFIG_GROUP.equals(event.getGroup())
+			&& TemplateRepositoryClient.EI_PLUGIN_TOKEN_KEY.equals(event.getKey()))
+		{
+			eiLinkedHash = -1;
+			maybeLinkEiAccount();
+			javax.swing.SwingUtilities.invokeLater(panel::refreshLinkStatus);
+			return;
+		}
 		if (BankTemplatesConfig.GROUP.equals(event.getGroup()))
 		{
 			// Pasting/changing the Exchange Insights token should link right away, without a relog.
@@ -573,7 +584,8 @@ public class BankTemplatesPlugin extends Plugin
 	// with the Exchange Insights plugin (both may send the same link). Runs once per character per session.
 	private void maybeLinkEiAccount()
 	{
-		final String token = config.eiAccountToken() == null ? "" : config.eiAccountToken().trim();
+		final String effective = repositoryClient.effectiveToken();
+		final String token = effective == null ? "" : effective;
 		final long hash = client.getAccountHash();
 		if (token.isEmpty() || !repositoryClient.isEnabled() || hash == -1 || hash == eiLinkedHash)
 		{
