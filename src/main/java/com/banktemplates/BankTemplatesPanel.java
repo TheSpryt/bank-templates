@@ -2226,6 +2226,10 @@ public class BankTemplatesPanel extends PluginPanel
 				templateManager.setSuppressChangeEvents(false);
 			}
 			webSyncLinked = true;
+			if (result.bankValue != null)
+			{
+				setBankValue(result.bankValue); // fresh heartbeat value - no bank change needed
+			}
 			rebuildOnEdt();
 		}
 		else if (result != null)

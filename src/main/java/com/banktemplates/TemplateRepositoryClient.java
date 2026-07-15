@@ -506,6 +506,9 @@ public class TemplateRepositoryClient
 		// The account's private-sync setting; when false the server never applies the plugin's pushes, so
 		// there's no point retrying them (the website->plugin pull still runs).
 		boolean privateSync;
+		// The character's current bank value (gp at GE mids, revalued daily server-side), so the panel's
+		// value line stays fresh on the sync heartbeat instead of waiting for the next bank change.
+		Long bankValue;
 		List<WebTemplate> templates;
 	}
 
