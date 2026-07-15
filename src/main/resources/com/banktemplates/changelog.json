@@ -1,11 +1,17 @@
 [
   {
+    "version": "1.6.5",
+    "notes": [
+      "The 'Your current bank value' line now stays fresh on its own: each background sync brings back the latest stored value from Exchange Insights, so price changes and valuation improvements (like untradables that can become tradable now counting toward your total) show up in the panel without needing a bank change.",
+      "The website button at the bottom of the panel now reads 'Browse on Exchange Insights'."
+    ]
+  },
+  {
     "version": "1.6.4",
     "notes": [
       "Already linked through the Exchange Insights plugin? Bank Templates now picks that up automatically: if you haven't set a token here, the one configured in the Exchange Insights plugin on this client is used, so your account link and verified bank sync just work with zero setup. Your own Bank Templates token still wins if you set one, nothing is copied or stored twice, and clearing or revoking the token in either plugin takes effect in both immediately. Everything stays on your machine - the plugins never fetch a token from anywhere.",
       "The account link status is now a single button below the search box, colored by status: red 'Link Exchange Insights account' when unlinked, green '✓ Account linked' when linked - and clicking it toggles. Unlinking asks for confirmation, stops new bank snapshots and template sync for that character (stored data stays until you delete your Exchange Insights account), and is remembered, so the automatic linking above never silently relinks a character you chose to unlink. Linking again is one click: instant when a token is already set up, via the browser approval otherwise.",
       "The bank value line under that button now reads 'Your current bank value: ...' and only shows while linked.",
-      "That bank value line also stays fresh on its own now: each background sync brings back the latest stored value from Exchange Insights, so price changes and valuation improvements show up in the panel without needing a bank change.",
       "My Templates now updates dynamically from the website while the side panel is open: import or edit a template on exchange-insights.gg and it appears in-game within seconds (opening the panel also refreshes immediately). With the panel closed the usual background sync continues as before.",
       "Bank value sync now handles placeholder slots properly: they used to slip into snapshots as phantom items with unusable internal ids, showing up as blank slots in the website's bank view. Placeholders are now sent as the real item with a quantity of 0, and the website draws them exactly like the bank does - the item's icon, faded, with a 0 stack count. Your next bank change after updating refreshes the stored snapshot automatically."
     ]
