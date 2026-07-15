@@ -1212,7 +1212,7 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private JPanel buildBrowseOnWebRow()
 	{
-		final JButton web = new JButton("Browse on web");
+		final JButton web = new JButton("Browse on Exchange Insights");
 		web.setFocusPainted(false);
 		web.setToolTipText("Open the community bank templates on exchange-insights.gg in your browser");
 		web.addActionListener(e -> LinkBrowser.browse("https://exchange-insights.gg/tools/osrs-bank-templates"));
