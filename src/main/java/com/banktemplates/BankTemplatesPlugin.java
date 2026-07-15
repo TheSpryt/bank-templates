@@ -383,7 +383,7 @@ public class BankTemplatesPlugin extends Plugin
 		}
 		int id = item.getId();
 		int qty = item.getQuantity();
-		final ItemComposition comp = client.getItemComposition(id);
+		final ItemComposition comp = itemManager.getItemComposition(id);
 		if (comp.getPlaceholderTemplateId() != -1)
 		{
 			id = comp.getPlaceholderId(); // the placeholder variant points back at the real item
