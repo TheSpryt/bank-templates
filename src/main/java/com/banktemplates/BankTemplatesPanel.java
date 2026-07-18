@@ -1178,20 +1178,24 @@ public class BankTemplatesPanel extends PluginPanel
 
 		listContainer.add(buildSortRow());
 		listContainer.add(Box.createVerticalStrut(6));
-		listContainer.add(buildBrowseOnWebRow());
-		listContainer.add(Box.createVerticalStrut(6));
 
 		if (browseStatus != null)
 		{
+			listContainer.add(buildBrowseOnWebRow());
+			listContainer.add(Box.createVerticalStrut(6));
 			listContainer.add(messageLabel(browseStatus));
 			return;
 		}
 
+		// Sort -> count -> the web button, then the cards: the button sits with the list it
+		// mirrors, and carries the selected sort so the web page opens matching this view.
 		final JLabel count = new JLabel("Count: " + browseTotal);
 		count.setFont(FontManager.getRunescapeSmallFont());
 		count.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		count.setAlignmentX(Component.LEFT_ALIGNMENT);
 		listContainer.add(count);
+		listContainer.add(Box.createVerticalStrut(6));
+		listContainer.add(buildBrowseOnWebRow());
 		listContainer.add(Box.createVerticalStrut(6));
 
 		// Re-sort the fetched page by how much of each template you own (most-owned first). Done here so it
@@ -1214,8 +1218,13 @@ public class BankTemplatesPanel extends PluginPanel
 	{
 		final JButton web = new JButton("Browse on Exchange Insights");
 		web.setFocusPainted(false);
-		web.setToolTipText("Open the community bank templates on exchange-insights.gg in your browser");
-		web.addActionListener(e -> LinkBrowser.browse("https://exchange-insights.gg/tools/osrs-bank-templates"));
+		web.setToolTipText("Open the community bank templates on exchange-insights.gg in your browser, sorted like this list");
+		// Carry the panel's sort so the web list opens matching this one. 'Items owned' is
+		// ranked locally against your bank (the site can't see it), so it sends its server
+		// base order instead - the site treats that as Most imported.
+		web.addActionListener(e -> LinkBrowser.browse(
+			"https://exchange-insights.gg/tools/osrs-bank-templates?sort="
+				+ (CLOSEST_SORT.equals(browseSort) ? "imported" : browseSort)));
 
 		final JPanel row = new JPanel(new BorderLayout());
 		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
