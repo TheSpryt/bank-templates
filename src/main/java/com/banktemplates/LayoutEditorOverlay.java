@@ -89,6 +89,11 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	// threshold. Dropping it on another numbered tab reorders the template's tabs.
 	private volatile int pressTabBtn = -1;
 	private volatile int dragTabBtn = -1;
+	// Whether the client itself considers a widget drag in progress. Only true once the pressed widget's
+	// drag dead time/zone are exceeded, so it honours the vanilla drag delay and Anti Drag's settings
+	// (including "on shift only"). Without this gate a fast withdraw click that slides a few pixels would
+	// count as a drag and rearrange the template (issue #35).
+	private volatile boolean nativeDragging;
 
 	@Inject
 	LayoutEditorOverlay(Client client, ItemIndex itemIndex, ItemManager itemManager, SpriteManager spriteManager,
@@ -111,6 +116,9 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		// Sampled on the client thread each frame for the AWT mouse handlers (matching the cached rects).
+		nativeDragging = client.isDraggingWidget();
+
 		// Editable whenever a user template is applied (always-on), or during an explicit edit session.
 		final BankTemplate template = layoutEditor.liveTemplate();
 		// Only edit in the bank when the editable template is the one actually applied/rendered. Editing a
@@ -540,12 +548,16 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	public java.awt.event.MouseEvent mouseDragged(java.awt.event.MouseEvent e)
 	{
 		final java.awt.Point press = pressPoint;
-		if (dragFrom < 0 && pressSlot >= 0 && press != null && press.distance(e.getPoint()) > DRAG_THRESHOLD)
+		// Movement alone isn't enough to call it a drag: the client must have engaged its own widget drag
+		// too (past the drag dead time/zone), or a quick withdraw click that slides a few pixels rearranges
+		// the template (issue #35). This also inherits Anti Drag's delay / on-shift-only settings.
+		final boolean clientDragging = nativeDragging;
+		if (dragFrom < 0 && pressSlot >= 0 && press != null && clientDragging && press.distance(e.getPoint()) > DRAG_THRESHOLD)
 		{
 			// Movement past the threshold means a drag (rearrange the template), not a click (withdraw).
 			dragFrom = pressSlot;
 		}
-		if (dragTabBtn < 0 && pressTabBtn >= 1 && press != null && press.distance(e.getPoint()) > DRAG_THRESHOLD)
+		if (dragTabBtn < 0 && pressTabBtn >= 1 && press != null && clientDragging && press.distance(e.getPoint()) > DRAG_THRESHOLD)
 		{
 			// Past the threshold from a tab button -> a tab-reorder drag, not a tab switch (click).
 			dragTabBtn = pressTabBtn;
