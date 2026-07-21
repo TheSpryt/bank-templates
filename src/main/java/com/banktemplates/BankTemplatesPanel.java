@@ -1,17 +1,25 @@
 package com.banktemplates;
 
 import com.google.gson.Gson;
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Image;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.Shape;
 import java.awt.Window;
+import java.awt.geom.Ellipse2D;
 import java.awt.event.HierarchyEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
@@ -60,6 +68,7 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemVariationMapping;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
+import net.runelite.client.util.AsyncBufferedImage;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.util.LinkBrowser;
 
@@ -1341,22 +1350,187 @@ public class BankTemplatesPanel extends PluginPanel
 		return b;
 	}
 
+	// A Browse card styled after the uploader's Exchange Insights profile: their themed background and
+	// avatar, with the import/report counts as clickable icons. The whole thing is rebuilt from the freshly
+	// fetched profile on each redraw, so a change to the uploader's avatar/background shows next refresh.
 	private JPanel buildRemoteCard(RemoteTemplate rt)
 	{
-		final JPanel card = cardPanel(false);
-		card.add(remoteTitleBlock(rt), BorderLayout.CENTER);
+		final RemoteTemplate.Profile p = rt.profile;
+		final String bg = p != null ? p.profileBg : null;
 
-		final JPanel buttons = buttonRow();
-		buttons.add(iconButton("View", "Preview this template", () -> showPreview(rt.toTemplate())));
-		buttons.add(iconButton("Web", "Open this template on exchange-insights.gg", () -> openOnWeb(rt.id)));
-		buttons.add(iconButton("Import", "Save a copy to My Templates", () -> importRemote(rt)));
-		buttons.add(iconButton("Report", "Report this template", () -> reportRepo(rt.id, this::loadBrowse)));
+		final JPanel card = profileCardPanel(bg);
+		card.setLayout(new BorderLayout(8, 4));
+		card.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+		card.add(avatarComponent(rt), BorderLayout.WEST);
+
+		final JPanel text = new JPanel();
+		text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
+		text.setOpaque(false);
+
+		final JLabel name = clampedLabel(rt.name, FontManager.getRunescapeFont(), Color.WHITE, CARD_NAME_MAX_WIDTH);
+		name.setAlignmentX(Component.LEFT_ALIGNMENT);
+		text.add(name);
+
+		final JLabel author = clampedLabel(byLine(rt), FontManager.getRunescapeSmallFont(), ColorScheme.LIGHT_GRAY_COLOR, CARD_AUTHOR_MAX_WIDTH);
+		author.setAlignmentX(Component.LEFT_ALIGNMENT);
+		text.add(author);
+
+		final JLabel meta = new JLabel(remoteMeta(rt));
+		meta.setFont(FontManager.getRunescapeSmallFont());
+		meta.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		meta.setAlignmentX(Component.LEFT_ALIGNMENT);
+		text.add(meta);
+		card.add(text, BorderLayout.CENTER);
+
+		final JPanel actions = buttonRow();
+		// The count icons ARE the buttons: the download glyph imports, the flag glyph reports.
+		actions.add(actionIcon("&#11015;", rt.downloads, UPVOTE_COLOR, "Import a copy to My Templates", () -> importRemote(rt)));
+		actions.add(actionIcon("&#9873;", rt.reports, DOWNVOTE_COLOR, "Report this template", () -> reportRepo(rt.id, this::loadBrowse)));
+		actions.add(iconButton("View", "Preview this template", () -> showPreview(rt.toTemplate())));
+		actions.add(iconButton("Web", "Open this template on exchange-insights.gg", () -> openOnWeb(rt.id)));
 		if (ownsRemote(rt.id))
 		{
-			buttons.add(iconButton("Del", "Delete your shared template", () -> deleteRemote(rt.id)));
+			actions.add(iconButton("Del", "Delete your shared template", () -> deleteRemote(rt.id)));
 		}
-		card.add(buttons, BorderLayout.SOUTH);
+		card.add(actions, BorderLayout.SOUTH);
 		return card;
+	}
+
+	// The uploader line: prefer their EI display name / @handle, else the template's author, else Anonymous.
+	private String byLine(RemoteTemplate rt)
+	{
+		if (rt.profile != null)
+		{
+			if (rt.profile.displayName != null && !rt.profile.displayName.isEmpty())
+			{
+				return "by " + rt.profile.displayName;
+			}
+			if (rt.profile.handle != null && !rt.profile.handle.isEmpty())
+			{
+				return "by @" + rt.profile.handle;
+			}
+		}
+		final String by = rt.anonymous || rt.author == null || rt.author.isEmpty() ? "Anonymous" : rt.author;
+		return "by " + by;
+	}
+
+	// A card panel that paints the uploader's themed profile background (falls back to the neutral default).
+	// Height is capped to its preferred height, like cardPanel, so the vertical list doesn't stretch it.
+	private JPanel profileCardPanel(final String bgKey)
+	{
+		final JPanel card = new JPanel()
+		{
+			@Override
+			protected void paintComponent(Graphics g)
+			{
+				final Graphics2D g2 = (Graphics2D) g.create();
+				ProfileCardStyle.paint(g2, getWidth(), getHeight(), 10, bgKey);
+				g2.dispose();
+			}
+
+			@Override
+			public Dimension getMaximumSize()
+			{
+				return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+			}
+		};
+		card.setOpaque(false);
+		card.setAlignmentX(Component.LEFT_ALIGNMENT);
+		return card;
+	}
+
+	// Circular avatar rendered from the uploader's chosen item (via the local item-icon cache, so it stays
+	// current), ringed in the profile's accent colour. Falls back to the name's initial when there's none.
+	private JComponent avatarComponent(RemoteTemplate rt)
+	{
+		final int size = 44;
+		final RemoteTemplate.Profile p = rt.profile;
+		final Color ring = ProfileCardStyle.border(p != null ? p.profileBg : null);
+		final Integer itemId = p != null ? p.avatarItemId : null;
+		final String initial = rt.name != null && !rt.name.isEmpty() ? rt.name.substring(0, 1).toUpperCase(Locale.ROOT) : "?";
+
+		final JComponent avatar = new JComponent()
+		{
+			private Image img;
+
+			{
+				setPreferredSize(new Dimension(size, size));
+				setMaximumSize(new Dimension(size, size));
+				if (itemId != null && itemId > 0)
+				{
+					final AsyncBufferedImage a = itemManager.getImage(itemId);
+					img = a;
+					a.onLoaded(this::repaint);
+				}
+			}
+
+			@Override
+			protected void paintComponent(Graphics g)
+			{
+				final Graphics2D g2 = (Graphics2D) g.create();
+				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				g2.setColor(new Color(0, 0, 0, 90));
+				g2.fillOval(1, 1, size - 3, size - 3);
+
+				final int iw = img != null ? img.getWidth(null) : -1;
+				final int ih = img != null ? img.getHeight(null) : -1;
+				if (iw > 0 && ih > 0)
+				{
+					final Shape old = g2.getClip();
+					g2.setClip(new Ellipse2D.Float(2, 2, size - 5, size - 5));
+					final int max = size - 12;
+					final double sc = Math.min((double) max / iw, (double) max / ih);
+					final int dw = (int) Math.round(iw * sc);
+					final int dh = (int) Math.round(ih * sc);
+					g2.drawImage(img, (size - dw) / 2, (size - dh) / 2, dw, dh, null);
+					g2.setClip(old);
+				}
+				else
+				{
+					g2.setColor(ring);
+					g2.setFont(FontManager.getRunescapeBoldFont());
+					final FontMetrics fm = g2.getFontMetrics();
+					g2.drawString(initial, (size - fm.stringWidth(initial)) / 2, (size + fm.getAscent() - fm.getDescent()) / 2);
+				}
+
+				g2.setColor(ring);
+				g2.setStroke(new BasicStroke(1.5f));
+				g2.drawOval(1, 1, size - 4, size - 4);
+				g2.dispose();
+			}
+		};
+		return avatar;
+	}
+
+	// An import/report count shown as its own clickable icon+number (the icon is the action button).
+	private JLabel actionIcon(String glyphEntity, int count, Color color, String tooltip, Runnable action)
+	{
+		final JLabel label = new JLabel("<html><span style='font-family:Dialog'>" + glyphEntity + "</span>&nbsp;" + count + "</html>");
+		label.setForeground(color);
+		label.setToolTipText(tooltip);
+		label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		label.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				action.run();
+			}
+
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				label.setForeground(color.brighter());
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				label.setForeground(color);
+			}
+		});
+		return label;
 	}
 
 	private boolean ownsRemote(long repoId)
@@ -1774,35 +1948,6 @@ public class BankTemplatesPanel extends PluginPanel
 	}
 
 	// Browse card title: name + imports (▲, green) and reports (▼, red) shown as up/down votes.
-	private JPanel remoteTitleBlock(RemoteTemplate rt)
-	{
-		final JPanel text = new JPanel();
-		text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
-		text.setOpaque(false);
-
-		final JLabel name = clampedLabel(rt.name, FontManager.getRunescapeFont(), Color.WHITE, CARD_NAME_MAX_WIDTH);
-		text.add(name);
-
-		final JPanel votes = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-		votes.setOpaque(false);
-		votes.setAlignmentX(Component.LEFT_ALIGNMENT);
-		votes.add(voteLabel("<html><span style='font-family:Dialog'>&#9650;</span>&nbsp;" + rt.downloads + "</html>", UPVOTE_COLOR));
-		votes.add(voteLabel("<html><span style='font-family:Dialog'>&#9660;</span>&nbsp;" + rt.reports + "</html>", DOWNVOTE_COLOR));
-
-		final String by = rt.anonymous || rt.author == null || rt.author.isEmpty() ? "Anonymous" : rt.author;
-		final JLabel author = clampedLabel("by " + by, FontManager.getRunescapeSmallFont(), ColorScheme.LIGHT_GRAY_COLOR, CARD_AUTHOR_MAX_WIDTH);
-		votes.add(author);
-
-		text.add(votes);
-
-		final JLabel meta = new JLabel(remoteMeta(rt));
-		meta.setFont(FontManager.getRunescapeSmallFont());
-		meta.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		meta.setAlignmentX(Component.LEFT_ALIGNMENT);
-		text.add(meta);
-		return text;
-	}
-
 	// "x / y items" (x = how many of the template's items you own) plus tab count, for a Browse card. Falls
 	// back to "y items" until the bank has loaded.
 	private String remoteMeta(RemoteTemplate rt)
@@ -1835,16 +1980,6 @@ public class BankTemplatesPanel extends PluginPanel
 		return (double) owned * owned / total;
 	}
 
-	private JLabel voteLabel(String html, Color color)
-	{
-		// The count keeps the panel's RuneScape pixel font (its cmap has the digits, so they render on every
-		// platform). The caller wraps only the ▲/▼ arrow in an HTML logical-font span: the RuneScape font has
-		// no ▲/▼ glyph, and a logical font gets composite glyph fallback everywhere (incl. macOS), so the
-		// arrow renders while the count keeps the RuneScape look.
-		final JLabel label = new JLabel(html);
-		label.setForeground(color);
-		return label;
-	}
 
 	private JPanel titleBlock(String nameText, String metaText, Color nameColor)
 	{
