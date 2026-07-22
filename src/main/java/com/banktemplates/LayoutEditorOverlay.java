@@ -125,8 +125,7 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		// template from the side panel doesn't activate it, so its window edits must not touch the bank.
 		final boolean active = template != null
 			&& layoutEditor.liveOverBank()
-			&& (layoutEditor.isEditing() || (config.applyLayout() && !config.showReorgHelper()))
-			&& !BankLayoutRenderer.isBankFiltered(client);
+			&& (layoutEditor.isEditing() || (config.applyLayout() && !config.showReorgHelper()));
 		if (!active)
 		{
 			clearCache();
@@ -143,6 +142,26 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		// The viewed tab is just the native current tab - clicking an extra tab sets it to that tab's number,
 		// even past the real bank's tab count, and the renderer fills the (empty) native view from the template.
 		final int tab = client.getVarbitValue(VarbitID.BANK_CURRENTTAB);
+
+		// A filtered bank (tag tab, search, Inventory Setups) shows something other than the template's
+		// layout, so none of the slot / "+" / drag machinery below applies. The extra TAB BUTTONS must still
+		// be drawn though: otherwise the virtual tabs vanish the moment a tag tab is opened, leaving no way
+		// back to them. Draw just the tab strip and keep it clickable.
+		if (BankLayoutRenderer.isBankFiltered(client))
+		{
+			slotRects = new Rectangle[0];
+			slotItems = new int[0];
+			addRect = null;
+			containerRect = null;
+			dragFrom = -1;
+			dragPoint = null;
+			pressSlot = -1;
+			pressPoint = null;
+			this.currentTab = tab;
+			this.tabRects = captureTabRects();
+			this.extraTabRects = drawExtraTabs(graphics, template, tab);
+			return null;
+		}
 		final int[] layout = template.tabLayout(tab);
 		final int len = layout == null ? 0 : layout.length;
 

@@ -4,7 +4,9 @@ import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
+import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Insets;
 import java.awt.RenderingHints;
 import java.awt.event.ActionListener;
 import java.awt.event.KeyListener;
@@ -38,14 +40,17 @@ final class SearchBar extends JPanel
 	{
 		super(new BorderLayout(4, 0));
 		setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR),
-			BorderFactory.createEmptyBorder(3, 6, 3, 4)));
+		// Non-opaque so paintComponent can draw the rounded body; the border strokes the matching outline,
+		// giving the field the same corner radius as the template cards.
+		setOpaque(false);
+		setBorder(new RoundedBorder(ColorScheme.MEDIUM_GRAY_COLOR, new Insets(3, 8, 3, 6)));
 
 		final JLabel icon = new JLabel(magnifier());
 		icon.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 4));
 		add(icon, BorderLayout.WEST);
 
+		field.setOpaque(false);
+		field.setFont(FontManager.getRunescapeFont());
 		field.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		field.setForeground(Color.WHITE);
 		field.setCaretColor(Color.WHITE);
@@ -96,6 +101,14 @@ final class SearchBar extends JPanel
 				update();
 			}
 		});
+	}
+
+	@Override
+	protected void paintComponent(Graphics g)
+	{
+		// The field is non-opaque, so paint its body here with the shared card corner radius.
+		RoundedBorder.fill(g, this, getBackground());
+		super.paintComponent(g);
 	}
 
 	// A simple magnifying glass (lens + handle) drawn at runtime, so there's no bundled asset to ship.

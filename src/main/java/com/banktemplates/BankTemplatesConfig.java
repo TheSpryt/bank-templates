@@ -61,6 +61,54 @@ public interface BankTemplatesConfig extends Config
 	)
 	String repositorySection = "repository";
 
+	@ConfigSection(
+		name = "Exchange Insights account",
+		description = "Link this character to your Exchange Insights account so your bank templates sync between the game and the website.",
+		position = 4,
+		closedByDefault = true
+	)
+	String accountSection = "eiAccount";
+
+	// Momentary action, not a stored preference: ticking it starts the one-click browser link and the panel
+	// clears it straight back to false. Kept as a config item so it's available from the settings screen as
+	// well as the side-panel button.
+	@ConfigItem(
+		keyName = "linkAccountInBrowser",
+		name = "Link account in browser",
+		description = "One-click linking: opens exchange-insights.gg in your browser to approve linking this character - no token to copy. Be logged into OSRS and signed in on the website first. Ticking this starts the link (it clears itself once done). Requires the community repository to be enabled.",
+		position = 0,
+		section = accountSection
+	)
+	default boolean linkAccountInBrowser()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "eiAccountToken",
+		name = "Account token",
+		description = "Alternative to the one-click link above: paste your Exchange Insights account token to link this character. Get it free at exchange-insights.gg (Account → RuneLite plugin). Templates you make then sync to your website My Templates and back. If you leave this empty and the Exchange Insights plugin has a token configured, that one is used automatically.",
+		position = 1,
+		section = accountSection,
+		secret = true
+	)
+	default String eiAccountToken()
+	{
+		return "";
+	}
+
+	@ConfigItem(
+		keyName = "syncBankSnapshot",
+		name = "Sync bank value",
+		description = "For characters linked to an Exchange Insights account: send a snapshot of your bank's contents (item IDs and quantities only - no placement, notes or anything else) to exchange-insights.gg when it changes, powering bank-value tracking on the website. Never sent for unlinked characters. Turning this off stops new snapshots; data already sent stays with your Exchange Insights account until you delete that account.",
+		position = 2,
+		section = accountSection
+	)
+	default boolean syncBankSnapshot()
+	{
+		return true;
+	}
+
 	@ConfigItem(
 		keyName = "enableRepository",
 		name = "Enable community repository",

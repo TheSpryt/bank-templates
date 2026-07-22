@@ -38,7 +38,20 @@ class WrapLayout extends FlowLayout
 	{
 		synchronized (target.getTreeLock())
 		{
+			// Measure against the target's width - but on the first layout pass it's still 0, which would make
+			// us assume everything fits on one row and under-report the height (the parent then allocates too
+			// little, so wrapped rows overlap or clip). Fall back to the nearest laid-out ancestor's width so
+			// the row count - and thus the height - is right from the very first pass.
 			int targetWidth = target.getSize().width;
+			if (targetWidth == 0)
+			{
+				Container c = target.getParent();
+				while (c != null && c.getSize().width == 0)
+				{
+					c = c.getParent();
+				}
+				targetWidth = c != null ? c.getSize().width : 0;
+			}
 			if (targetWidth == 0)
 			{
 				targetWidth = Integer.MAX_VALUE;
