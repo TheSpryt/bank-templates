@@ -9,8 +9,6 @@
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-orange)](LICENSE)
 [![RuneLite](https://img.shields.io/badge/RuneLite-Plugin%20Hub-yellow)](https://runelite.net/plugin-hub)
 
-![Bank Templates demo](docs/images/demo.gif)
-
 </div>
 
 ---
@@ -209,17 +207,10 @@ notes - to power bank-value tracking on the website. This can be turned off any 
 value** in settings; turning it off (or unlinking) stops new snapshots, and deleting your Exchange
 Insights account removes the stored data. Unlinked characters never send bank contents anywhere.
 
+You can ask for a copy of everything held on your account at any time from the account settings section
+on [exchange-insights.gg](https://exchange-insights.gg), and it is emailed to you as a JSON file.
+
 ---
-
-## Screenshots
-
-| My Templates | Browse the community repository | Template preview |
-|---|---|---|
-| ![My Templates](docs/images/my-templates.png) | ![Browse](docs/images/browse.png) | ![Preview](docs/images/preview.png) |
-
-| Layout editor | Reorganise helper over the bank |
-|---|---|
-| ![Layout editor](docs/images/editor.png) | ![Reorganise helper](docs/images/reorg.png) |
 
 ## License
 
