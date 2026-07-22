@@ -566,6 +566,11 @@ public class TemplateRepositoryClient
 		String status;
 		String clientKey;
 		long updatedAt;
+		// Community reach of this template's shared copy. The server has always sent these; without the
+		// fields to receive them gson dropped both, so every My Templates card showed 0 imports and 0
+		// reports no matter how the shared copy was doing.
+		int downloads;
+		int reports;
 
 		BankTemplate toTemplate()
 		{
@@ -573,6 +578,8 @@ public class TemplateRepositoryClient
 			t.setName(name);
 			t.setDescription(description);
 			t.setColumns(columns);
+			t.setShareDownloads(downloads);
+			t.setShareReports(reports);
 			if (tabs != null)
 			{
 				for (TabLayout tl : tabs)
