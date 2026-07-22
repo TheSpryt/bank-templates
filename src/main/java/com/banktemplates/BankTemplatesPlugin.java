@@ -2,10 +2,18 @@ package com.banktemplates;
 
 import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
+import net.runelite.api.Player;
 import net.runelite.api.GameState;
+import net.runelite.api.Item;
+import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
@@ -39,7 +47,7 @@ import net.runelite.client.util.ImageUtil;
 @Slf4j
 @PluginDescriptor(
 	name = "Bank Templates",
-	description = "Create, share and apply bank layout templates that virtually arrange your bank.",
+	description = "Create, share and apply bank layout templates that virtually arrange your bank. Free forever.",
 	tags = {"bank", "layout", "template", "organise", "organize", "tabs", "placeholder", "sort"}
 )
 public class BankTemplatesPlugin extends Plugin
@@ -98,6 +106,32 @@ public class BankTemplatesPlugin extends Plugin
 	@Inject
 	private BankTemplatesPanel panel;
 
+	@Inject
+	private BankTemplatesConfig config;
+
+	@Inject
+	private ConfigManager configManager;
+
+	@Inject
+	private ScheduledExecutorService executor;
+
+	// The account hash we've already sent an Exchange Insights identity link for this session, so linking
+	// happens once per character per session (and can retry until the player's name has loaded).
+	private long eiLinkedHash = -1;
+
+	// Opt-in bank snapshot sync (bank-value tracking): bank changes arrive in bursts while the bank is
+	// open, so debounce, then read once and only send when the contents actually changed.
+	private static final long BANK_SNAPSHOT_DEBOUNCE_MS = 5_000;
+	private static final long BANK_SNAPSHOT_MIN_INTERVAL_MS = 60_000;
+	private ScheduledFuture<?> pendingBankSnapshot;
+	// Volatile: written on the client thread, but also reset from other threads (account switch via
+	// startUp, the failed-send retry callback) - visibility matters for the "unchanged" suppression.
+	private volatile long lastBankSnapshotChecksum;
+	private volatile long lastBankSnapshotAt;
+	// True after shutDown: cancel(false) can't stop an already-executing task, and the retry/rate-gap
+	// paths re-arm - this flag stops a disabled plugin from resurrecting the snapshot loop.
+	private volatile boolean snapshotStopped;
+
 	private NavigationButton navButton;
 
 	// The layout-change listener registered with the singleton LayoutEditor, stored so it can be removed
@@ -107,6 +141,7 @@ public class BankTemplatesPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+		snapshotStopped = false; // re-enable after a previous shutDown (the panel/plugin are singletons)
 		templateManager.load();
 
 		panel.setOnActiveChanged(this::requestBankRebuild);
@@ -115,9 +150,15 @@ public class BankTemplatesPlugin extends Plugin
 		{
 			requestBankRebuild();
 			panel.rebuild();
+			reorgHelperOverlay.invalidateBankCache(); // an edited layout changes what the guidance should say
 		};
 		layoutEditor.addListener(layoutListener);
 		panel.rebuild();
+		// Start the duplex sync now rather than waiting for a login: with an account token the sync no
+		// longer needs a character, so a client sitting at the login screen still pushes anything made
+		// offline and pulls website-side changes down. A no-op without a token - the pass bails and the
+		// loop idles until the login kick below arms it.
+		panel.syncWebTemplates();
 
 		final BufferedImage icon = ImageUtil.loadImageResource(BankTemplatesPlugin.class, "/com/banktemplates/icon.png");
 		navButton = NavigationButton.builder()
@@ -138,13 +179,47 @@ public class BankTemplatesPlugin extends Plugin
 		mouseManager.registerMouseListener(layoutEditorOverlay);
 		mouseManager.registerMouseListener(reorgHelperOverlay);
 
-		repositoryClient.setIdentity(client.getAccountHash());
+		updateRepoIdentity(client.getAccountHash());
 		requestBankRebuild();
+	}
+
+	// The last account hash we backfilled the profile link for, so we only send one claim per account
+	// per session (on login or an account switch) rather than on every game-state change.
+	private long claimedAccountHash = -1;
+
+	// Point the repository client at the current account and, the first time we see a given account this
+	// session, ask the server to link that account's existing shared templates to its Exchange Insights
+	// profile (a no-op for accounts that aren't linked, and idempotent otherwise).
+	private void updateRepoIdentity(long accountHash)
+	{
+		repositoryClient.setIdentity(accountHash);
+		if (accountHash != -1 && accountHash != claimedAccountHash)
+		{
+			claimedAccountHash = accountHash;
+			// A different character's bank is a different snapshot - never suppress it as "unchanged".
+			lastBankSnapshotChecksum = 0;
+			// And its link state is unknown until its first sync answers - close the snapshot gate now.
+			panel.resetLinkState();
+			repositoryClient.claimTemplates();
+			// Pull this account's website-made templates (incl. private) into My Templates.
+			panel.syncWebTemplates();
+		}
 	}
 
 	@Override
 	protected void shutDown()
 	{
+		synchronized (this)
+		{
+			// The flag (not just the cancel) is what stops an already-executing task's retry/rate-gap
+			// re-arm from resurrecting the loop after the plugin is disabled.
+			snapshotStopped = true;
+			if (pendingBankSnapshot != null)
+			{
+				pendingBankSnapshot.cancel(false);
+				pendingBankSnapshot = null;
+			}
+		}
 		eventBus.unregister(bankValuePreRenderer);
 		if (layoutEditor.isEditing())
 		{
@@ -161,6 +236,10 @@ public class BankTemplatesPlugin extends Plugin
 		overlayManager.remove(reorgHelperOverlay);
 		clientToolbar.removeNavigation(navButton);
 		navButton = null;
+		if (panel != null)
+		{
+			panel.stopSync();
+		}
 		requestBankRebuild();
 	}
 
@@ -180,9 +259,10 @@ public class BankTemplatesPlugin extends Plugin
 		final GameState state = event.getGameState();
 		if (state == GameState.LOGGED_IN)
 		{
-			repositoryClient.setIdentity(client.getAccountHash());
+			updateRepoIdentity(client.getAccountHash());
 			// Load this account's cached bank counts (and pick up an account switch) without needing the bank open.
 			panel.refreshOwnedCanon();
+			maybeLinkEiAccount(false);
 		}
 		else if (state == GameState.LOGIN_SCREEN)
 		{
@@ -211,7 +291,121 @@ public class BankTemplatesPlugin extends Plugin
 		if (event.getContainerId() == InventoryID.BANK)
 		{
 			panel.refreshOwnedCanon();
+			// The reorg overlay derives two sets from the bank's contents and caches them rather than
+			// rebuilding them every frame; this is the signal that they're stale.
+			reorgHelperOverlay.invalidateBankCache();
+			scheduleBankSnapshot(BANK_SNAPSHOT_DEBOUNCE_MS);
 		}
+	}
+
+	// (Re)arm the debounced snapshot send, replacing any pending one so a burst of bank changes
+	// collapses into a single read + send once things settle.
+	private synchronized void scheduleBankSnapshot(long delayMs)
+	{
+		if (snapshotStopped || !config.syncBankSnapshot() || !repositoryClient.isEnabled())
+		{
+			return;
+		}
+		if (pendingBankSnapshot != null)
+		{
+			pendingBankSnapshot.cancel(false);
+		}
+		pendingBankSnapshot = executor.schedule(
+			() -> clientThread.invoke(this::sendBankSnapshotNow), delayMs, TimeUnit.MILLISECONDS);
+	}
+
+	// Reads the bank and sends the snapshot (client thread - container reads aren't safe elsewhere).
+	// Skips silently when nothing changed since the last send; the server additionally only stores
+	// snapshots for characters linked to an Exchange Insights account.
+	private void sendBankSnapshotNow()
+	{
+		// panel.isWebLinked() is the privacy gate: bank contents must never leave the client unless the
+		// duplex sync has CONFIRMED this character is linked to an Exchange Insights account (the setting
+		// promises "never sent for unlinked characters" - merely being logged in isn't consent). While the
+		// link state is still unknown (before the first sync answers), we skip; the next bank change after
+		// confirmation sends normally.
+		if (snapshotStopped || !config.syncBankSnapshot() || !repositoryClient.isEnabled()
+			|| !repositoryClient.hasIdentity() || !panel.isWebLinked())
+		{
+			return;
+		}
+		final long now = System.currentTimeMillis();
+		if (now - lastBankSnapshotAt < BANK_SNAPSHOT_MIN_INTERVAL_MS)
+		{
+			// Too soon - re-arm for the remainder of the window so the change still lands.
+			scheduleBankSnapshot(BANK_SNAPSHOT_MIN_INTERVAL_MS - (now - lastBankSnapshotAt));
+			return;
+		}
+		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank == null)
+		{
+			return;
+		}
+		// [id, qty, tab] triples, sliced into tabs the same way BankCapture does (container is ordered
+		// tab 1..9 then the main view; per-tab counts live in the BANK_TAB_1..9 varbits). Tab 0 = main.
+		final Item[] all = bank.getItems();
+		final List<int[]> items = new ArrayList<>();
+		long checksum = 7;
+		int idx = 0;
+		for (int tab = 1; tab <= 9; tab++)
+		{
+			final int count = client.getVarbitValue(BankCapture.TAB_COUNT_VARBITS[tab - 1]);
+			for (int k = 0; k < count && idx < all.length; k++, idx++)
+			{
+				checksum = addSnapshotItem(items, all[idx], tab, checksum);
+			}
+		}
+		for (; idx < all.length; idx++)
+		{
+			checksum = addSnapshotItem(items, all[idx], 0, checksum);
+		}
+		if (items.isEmpty() || checksum == lastBankSnapshotChecksum)
+		{
+			return;
+		}
+		lastBankSnapshotChecksum = checksum;
+		lastBankSnapshotAt = now;
+		// The response carries the bank's live GE value - surface it in the side panel (the free teaser
+		// for bank-value tracking on the website). If the snapshot was NOT stored (network failure or
+		// the server's write gap), forget the checksum and retry after the min interval so the latest
+		// bank state isn't silently lost (e.g. the last change before a logout).
+		repositoryClient.sendBankSnapshot(items,
+			value -> javax.swing.SwingUtilities.invokeLater(() -> panel.setBankValue(value)),
+			() ->
+			{
+				lastBankSnapshotChecksum = 0;
+				scheduleBankSnapshot(BANK_SNAPSHOT_MIN_INTERVAL_MS);
+			});
+	}
+
+	// Adds one bank slot to the snapshot and folds it into the change-detection checksum. Empty slots
+	// are skipped. Placeholders are detected BY DEFINITION (getPlaceholderTemplateId), never by their
+	// quantity - the container reports quantity 1 for them in some client states, which used to leak
+	// raw placeholder-variant item ids (no icon, no price) into snapshots. A placeholder is sent as
+	// its REAL item's id with quantity 0, so the website can draw the same faded ghost the bank shows.
+	// Runs on the client thread (sendBankSnapshotNow), so the composition read is safe.
+	private long addSnapshotItem(List<int[]> items, Item item, int tab, long checksum)
+	{
+		if (item == null || item.getId() <= 0 || item.getQuantity() <= 0)
+		{
+			return checksum;
+		}
+		int id = item.getId();
+		int qty = item.getQuantity();
+		final ItemComposition comp = itemManager.getItemComposition(id);
+		if (comp.getPlaceholderTemplateId() != -1)
+		{
+			id = comp.getPlaceholderId(); // the placeholder variant points back at the real item
+			qty = 0;
+			if (id <= 0)
+			{
+				return checksum;
+			}
+		}
+		items.add(new int[]{id, qty, tab});
+		checksum = checksum * 31 + id;
+		checksum = checksum * 31 + qty;
+		return checksum * 31 + tab;
 	}
 
 	@Subscribe
@@ -378,10 +572,84 @@ public class BankTemplatesPlugin extends Plugin
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
+		// The Exchange Insights plugin's token changed on this client. When we have no token of our
+		// own we borrow that one (see TemplateRepositoryClient.effectiveToken), so re-run the same
+		// link/refresh path as if our own token changed - set, cleared or replaced.
+		if (TemplateRepositoryClient.EI_PLUGIN_CONFIG_GROUP.equals(event.getGroup())
+			&& TemplateRepositoryClient.EI_PLUGIN_TOKEN_KEY.equals(event.getKey()))
+		{
+			eiLinkedHash = -1;
+			maybeLinkEiAccount(false);
+			javax.swing.SwingUtilities.invokeLater(panel::refreshLinkStatus);
+			return;
+		}
 		if (BankTemplatesConfig.GROUP.equals(event.getGroup()))
 		{
+			// Pasting/changing the Exchange Insights token should link right away, without a relog.
+			if ("eiAccountToken".equals(event.getKey()))
+			{
+				// Pasting a token here is an explicit link request: lift any earlier unlink
+				// opt-out for the logged-in character so the link actually happens.
+				final String pasted = event.getNewValue();
+				final long h = client.getAccountHash();
+				if (pasted != null && !pasted.trim().isEmpty() && h != -1)
+				{
+					repositoryClient.setUnlinkOptOut(h, false);
+				}
+				eiLinkedHash = -1;
+				maybeLinkEiAccount(true); // explicit: a pasted token also lifts the server-side tombstone
+				// Refresh the side panel's linked-as status for the new token.
+				javax.swing.SwingUtilities.invokeLater(panel::refreshLinkStatus);
+			}
+			// The "Link account in browser" toggle is a momentary action: reset it straight back to false and
+			// start the one-click device link from the panel (which owns the browser + poll flow).
+			else if ("linkAccountInBrowser".equals(event.getKey()) && Boolean.parseBoolean(event.getNewValue()))
+			{
+				configManager.setConfiguration(BankTemplatesConfig.GROUP, "linkAccountInBrowser", false);
+				javax.swing.SwingUtilities.invokeLater(panel::startOneClickLink);
+			}
 			requestBankRebuild();
 		}
+	}
+
+	// Link the logged-in character to the Exchange Insights account whose token is set in the config, so
+	// bank templates sync to that account. Idempotent + ownership-safe server-side, and does nothing until
+	// a token is set, the community repository is enabled, and a character is logged in - so it coexists
+	// with the Exchange Insights plugin (both may send the same link). Runs once per character per session.
+	// `explicit` marks a deliberate user action (a pasted token) and lifts the server-side unlink
+	// tombstone; ambient triggers (login, the borrowed token changing) pass false and respect it.
+	private void maybeLinkEiAccount(boolean explicit)
+	{
+		final String effective = repositoryClient.effectiveToken();
+		final String token = effective == null ? "" : effective;
+		final long hash = client.getAccountHash();
+		if (token.isEmpty() || !repositoryClient.isEnabled() || hash == -1 || hash == eiLinkedHash)
+		{
+			return;
+		}
+		// The user explicitly unlinked this character from the panel: never auto-relink it.
+		if (repositoryClient.isUnlinkOptedOut(hash))
+		{
+			return;
+		}
+		// Wait (on the client thread) until the local player's name has loaded, then link exactly once.
+		clientThread.invokeLater(() ->
+		{
+			if (client.getAccountHash() != hash)
+			{
+				return true; // logged out / switched before the name loaded - abandon this attempt
+			}
+			final Player p = client.getLocalPlayer();
+			if (p == null || p.getName() == null || p.getName().isEmpty())
+			{
+				return false; // not ready yet - retry next tick
+			}
+			eiLinkedHash = hash;
+			repositoryClient.linkEiAccount(token, hash, p.getName(), explicit,
+				panel::syncWebTemplates, // linked - kick a sync now that the account resolves
+				error -> {});
+			return true;
+		});
 	}
 
 	/** Rebuilds the bank interface so the active template (or normal view) is re-applied. */

@@ -147,13 +147,16 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			return null;
 		}
 
+		// Both bank-derived sets, rebuilt only when the bank or template moved (see ensureSets).
+		ensureSets(template);
+
 		// Filler-setup guidance runs first, and even when the bank settings menu is open (which hides the
 		// item container): guide reserving real bank slots for unowned-item placeholders and filler slots.
 		if (steps && !skipFillers)
 		{
 			// Cap the ask at the free bank slots - never request more fillers than physically fit.
 			final int free = freeBankSlots();
-			final int wanted = reservedSlotsNeeded(template, ownedItems()) - bankFillerCount();
+			final int wanted = reservedSlotsNeeded(template, cachedOwned) - bankFillerCount();
 			final int needed = Math.min(wanted, free);
 			if (needed > 0)
 			{
@@ -187,9 +190,8 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			return null;
 		}
 
-		// Which exact variants you own separately must stay distinct while sorting (see reorgId). Rebuilt
-		// each frame so it tracks the live template and bank.
-		exactShared = sharedExactIds(template);
+		// Which exact variants you own separately must stay distinct while sorting (see reorgId).
+		exactShared = cachedShared;
 
 		// Current tab's items in slot order, with widgets for bounds.
 		final List<Widget> widgets = new ArrayList<>();
@@ -214,7 +216,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		final int currentTab = client.getVarbitValue(VarbitID.BANK_CURRENTTAB);
 
 		// Where each item belongs: target tab + rank within that tab (among items you actually own).
-		final Set<Integer> owned = ownedItems();
+		final Set<Integer> owned = cachedOwned;
 		final Map<Integer, Integer> targetTab = new HashMap<>();
 		final Map<Integer, Integer> targetRank = new HashMap<>();
 		for (TabLayout tl : template.getTabs())
@@ -1228,6 +1230,43 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 	// Canonical ids present in BOTH the active template and your bank, rebuilt each frame. reorgId uses this
 	// to keep exact variants you own separately (an item and its ornamented version) distinct while sorting.
 	private Set<Integer> exactShared = java.util.Collections.emptySet();
+
+	// Per-frame set building was the overlay's biggest cost. Both sets below walk the WHOLE bank (up to
+	// ~1,900 slots) and, for the shared set, every slot of the template too - canonicalizing each one and
+	// boxing every id. At ~50fps with a large bank and a 1,200-item template that ran into six figures of
+	// canonicalize calls and allocations PER SECOND, purely to rebuild two sets that only change when the
+	// bank or the template does.
+	//
+	// Invalidated explicitly on a bank change (the plugin forwards it) and whenever the active template
+	// object changes, with a short TTL as a backstop so an edit arriving by a route nothing hooks - a
+	// website sync rewriting the active template in place, say - can never leave the guidance stale for
+	// more than a blink.
+	private static final long SET_CACHE_TTL_MS = 500;
+	private Set<Integer> cachedOwned;
+	private Set<Integer> cachedShared;
+	private BankTemplate cachedFor;
+	private long cachedAt;
+
+	/** Drop the cached bank-derived sets; the next frame rebuilds them. */
+	void invalidateBankCache()
+	{
+		cachedOwned = null;
+		cachedShared = null;
+	}
+
+	// The two sets for this frame, rebuilt only when something they depend on moved.
+	private void ensureSets(BankTemplate template)
+	{
+		final long now = System.currentTimeMillis();
+		if (cachedShared != null && cachedOwned != null && cachedFor == template && now - cachedAt < SET_CACHE_TTL_MS)
+		{
+			return;
+		}
+		cachedShared = sharedExactIds(template);
+		cachedOwned = ownedItems();
+		cachedFor = template;
+		cachedAt = now;
+	}
 
 	/**
 	 * A stable id for matching a template item to a bank item. Canonicalises placeholders to the real item,

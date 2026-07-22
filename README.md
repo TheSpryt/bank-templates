@@ -5,7 +5,7 @@
 **Save, apply, and share bank layouts. Your real bank is never touched.**
 
 [![Plugin Hub installs](https://img.shields.io/endpoint?url=https://api.runelite.net/pluginhub/shields/installs/plugin/bank-templates&label=installs&color=brightgreen)](https://runelite.net/plugin-hub/show/bank-templates)
-[![Version](https://img.shields.io/badge/version-1.5.4-blue)](https://github.com/TheSpryt/bank-templates/releases)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue)](https://github.com/TheSpryt/bank-templates/releases)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-orange)](LICENSE)
 [![RuneLite](https://img.shields.io/badge/RuneLite-Plugin%20Hub-yellow)](https://runelite.net/plugin-hub)
 
@@ -21,6 +21,11 @@ Jagex's third-party client rules. You can snapshot your current bank as a templa
 the community's, build layouts for items you don't even own yet, and get guided help reorganising your
 *real* bank to match.
 
+> **Free forever.** Every feature this plugin has now - and everything we keep adding to it - stays
+> free, with no ads and nothing paywalled. [Exchange Insights](https://exchange-insights.gg) membership
+> is a separate, optional thing for going further on the website (bank-value tracking and more);
+> linking an account is opt-in and never changes the free plugin.
+
 ## ✨ Highlights
 
 - 📸 **Capture your bank** into a reusable, shareable template in one click.
@@ -30,6 +35,9 @@ the community's, build layouts for items you don't even own yet, and get guided 
   coding, on-item labels, or step-by-step prompts (mix and match).
 - 🌍 **Community repository** to browse, preview, import, and share templates (opt-in).
 - 🔢 **"x / y items" counts** on every card so you can see, at a glance, how much of a template you own.
+- 🖼️ **Profile cards** showing each template's tab icons, its uploader, and its import and report counts.
+- 🔄 **Two-way website sync** for anyone who links an [Exchange Insights](https://exchange-insights.gg)
+  account (opt-in): templates you make in game appear on the site and vice versa.
 
 ---
 
@@ -56,10 +64,11 @@ the community's, build layouts for items you don't even own yet, and get guided 
 - **"x / y items" counts** - each card shows how many of a template's items you currently own out of the
   total (variant-aware). The count is cached per account, so it shows from your last visit even before
   you open the bank, then updates live as your bank changes.
-- **Enable / Disable per template** - toggle a template on or off straight from its card; the
-  **Disable Template** button at the top clears the active one and shows your normal bank.
-- **Preview windows** - **View** opens an interactive mini-bank beside the client (so the game stays
-  clickable), with tab buttons and item names on hover, sized consistently whatever the description.
+- **Click a card to apply it** - clicking anywhere on a template's card (except its icon buttons)
+  applies it, and clicking the applied one again turns it off. The active template's card is ringed
+  in red.
+- **Preview windows** - an interactive mini-bank opens beside the client, so the game stays clickable,
+  with tab buttons and item names on hover. In Browse, clicking a card previews it.
 - **Plays nicely with other plugins** - items are positioned by identity (each keeps its own bank slot),
   so plugins like Inventory Setups that highlight or withdraw by slot still target the right items. When
   a Bank Tags tag tab or a search is open, the plugin steps aside and lets that view render normally.
@@ -87,8 +96,12 @@ as the same item, so the helper won't flag a slot just because you hold a differ
 ### Community repository (optional, opt-in)
 
 - **Browse and search** - search matches template names *and* RuneScape names. Sort by **Most imported**,
-  **Newest**, **Popular (30 days)**, or **Items owned** (how much of each you already have). Browse cards
-  also show the "x / y items" count.
+  **Newest**, **Popular (30 days)**, or **Items owned** (how much of each you already have). *My
+  templates* has its own search and sorting (**Recently updated**, **Name (A-Z)**, **Most items**).
+  Both lists page, with the pager at each end so it sits where you left it.
+- **Profile cards** - each card shows the uploader's name and avatar, the template's tab icons, its
+  import and report counts, and how many of its items you own. Clicking an avatar opens that player's
+  Exchange Insights profile in your browser.
 - **Preview and import** - preview any template, then import a copy to *My templates*.
 - **Share** - upload your template with an optional description (up to 500 characters), credited to your
   RuneScape name or shared **anonymously**.
@@ -116,18 +129,19 @@ Open the **Bank Templates** side panel from the RuneLite toolbar.
 
 ### Capture and apply
 
-1. Arrange your bank, then click **Capture current bank** (at the top of the tab) and give it a name. It
-   appears under **My templates** showing "x / y items · M tabs".
-2. Click **Enable** on a template to apply it. Open the bank and switch tabs; each tab shows its own
-   layout. Items you don't own appear faded; 🚫 marks reserved slots. Click **Disable** to switch it off.
-3. Click **View** to preview a template in a mini-bank window beside the client; hover an item for its
-   name.
-4. **Del** removes a template (for ones you've shared, it offers to remove it from the repository too).
+1. Arrange your bank, then click the green **+** card at the top of *My templates* and choose **Capture
+   current bank**. Name it, and it appears in the list showing "x / y items · M tabs".
+2. Click a template's card to apply it. Open the bank and switch tabs; each tab shows its own layout.
+   Items you don't own appear faded; 🚫 marks reserved slots. Click the applied card again to switch it
+   off.
+3. The icon buttons along the bottom of a card handle everything else: 🔍 previews a preset, ✏️ opens
+   your own layout to edit, ⬆ shares it, 🌐 opens it on the website, and ✕ deletes it (for a template
+   you've shared, it offers to remove the shared copy too).
 
 ### Build and edit layouts
 
-You don't need to own an item to put it in a layout. **Capture current bank** or **New empty template**
-(both at the top of the tab), then click **Edit** on a template:
+You don't need to own an item to put it in a layout. Click the **+** card and pick **Capture current
+bank** or **New empty template**, then click ✏️ on the template:
 
 - An editor window opens beside the client, and the template renders **editably over your bank** with a
   green **+** button after the last slot. (Editing doesn't activate the template.)
@@ -143,10 +157,10 @@ You don't need to own an item to put it in a layout. **Capture current bank** or
 
 ### Reorganise helper
 
-Select a template, then pick a mode from the **Reorganise** dropdown at the bottom of *My templates*
-(**Off**, **Colour-coded**, **Labels**, **Step-by-step**, or any combination). The plugin shows your
-real bank instead of the virtual layout and guides you through the moves. Set it back to **Off** to
-return to the virtual layout.
+Select a template, then open the **Reorganise** card pinned at the bottom of the panel and pick a mode
+(**Off**, **Colour-coded**, **Labels**, **Step-by-step**, or any combination). The card collapses to a
+single row when you're done with it. The plugin shows your real bank instead of the virtual layout and
+guides you through the moves. Set it back to **Off** to return to the virtual layout.
 
 ### Community repository
 
@@ -169,9 +183,11 @@ it in settings. Then browse, sort, preview, import, share, and report as above.
 | Target highlight | cyan | Reorganise-helper destination-slot highlight colour |
 | Reorganise tab colours | palette | Per-tab colours used by the colour-coding mode (main + tabs 1-9) |
 | Enable community repository | off | Opt-in; browse/share (sends your IP to the repo server) |
+| Account token | empty | Links this character to an Exchange Insights account. The panel's link button sets it for you |
+| Sync bank value | on | For linked characters only: send bank contents for bank-value tracking on the website |
 
 The **Reorganise** mode (Off / Colour-coded / Labels / Step-by-step and combinations) is chosen in the
-side panel, under *My templates*, not in settings.
+side panel, in the card pinned at the bottom, not in settings.
 
 ---
 
@@ -184,8 +200,14 @@ attribute ownership and enforce limits. Sharing sends your RuneScape name to cre
 **Share anonymously** and other players see **"Anonymous"** instead (your name is still stored privately
 on the server for moderation). Nothing is sent while the feature is disabled.
 
-The "x / y items" counts are computed entirely on your own machine. Your bank contents are never sent
-anywhere, including for the **Items owned** sort.
+The "x / y items" counts are computed on your own machine from your open bank, and nothing is sent for
+the **Items owned** sort. Signed out of the game, a linked account falls back to the bank snapshot the
+website already holds for it (see below), so the counts still show; without a linked account the card
+just shows the template's total. For characters **linked to an Exchange Insights account** (and only those), the
+plugin also sends a snapshot of your bank's contents - item IDs and quantities only, no placement or
+notes - to power bank-value tracking on the website. This can be turned off any time with **Sync bank
+value** in settings; turning it off (or unlinking) stops new snapshots, and deleting your Exchange
+Insights account removes the stored data. Unlinked characters never send bank contents anywhere.
 
 ---
 

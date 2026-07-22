@@ -53,6 +53,12 @@ public class TemplateManager
 
 	private BankTemplate active;
 
+	// Notified after a genuine user change to the templates (save/delete/rename) so the panel can push it to
+	// the website. Not fired for sync-driven writes: those run with suppressChangeEvents set, so mirroring
+	// the website back down can never trigger another sync in a loop.
+	private Runnable changeListener;
+	private boolean suppressChangeEvents;
+
 	@Inject
 	TemplateManager(Gson gson, ConfigManager configManager, ScheduledExecutorService executor)
 	{
@@ -66,6 +72,26 @@ public class TemplateManager
 		loadPresets();
 		loadUserTemplates();
 		resolveActiveFromConfig();
+	}
+
+	/** Sets the listener notified after a genuine user change (save/delete/rename), for duplex sync. */
+	void setChangeListener(Runnable listener)
+	{
+		this.changeListener = listener;
+	}
+
+	/** While true, sync-driven writes don't notify the change listener (so mirroring can't loop). */
+	void setSuppressChangeEvents(boolean suppress)
+	{
+		this.suppressChangeEvents = suppress;
+	}
+
+	private void fireChanged()
+	{
+		if (!suppressChangeEvents && changeListener != null)
+		{
+			changeListener.run();
+		}
 	}
 
 	private void loadPresets()
@@ -125,7 +151,10 @@ public class TemplateManager
 		try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8))
 		{
 			final BankTemplate t = gson.fromJson(reader, BankTemplate.class);
-			if (t != null && t.getName() != null && !t.getTabs().isEmpty())
+			// A blank name can't be created any more (saveUserTemplate rejects it), but older builds could
+			// persist one, leaving an unusable nameless "ghost" card. Skip those - the name is this file's
+			// storage key, so a blank-named file is unreachable anyway.
+			if (t != null && t.getName() != null && !t.getName().trim().isEmpty() && !t.getTabs().isEmpty())
 			{
 				t.setPreset(false);
 				t.pruneTrailingEmptyTabs();
@@ -205,10 +234,25 @@ public class TemplateManager
 	}
 
 	/**
-	 * Saves a user template (creating or overwriting by name) and writes it to disk asynchronously.
-	 * Returns false if the name collides with a preset.
+	 * Saves a user template as a genuine edit: stamps {@code updatedAt} to now (so duplex sync knows this
+	 * side changed more recently) and writes it to disk. Returns false if the name collides with a preset.
 	 */
 	public boolean saveUserTemplate(BankTemplate template)
+	{
+		return saveUserTemplate(template, true);
+	}
+
+	/**
+	 * Saves a template written by duplex sync from the authoritative website copy, WITHOUT bumping
+	 * {@code updatedAt} - the caller has already set it to the server's value, and touching it would make
+	 * the copy look freshly edited in-game and push it straight back up.
+	 */
+	public boolean saveSyncedTemplate(BankTemplate template)
+	{
+		return saveUserTemplate(template, false);
+	}
+
+	private boolean saveUserTemplate(BankTemplate template, boolean markEdited)
 	{
 		if (template == null || template.getName() == null || template.getName().trim().isEmpty())
 		{
@@ -228,8 +272,16 @@ public class TemplateManager
 			}
 		}
 
+		if (markEdited)
+		{
+			template.setUpdatedAt(System.currentTimeMillis());
+		}
 		userTemplates.put(name, template);
 		writeAsync(template);
+		if (markEdited)
+		{
+			fireChanged();
+		}
 		return true;
 	}
 
@@ -277,6 +329,12 @@ public class TemplateManager
 		userTemplates.remove(oldName);
 		template.setName(trimmed);
 		userTemplates.put(trimmed, template);
+		// A user rename is a genuine edit, so it wins last-write-wins and pushes up; a sync-driven rename
+		// (suppressed) keeps the server's timestamp so it doesn't bounce straight back.
+		if (!suppressChangeEvents)
+		{
+			template.setUpdatedAt(System.currentTimeMillis());
+		}
 
 		// Write the new file first, then drop the old one - but only if it's a different file (a rename that
 		// only changes case or punctuation can map to the same safe file name, which we must not delete).
@@ -292,6 +350,7 @@ public class TemplateManager
 		{
 			configManager.setConfiguration(BankTemplatesConfig.GROUP, BankTemplatesConfig.ACTIVE_TEMPLATE_KEY, trimmed);
 		}
+		fireChanged();
 		return true;
 	}
 
@@ -308,6 +367,7 @@ public class TemplateManager
 			setActive(null);
 		}
 		deleteAsync(template.getName());
+		fireChanged();
 	}
 
 	private void writeAsync(BankTemplate template)

@@ -1,5 +1,70 @@
 [
   {
+    "version": "2.0.0",
+    "notes": [
+      "My Templates and Browse now show the same profile-styled cards. A template you imported and haven't changed keeps the original owner's name, icon and card; edit it and it becomes yours. Everything about an Exchange Insights account stays opt-in - without one your cards simply show the default styling.",
+      "Capture and New are now a single green '+' card at the top of My Templates, which asks whether to start from your current bank or from an empty layout. Capturing from your bank is only offered when there's a bank to capture. A new template is scrolled into view when it's created, paging there if it landed on another page.",
+      "Click anywhere on a card to apply it (or to preview it, in Browse); the icon buttons keep their own actions. The applied template is ringed in red.",
+      "The avatar on a card is now a button: it opens that player's Exchange Insights profile in your browser. Cards show import and report counts, and how many of the template's items you already own - the item counts now work while logged out too, from your last synced bank.",
+      "Pagination sits at the top and the bottom of both lists, so paging never means scrolling to find the control or to see where you landed.",
+      "Sorting and searching for both tabs, a link out to the same list on the website, and a scrollbar that's always visible.",
+      "Visual pass: the RuneScape font throughout, rounded corners on the inputs, gold dropdown arrows and tab labels, hover feedback on every card and icon, and icons in place of the old buttons.",
+      "Virtual tabs from an active template will now continue to render whilst using a bank tag tab or the Quest Helper plugin's bank tab, etc."
+    ]
+  },
+  {
+    "version": "1.6.6",
+    "notes": [
+      "Bank view: withdrawing items quickly no longer rearranges your template. Dragging to rearrange now only kicks in once the game itself starts a drag, so it follows the client's drag delay and the Anti Drag plugin's settings. Previously a quick withdraw click that slid a few pixels counted as a drag, which could move the item to another slot or send it to the end of the tab, quietly shuffling your layout. Thanks for the report and video!"
+    ]
+  },
+  {
+    "version": "1.6.5",
+    "notes": [
+      "The 'Your current bank value' line now stays fresh on its own: each background sync brings back the latest stored value from Exchange Insights, so price changes and valuation improvements (like untradables that can become tradable now counting toward your total) show up in the panel without needing a bank change.",
+      "The website button at the bottom of the panel now reads 'Browse on Exchange Insights'."
+    ]
+  },
+  {
+    "version": "1.6.4",
+    "notes": [
+      "Already linked through the Exchange Insights plugin? Bank Templates now picks that up automatically: if you haven't set a token here, the one configured in the Exchange Insights plugin on this client is used, so your account link and verified bank sync just work with zero setup. Your own Bank Templates token still wins if you set one, nothing is copied or stored twice, and clearing or revoking the token in either plugin takes effect in both immediately. Everything stays on your machine - the plugins never fetch a token from anywhere.",
+      "The account link status is now a single button below the search box, colored by status: red 'Link Exchange Insights account' when unlinked, green '✓ Account linked' when linked - and clicking it toggles. Unlinking asks for confirmation, stops new bank snapshots and template sync for that character (stored data stays until you delete your Exchange Insights account), and is remembered, so the automatic linking above never silently relinks a character you chose to unlink. Linking again is one click: instant when a token is already set up, via the browser approval otherwise.",
+      "The bank value line under that button now reads 'Your current bank value: ...' and only shows while linked.",
+      "My Templates now updates dynamically from the website while the side panel is open: import or edit a template on exchange-insights.gg and it appears in-game within seconds (opening the panel also refreshes immediately). With the panel closed the usual background sync continues as before.",
+      "Bank value sync now handles placeholder slots properly: they used to slip into snapshots as phantom items with unusable internal ids, showing up as blank slots in the website's bank view. Placeholders are now sent as the real item with a quantity of 0, and the website draws them exactly like the bank does - the item's icon, faded, with a 0 stack count. Your next bank change after updating refreshes the stored snapshot automatically."
+    ]
+  },
+  {
+    "version": "1.6.3",
+    "notes": [
+      "Bank value sync: characters linked to a (free) Exchange Insights account now send a snapshot of the bank's contents (item IDs and quantities only - no placement, notes or anything else) to exchange-insights.gg when it changes, powering bank-value tracking on the website. Nothing is ever sent for unlinked characters. Turn it off any time with 'Sync bank value' in the Exchange Insights account settings section - that stops new snapshots, and deleting your Exchange Insights account removes the stored data.",
+      "Once a linked character's bank has synced, the side panel shows your bank's live GE value at the top - bank-value tracking over time is coming to the website.",
+      "Bank Templates is free forever: every feature the plugin has stays free, with no ads and nothing paywalled. An Exchange Insights account is a separate, optional extra and never changes the free plugin."
+    ]
+  },
+  {
+    "version": "1.6.2",
+    "notes": [
+      "My templates now syncs both ways with your Exchange Insights website templates. Templates you import or make in-game show up in your website My Templates, and ones you create or edit on the website appear in-game - edit on either side and both stay in step (most recent edit wins), delete on either side and it's removed from both.",
+      "You can now link this character to your free Exchange Insights account straight from Bank Templates. Click 'Link Exchange Insights account' at the top of the side panel (or tick 'Link account in browser' in settings) to approve it in your browser in one click - no token to copy - or paste an account token instead (get one at exchange-insights.gg, Account -> RuneLite plugin). The panel shows your link status once connected. No separate plugin needed; if you use the Exchange Insights plugin too, either linking method works alongside it.",
+      "Fixed website-synced templates that could show up without a name, or linger as stale duplicates after being renamed or deleted on the website (nameless cards left behind by an earlier version are now cleaned up automatically)."
+    ]
+  },
+  {
+    "version": "1.6.1",
+    "notes": [
+      "Community templates now have a 'Web' button next to View/Import/Report that opens that exact template on exchange-insights.gg in your browser. Templates you've shared or imported carry the same button in My templates."
+    ]
+  },
+  {
+    "version": "1.6.0",
+    "notes": [
+      "We've partnered with Exchange Insights (exchange-insights.gg) to power customising your bank templates in the browser, away from the client! Head to exchange-insights.gg to browse the whole community repository and, when signed in, build and edit your own templates right on the web - there's a new 'Browse on web' button in the Browse panel. In the plugin, browsing, sharing and importing work exactly as before, nothing you need to do.",
+      "Templates you share can now show your Exchange Insights profile on the website (your icon, background and badge) if you've linked that account to Exchange Insights. It's entirely optional - nothing is shared for anonymous uploads, and you don't need an Exchange Insights account to use the plugin."
+    ]
+  },
+  {
     "version": "1.5.6",
     "notes": [
       "Preview: you can now import a template's Main (all-items) view, not just its numbered tabs - select the Main tab in a preview and click 'Import this tab'. Importing into an existing template replaces that template's main view (you're asked to confirm first when it already holds items); importing into a new template makes it that template's main view. As with numbered tabs, any item it brings in that already sits in another tab is moved into the main view.",
