@@ -57,6 +57,27 @@ public class BankTemplate
 	// back down, which would otherwise ping-pong the template between the two sides.
 	private long updatedAt;
 
+	// The ORIGINAL uploader's captured public profile, stored when this template was imported from the
+	// community Browse list, so its card can show the owner's name/avatar/theme even though the local
+	// template model carries no live server profile. Cleared once the user edits the template (it then
+	// becomes their own). Null for self-made templates and presets.
+	private OwnerProfile ownerProfile;
+
+	// Popularity of this template's SHARED community copy (owned templates that were shared): how many
+	// players imported it, and how many reported it. Null until the server reports them via sync, so the
+	// card can grey the stat icons out until real numbers exist.
+	private Integer shareDownloads;
+	private Integer shareReports;
+
+	/** A snapshot of the uploader's public profile, captured at import time for the profile card. */
+	public static class OwnerProfile
+	{
+		public String name;            // display name (or author), for the "by …" line
+		public String handle;          // @handle, when known
+		public String bg;              // profile_bg theme key (null → the neutral default card)
+		public Integer avatarItemId;   // item whose icon is the avatar (null → initial letter)
+	}
+
 	public BankTemplate()
 	{
 	}
@@ -79,6 +100,36 @@ public class BankTemplate
 	public void setOwned(boolean owned)
 	{
 		this.owned = owned;
+	}
+
+	public OwnerProfile getOwnerProfile()
+	{
+		return ownerProfile;
+	}
+
+	public void setOwnerProfile(OwnerProfile ownerProfile)
+	{
+		this.ownerProfile = ownerProfile;
+	}
+
+	public Integer getShareDownloads()
+	{
+		return shareDownloads;
+	}
+
+	public void setShareDownloads(Integer shareDownloads)
+	{
+		this.shareDownloads = shareDownloads;
+	}
+
+	public Integer getShareReports()
+	{
+		return shareReports;
+	}
+
+	public void setShareReports(Integer shareReports)
+	{
+		this.shareReports = shareReports;
 	}
 
 	public boolean isSharedAnonymously()

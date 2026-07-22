@@ -143,6 +143,22 @@ public class TemplateRepositoryClient
 		}
 	}
 
+	// Present the account token (our own config value, or one borrowed live from the Exchange Insights
+	// plugin) on the requests the server RATCHETS: identity attribution (share / update / claim), private
+	// template reads and duplex-sync writes. Once an account holds any active plugin token, the server
+	// stops honouring a tokenless request for that account - it silently stores NO attribution, which is
+	// why a shared template would keep its raw character name instead of picking up the linked Exchange
+	// Insights profile (name, avatar, card theme). Harmless when there's no token: nothing is sent and the
+	// legacy tokenless behaviour applies.
+	private void addAuth(Request.Builder builder)
+	{
+		final String token = effectiveToken();
+		if (token != null && !token.trim().isEmpty())
+		{
+			builder.header("Authorization", "Bearer " + token.trim());
+		}
+	}
+
 	// Signs a write request: X-BT-TS = now, X-BT-Sig = HMAC-SHA256(SIG_KEY, "<ts>.<body>"). Obfuscation
 	// only (see SIG_KEY); the Worker enforces it only when REQUIRE_SIG is enabled.
 	private void addSig(Request.Builder builder, String body)
@@ -249,6 +265,7 @@ public class TemplateRepositoryClient
 			.url(baseUrl() + "/api/bank-templates/templates")
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
+		addAuth(rb);
 		send(rb.build(), body ->
 		{
 			final JsonObject o = gson.fromJson(body, JsonObject.class);
@@ -264,6 +281,7 @@ public class TemplateRepositoryClient
 			.url(baseUrl() + "/api/bank-templates/templates/" + repoId)
 			.put(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
+		addAuth(rb);
 		send(rb.build(), body -> onSuccess.run(), onError);
 	}
 
@@ -279,9 +297,13 @@ public class TemplateRepositoryClient
 			ub.addQueryParameter("accountHash", accountHashRaw);
 		}
 		final HttpUrl url = ub.build();
+		final Request.Builder rb = new Request.Builder().url(url).delete();
+		// Logged out there's no clientId to prove ownership with; the token identifies the account, and the
+		// server matches it against the template's stored (server-side) account attribution.
+		addAuth(rb);
 		// A 404 means the template is already gone from the server, which is exactly what delete wants -
 		// treat it as success so the local copy can be cleaned up too.
-		sendAllowingNotFound(new Request.Builder().url(url).delete().build(), body -> onSuccess.run(), onError);
+		sendAllowingNotFound(rb.build(), body -> onSuccess.run(), onError);
 	}
 
 	// Records an import server-side, deduped to one per account per template. {@code onDone} (if any)
@@ -344,6 +366,7 @@ public class TemplateRepositoryClient
 			.url(baseUrl() + "/api/bank-templates/templates/" + repoId + "/report")
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
+		addAuth(rb);
 		send(rb.build(), b -> onSuccess.run(), onError);
 	}
 
@@ -395,6 +418,7 @@ public class TemplateRepositoryClient
 			.url(baseUrl() + "/api/bank-templates/for-account")
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
+		addAuth(rb);
 		okHttpClient.newCall(rb.build()).enqueue(new Callback()
 		{
 			@Override
@@ -432,14 +456,23 @@ public class TemplateRepositoryClient
 	// linked=false when the character isn't linked to an Exchange Insights account. No-op when logged out.
 	void sync(List<BankTemplate> local, Consumer<SyncResult> onDone)
 	{
-		if (!isEnabled() || accountHashRaw == null || !hasIdentity())
+		// An account token is enough on its own: templates belong to the Exchange Insights ACCOUNT, and the
+		// token proves which one. Only the hash-authenticated path needs a logged-in character, so without a
+		// token we still require one - but with a token, syncing works at the login screen.
+		final boolean haveToken = effectiveToken() != null;
+		if (!isEnabled() || (!haveToken && (accountHashRaw == null || !hasIdentity())))
 		{
 			onDone.accept(null);
 			return;
 		}
 		final JsonObject body = new JsonObject();
 		body.addProperty("clientId", clientId());
-		body.addProperty("accountHash", accountHashRaw);
+		if (accountHashRaw != null)
+		{
+			// Sent when a character IS logged in, so the server can stamp new rows with it; omitted at the
+			// login screen, where the token alone identifies the account.
+			body.addProperty("accountHash", accountHashRaw);
+		}
 		final JsonArray arr = new JsonArray();
 		for (BankTemplate t : local)
 		{
@@ -467,6 +500,7 @@ public class TemplateRepositoryClient
 			.url(baseUrl() + "/api/bank-templates/sync")
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
+		addAuth(rb);
 		okHttpClient.newCall(rb.build()).enqueue(new Callback()
 		{
 			@Override
@@ -509,7 +543,16 @@ public class TemplateRepositoryClient
 		// The character's current bank value (gp at GE mids, revalued daily server-side), so the panel's
 		// value line stays fresh on the sync heartbeat instead of waiting for the next bank change.
 		Long bankValue;
+		// The linked account's OWN public profile. The plugin has no other source for its own identity, so
+		// this is what lets a My Templates card show your display name, avatar and card theme instead of the
+		// defaulted placeholder. Null when the character isn't linked.
+		RemoteTemplate.Profile profile;
 		List<WebTemplate> templates;
+		// Client keys of pushed templates the server REFUSED because the website has deleted them. The
+		// removal pass in the panel can only drop a local copy that carries a web id, and a template
+		// refused this way never got one - so without this list the deletion never reaches the plugin and
+		// the two sides stay permanently out of step.
+		List<String> deleted;
 	}
 
 	// One website "My Templates" row as returned by /sync. Mirrors the JSON the Worker sends.
@@ -1022,6 +1065,65 @@ public class TemplateRepositoryClient
 		Boolean retry;
 	}
 
+	/** The linked account's own identity + last stored bank, fetched with the ACCOUNT TOKEN only. */
+	static class Me
+	{
+		RemoteTemplate.Profile profile;
+		Snapshot snapshot;
+
+		static class Snapshot
+		{
+			int itemCount;
+			long updatedAt;
+			// [id, qty, tab] triples in bank order (only present when requested with items=1).
+			List<int[]> items;
+		}
+	}
+
+	// Fetches the linked account's own profile (and whether a bank snapshot exists) using just the account
+	// token - NO account hash, so unlike sync this works while the player is logged OUT of the game. That's
+	// what lets the panel style your own cards, and offer a capture from the last stored bank, at the login
+	// screen. onDone gets null when there's no token or the request fails.
+	void fetchMe(boolean withItems, Consumer<Me> onDone)
+	{
+		final String token = effectiveToken();
+		if (!isEnabled() || token == null)
+		{
+			onDone.accept(null);
+			return;
+		}
+		final Request.Builder rb = new Request.Builder()
+			.url(baseUrl() + "/api/bank-templates/me" + (withItems ? "?items=1" : ""))
+			.get();
+		addAuth(rb);
+		okHttpClient.newCall(rb.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				onDone.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					if (!r.isSuccessful() || r.body() == null)
+					{
+						onDone.accept(null);
+						return;
+					}
+					onDone.accept(gson.fromJson(r.body().string(), Me.class));
+				}
+				catch (IOException | JsonSyntaxException e)
+				{
+					onDone.accept(null);
+				}
+			}
+		});
+	}
+
 	// Best-effort backfill: link this account's already-shared templates to its Exchange Insights profile
 	// (for templates uploaded before the accountHash field existed). The server verifies accountHash
 	// against clientId, so this only ever stamps the caller's own uploads. No-op when logged out.
@@ -1039,6 +1141,7 @@ public class TemplateRepositoryClient
 			.url(baseUrl() + "/api/bank-templates/claim")
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
+		addAuth(rb);
 		okHttpClient.newCall(rb.build()).enqueue(new Callback()
 		{
 			@Override
