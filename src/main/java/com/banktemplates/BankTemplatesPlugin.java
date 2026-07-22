@@ -150,9 +150,15 @@ public class BankTemplatesPlugin extends Plugin
 		{
 			requestBankRebuild();
 			panel.rebuild();
+			reorgHelperOverlay.invalidateBankCache(); // an edited layout changes what the guidance should say
 		};
 		layoutEditor.addListener(layoutListener);
 		panel.rebuild();
+		// Start the duplex sync now rather than waiting for a login: with an account token the sync no
+		// longer needs a character, so a client sitting at the login screen still pushes anything made
+		// offline and pulls website-side changes down. A no-op without a token - the pass bails and the
+		// loop idles until the login kick below arms it.
+		panel.syncWebTemplates();
 
 		final BufferedImage icon = ImageUtil.loadImageResource(BankTemplatesPlugin.class, "/com/banktemplates/icon.png");
 		navButton = NavigationButton.builder()
@@ -285,6 +291,9 @@ public class BankTemplatesPlugin extends Plugin
 		if (event.getContainerId() == InventoryID.BANK)
 		{
 			panel.refreshOwnedCanon();
+			// The reorg overlay derives two sets from the bank's contents and caches them rather than
+			// rebuilding them every frame; this is the signal that they're stale.
+			reorgHelperOverlay.invalidateBankCache();
 			scheduleBankSnapshot(BANK_SNAPSHOT_DEBOUNCE_MS);
 		}
 	}

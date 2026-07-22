@@ -13,19 +13,24 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GridBagLayout;
+import java.awt.GridLayout;
 import java.awt.Image;
+import java.awt.Insets;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.Window;
 import java.awt.geom.Ellipse2D;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.event.HierarchyEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -43,19 +48,24 @@ import javax.inject.Singleton;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.JComboBox;
+import javax.swing.JList;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JViewport;
 import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 import javax.swing.border.Border;
+import javax.swing.plaf.basic.BasicComboBoxUI;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.Item;
@@ -68,7 +78,9 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemVariationMapping;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
+import java.awt.image.BufferedImage;
 import net.runelite.client.util.AsyncBufferedImage;
+import net.runelite.client.util.ImageUtil;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.util.LinkBrowser;
 
@@ -90,6 +102,9 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private static final String[] SORT_LABELS = {"Most imported", "Newest", "Popular (30 days)", "Items owned"};
 	private static final String[] SORT_KEYS = {"imported", "newest", "popular", "closest"};
+	// My Templates sorting (local only - these never hit the server).
+	private static final String[] LOCAL_SORT_LABELS = {"Recently updated", "Name (A-Z)", "Most items"};
+	private static final String[] LOCAL_SORT_KEYS = {"updated", "name", "items"};
 	// Client-only sort: the server can't rank by your bank (and we don't send it your items), so results are
 	// fetched in this base order and re-sorted locally by how much of each template you already own.
 	private static final String CLOSEST_SORT = "closest";
@@ -119,6 +134,19 @@ public class BankTemplatesPanel extends PluginPanel
 	private final JButton localTab = new JButton("My Templates");
 	private final JButton browseTab = new JButton("Browse");
 	private final JButton updatesTab = new JButton("Updates");
+	// Pinned to the panel bottom (above the Updates button), OUTSIDE the scroll: the Reorganise card in
+	// My Templates mode, empty otherwise. Populated by buildLocalView, cleared on every rebuild.
+	private final JPanel reorgSlot = new JPanel(new BorderLayout());
+	// Reorganise card: collapsed to its title row by default so it costs one line of the panel, expanded on
+	// click. Session state - it isn't worth a config entry.
+	private boolean reorgExpanded;
+	// Pinned under the search box, OUTSIDE the scroll, so the sort/open-on-web controls stay put and only
+	// the cards scroll. Filled per mode on every rebuild (empty in Updates).
+	private final JPanel controlsSlot = new JPanel(new BorderLayout());
+	// Local (client-side) paging offset for My Templates.
+	private int localOffset = 0;
+	// Name of a just-created template to page to and scroll into view on the next rebuild, then forget.
+	private String revealName;
 
 	// The newest bundled patch notes (this build's version + notes), or null if none.
 	private final Changelog.Entry latestUpdate;
@@ -130,6 +158,16 @@ public class BankTemplatesPanel extends PluginPanel
 	// on the client thread (reading client state isn't EDT-safe), or loaded from the per-account cache until the
 	// live bank has loaded; null when neither is available yet.
 	private volatile Set<Integer> ownedCanon;
+	// Owned-items set built from the last stored bank snapshot, used when the live bank isn't readable
+	// (logged out, or before the bank has been opened this session). Null until /me answers with items.
+	private volatile Set<Integer> ownedSnapshot;
+
+	// The set to count "x / y items" against: the live bank first, else the stored snapshot. Null when we
+	// have neither - no linked account, no opt-in, or no snapshot yet - and the cards then just show "y items".
+	private Set<Integer> ownedForCounts()
+	{
+		return ownedCanon != null ? ownedCanon : ownedSnapshot;
+	}
 	// The account ownedCanon belongs to, so it's discarded (and reloaded) when the player switches accounts.
 	private volatile long ownedAccountHash = -1;
 
@@ -145,6 +183,15 @@ public class BankTemplatesPanel extends PluginPanel
 	// shutdown. All touched only on the EDT except linking (read from the poll thread).
 	private volatile boolean linking;
 	private String linkedHandle;
+	// The linked Exchange Insights account's own public profile, supplied by the duplex sync. Drives the
+	// styling of YOUR OWN My Templates cards (display name, avatar, card theme). Null until a sync answers,
+	// or whenever the character isn't linked - linking is opt-in, so the cards fall back to a fully
+	// defaulted look rather than requiring an account.
+	private RemoteTemplate.Profile selfProfile;
+	// The last bank snapshot Exchange Insights holds for this account (null when there is none). Lets the
+	// "New template" dialog still offer a capture while the player is logged out, sourced from that bank.
+	private TemplateRepositoryClient.Me.Snapshot selfSnapshot;
+	private long lastMeAttempt;
 	private ScheduledFuture<?> linkPollTask;
 	// Total time we'll wait for the browser approval before giving up (the server code lives ~10 minutes).
 	private static final long LINK_WINDOW_MS = 10 * 60 * 1_000L;
@@ -167,6 +214,7 @@ public class BankTemplatesPanel extends PluginPanel
 	private final List<RemoteTemplate> browseResults = new ArrayList<>();
 	private String browseStatus;
 	private String browseSort = "imported";
+	private String localSort = "updated";
 	private int browseOffset = 0;
 	private boolean browseHasMore = false;
 	// Total templates matching the current browse filter (from the server), for the count + pager labels.
@@ -227,24 +275,33 @@ public class BankTemplatesPanel extends PluginPanel
 		// The scrollable content (everything except the fixed bottom Updates bar) lives in the centre.
 		listContainer.setLayout(new BoxLayout(listContainer, BoxLayout.Y_AXIS));
 		listContainer.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		// Vertical bar ALWAYS shown: the list is the panel's main surface, so a bar that appears and
+		// disappears shifts the card widths as you move between tabs.
 		final JScrollPane scroll = new JScrollPane(listContainer,
-			JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+			JScrollPane.VERTICAL_SCROLLBAR_ALWAYS, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 		scroll.setBorder(BorderFactory.createEmptyBorder());
 		scroll.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
 		ThinScrollBarUI.style(scroll);
 		add(scroll, BorderLayout.CENTER);
 
-		// Updates is pinned to the very bottom of the panel, shared by every tab (only when there's one).
+		// The panel bottom, shared by every tab and OUTSIDE the scroll: the Reorganise card (My Templates
+		// mode only, filled by buildLocalView) pinned above the Updates button (shown only when there's one).
+		final JPanel south = new JPanel();
+		south.setLayout(new BoxLayout(south, BoxLayout.Y_AXIS));
+		south.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		south.setBorder(BorderFactory.createEmptyBorder(8, 0, 0, 0));
+		reorgSlot.setOpaque(false);
+		reorgSlot.setAlignmentX(Component.LEFT_ALIGNMENT);
+		south.add(reorgSlot);
 		if (updatesTabShown())
 		{
 			updatesTab.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-			final JPanel south = new JPanel(new BorderLayout());
-			south.setBackground(ColorScheme.DARK_GRAY_COLOR);
-			south.setBorder(BorderFactory.createEmptyBorder(8, 0, 0, 0));
-			south.add(updatesTab, BorderLayout.CENTER);
-			add(south, BorderLayout.SOUTH);
+			updatesTab.setAlignmentX(Component.LEFT_ALIGNMENT);
+			south.add(Box.createVerticalStrut(8));
+			south.add(updatesTab);
 		}
+		add(south, BorderLayout.SOUTH);
 
 		// If a token is already stored (from a previous session or the Exchange Insights plugin), resolve the
 		// linked handle so the top-of-panel status can show "linked as …" straight away.
@@ -264,6 +321,15 @@ public class BankTemplatesPanel extends PluginPanel
 		header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
 		header.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		header.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+
+		// Account link/unlink status pinned at the very top, above the tabs. Populated by
+		// refreshAccountRow().
+		accountRow.setLayout(new BoxLayout(accountRow, BoxLayout.Y_AXIS));
+		accountRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		accountRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		header.add(accountRow);
+		refreshAccountRow();
+		header.add(Box.createVerticalStrut(8));
 
 		tabsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		tabsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -316,13 +382,13 @@ public class BankTemplatesPanel extends PluginPanel
 		searchBar.setVisible(!UPDATES.equals(mode));
 		header.add(searchBar);
 
-		// Account link/unlink button + bank value line, directly below the search box. Populated by
-		// refreshAccountRow().
-		accountRow.setLayout(new BoxLayout(accountRow, BoxLayout.Y_AXIS));
-		accountRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		accountRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-		header.add(accountRow);
-		refreshAccountRow();
+		// Sort + open-on-web live here rather than in the scrolling list, so they stay put while the cards
+		// scroll under them. Filled per mode by the view builders.
+		controlsSlot.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		controlsSlot.setAlignmentX(Component.LEFT_ALIGNMENT);
+		controlsSlot.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+		header.add(Box.createVerticalStrut(6));
+		header.add(controlsSlot);
 
 		return header;
 	}
@@ -350,15 +416,6 @@ public class BankTemplatesPanel extends PluginPanel
 		return repositoryClient.effectiveToken() != null;
 	}
 
-	private JLabel statusLabel(String text, Color color)
-	{
-		final JLabel l = new JLabel(text);
-		l.setForeground(color);
-		l.setFont(FontManager.getRunescapeSmallFont());
-		l.setAlignmentX(Component.LEFT_ALIGNMENT);
-		return l;
-	}
-
 	// (Re)draw the link/unlink button below the search box for the current state. One button, colored
 	// by status - green when linked (click unlinks), red when not (click links) - with the bank value
 	// line underneath when linked. Only shown when the community repository is enabled (all third-party
@@ -373,22 +430,20 @@ public class BankTemplatesPanel extends PluginPanel
 			if (linking)
 			{
 				// The browser hint only applies to the device flow; with a token the link is direct.
-				btn = styledButton(repositoryClient.effectiveToken() != null ? "Linking…" : "Linking… approve it in your browser");
+				btn = accountButton(repositoryClient.effectiveToken() != null ? "Linking…" : "Linking… approve it in your browser",
+					new Color(96, 74, 30));
 				btn.setEnabled(false);
-				btn.setBackground(new Color(96, 74, 30));
 			}
 			else if (isLinkedForDisplay())
 			{
 				final String who = linkedHandle != null && !linkedHandle.isEmpty() ? " as " + linkedHandle : "";
-				btn = styledButton("✓ Account linked · Unlink");
-				btn.setBackground(new Color(35, 78, 42));
+				btn = accountButton("✓ Account linked · Unlink", new Color(35, 78, 42));
 				btn.setToolTipText("Linked" + who + ". Click to unlink this character from your Exchange Insights account.");
 				btn.addActionListener(e -> startUnlink());
 			}
 			else
 			{
-				btn = styledButton("Link Exchange Insights account");
-				btn.setBackground(new Color(94, 44, 44));
+				btn = accountButton("Link Exchange Insights account", new Color(94, 44, 44));
 				btn.setToolTipText(repositoryClient.effectiveToken() != null
 					? "Links this character to your Exchange Insights account using your existing token."
 					: "One-click: opens exchange-insights.gg to approve linking this character - no token to copy.");
@@ -397,18 +452,34 @@ public class BankTemplatesPanel extends PluginPanel
 			btn.setAlignmentX(Component.LEFT_ALIGNMENT);
 			btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 			accountRow.add(btn);
-			if (!linking && isLinkedForDisplay() && bankValue >= 0)
-			{
-				// Free teaser from the opt-in bank-value sync: the ingest response reports the bank's live
-				// GE value, and the website tracks it over time.
-				final JLabel bv = statusLabel("Your current bank value: " + fmtGp(bankValue) + " gp", ColorScheme.LIGHT_GRAY_COLOR);
-				bv.setToolTipText("Your bank at live GE mid prices, updated as it changes. Track it over time at exchange-insights.gg.");
-				accountRow.add(Box.createVerticalStrut(4));
-				accountRow.add(bv);
-			}
 		}
 		accountRow.revalidate();
 		accountRow.repaint();
+	}
+
+	// The account link/unlink control: a filled status button carrying the panel's rounded corners and bold
+	// font, so it reads as part of the same family as the cards and inputs rather than a plain Swing block.
+	private static JButton accountButton(String text, Color bg)
+	{
+		final JButton b = new JButton(text)
+		{
+			@Override
+			protected void paintComponent(Graphics g)
+			{
+				RoundedBorder.fill(g, this, getBackground());
+				super.paintComponent(g);
+			}
+		};
+		b.setFont(FontManager.getRunescapeBoldFont());
+		b.setHorizontalAlignment(SwingConstants.CENTER);
+		b.setForeground(Color.WHITE);
+		b.setBackground(bg);
+		b.setContentAreaFilled(false);
+		b.setOpaque(false);
+		b.setFocusPainted(false);
+		b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		b.setBorder(new RoundedBorder(bg.brighter(), new Insets(5, 10, 5, 10)));
+		return b;
 	}
 
 	// Confirm, then unlink the logged-in character from the Exchange Insights account server-side and
@@ -687,26 +758,59 @@ public class BankTemplatesPanel extends PluginPanel
 		refreshAccountRow();
 	}
 
-	// Compact gp formatting for the panel (214.3M, 1.20B, 53,120), matching how players talk about gp.
-	private static String fmtGp(long gp)
-	{
-		if (gp >= 1_000_000_000L)
-		{
-			return String.format(Locale.ROOT, "%.2fB", gp / 1_000_000_000.0);
-		}
-		if (gp >= 10_000_000L)
-		{
-			return String.format(Locale.ROOT, "%.1fM", gp / 1_000_000.0);
-		}
-		if (gp >= 1_000_000L)
-		{
-			return String.format(Locale.ROOT, "%.2fM", gp / 1_000_000.0);
-		}
-		return String.format(Locale.ROOT, "%,d", gp);
-	}
-
 	// Fetch the linked Exchange Insights handle for the status row, when a token is set. Best-effort: a
 	// failure (offline, revoked) just leaves the row without a name.
+	// Fetch the account's OWN profile and last stored bank (token only, so it works logged out). Retried
+	// rather than fired once at construction: a single attempt is lost to any transient failure - a cold
+	// start before the network is up, or a server that hasn't answered yet - and the cards would then sit on
+	// the defaulted look for the whole session. Backs off to at most one attempt per 30s, and stops asking
+	// once it has an answer.
+	private void maybeFetchMe()
+	{
+		final long now = System.currentTimeMillis();
+		if (!repositoryClient.isEnabled() || !hasEiToken() || selfProfile != null
+			|| now - lastMeAttempt < 30_000L)
+		{
+			return;
+		}
+		lastMeAttempt = now;
+		repositoryClient.fetchMe(false, me -> SwingUtilities.invokeLater(() ->
+		{
+			if (me == null)
+			{
+				return;
+			}
+			if (me.profile != null)
+			{
+				selfProfile = me.profile;
+			}
+			selfSnapshot = me.snapshot;
+			rebuildOnEdt();
+			// Pull the snapshot's item ids too, so "x / y items" still means something with no live bank.
+			if (me.snapshot != null && ownedSnapshot == null)
+			{
+				repositoryClient.fetchMe(true, full -> SwingUtilities.invokeLater(() ->
+				{
+					final List<int[]> items = full != null && full.snapshot != null ? full.snapshot.items : null;
+					if (items == null || items.isEmpty())
+					{
+						return;
+					}
+					final Set<Integer> owned = new HashSet<>();
+					for (int[] it : items)
+					{
+						if (it != null && it.length >= 1 && it[0] > 0)
+						{
+							owned.add(it[0]);
+						}
+					}
+					ownedSnapshot = owned;
+					rebuildOnEdt();
+				}));
+			}
+		}));
+	}
+
 	void refreshLinkStatus()
 	{
 		// All third-party server contact stays behind the community-repository opt-in - including this
@@ -715,6 +819,7 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			return;
 		}
+		maybeFetchMe();
 		repositoryClient.pingLink(repositoryClient.effectiveToken(),
 			handle -> SwingUtilities.invokeLater(() ->
 			{
@@ -751,36 +856,40 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private void styleTabs()
 	{
-		localTab.setBackground(LOCAL.equals(mode) ? ColorScheme.BRAND_ORANGE : ColorScheme.DARKER_GRAY_COLOR);
-		localTab.setForeground(LOCAL.equals(mode) ? Color.BLACK : Color.WHITE);
-		browseTab.setBackground(BROWSE.equals(mode) ? ColorScheme.BRAND_ORANGE : ColorScheme.DARKER_GRAY_COLOR);
-		browseTab.setForeground(BROWSE.equals(mode) ? Color.BLACK : Color.WHITE);
+		styleTab(localTab, LOCAL.equals(mode));
+		styleTab(browseTab, BROWSE.equals(mode));
+		// Updates stays an ordinary pinned button at the panel bottom, not part of the tab strip.
 		updatesTab.setBackground(UPDATES.equals(mode) ? ColorScheme.BRAND_ORANGE : ColorScheme.DARKER_GRAY_COLOR);
 		updatesTab.setForeground(UPDATES.equals(mode) ? Color.BLACK : Color.WHITE);
 	}
 
-	// Each tab on its own full-width row, so the labels never truncate. Updates lives at the bottom of the
-	// panel (see the constructor), not in this top row.
+	// A flat tab control rather than a filled button: the selected tab is white over an orange underline,
+	// the rest are grey over a faint rule, so the two share one continuous baseline.
+	private static void styleTab(JButton tab, boolean active)
+	{
+		tab.setContentAreaFilled(false);
+		tab.setOpaque(false);
+		tab.setFocusPainted(false);
+		tab.setFocusable(false); // keep the caret in the search box when switching tabs
+		tab.setForeground(active ? ICON_GOLD : ColorScheme.LIGHT_GRAY_COLOR);
+		tab.setFont(active ? FontManager.getRunescapeBoldFont() : FontManager.getRunescapeFont());
+		tab.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		tab.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 0, 2, 0, active ? ColorScheme.BRAND_ORANGE : ColorScheme.MEDIUM_GRAY_COLOR),
+			BorderFactory.createEmptyBorder(4, 6, 4, 6)));
+	}
+
+	// The tabs sit side by side on one strip. Updates lives at the bottom of the panel (see the
+	// constructor), not in this top row.
 	private void layoutTabs()
 	{
 		tabsPanel.removeAll();
-		tabsPanel.setLayout(new BoxLayout(tabsPanel, BoxLayout.Y_AXIS));
-
-		addTabRow(localTab, false);
-		addTabRow(browseTab, true);
+		tabsPanel.setLayout(new GridLayout(1, 2, 0, 0));
+		tabsPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		tabsPanel.add(localTab);
+		tabsPanel.add(browseTab);
 		tabsPanel.revalidate();
 		tabsPanel.repaint();
-	}
-
-	private void addTabRow(JButton tab, boolean gapAbove)
-	{
-		if (gapAbove)
-		{
-			tabsPanel.add(Box.createVerticalStrut(4));
-		}
-		tab.setAlignmentX(Component.LEFT_ALIGNMENT);
-		tab.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-		tabsPanel.add(tab);
 	}
 
 	private boolean updatesTabShown()
@@ -817,9 +926,33 @@ public class BankTemplatesPanel extends PluginPanel
 		});
 	}
 
+	// True when this panel's own window is the active one, so a modal editor/dialog elsewhere keeps focus.
+	private boolean ownWindowActive()
+	{
+		final Window w = SwingUtilities.getWindowAncestor(this);
+		return w != null && w.isActive();
+	}
+
+	private void restoreSearchFocus()
+	{
+		if (UPDATES.equals(mode) || !searchBar.isVisible() || !ownWindowActive())
+		{
+			return;
+		}
+		SwingUtilities.invokeLater(() ->
+		{
+			if (searchBar.isVisible() && ownWindowActive())
+			{
+				searchBar.requestFocusInWindow();
+			}
+		});
+	}
+
 	private void rebuildOnEdt()
 	{
 		listContainer.removeAll();
+		reorgSlot.removeAll();   // refilled by buildLocalView only in My Templates mode
+		controlsSlot.removeAll();
 		if (BROWSE.equals(mode))
 		{
 			buildBrowseView();
@@ -834,6 +967,14 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		listContainer.revalidate();
 		listContainer.repaint();
+		// Put the caret back in the search box after a rebuild, so clicking a card, an icon or a tab doesn't
+		// silently stop your typing. Skipped whenever another WINDOW holds focus - the template editor and
+		// the dialogs need their own fields to keep it.
+		restoreSearchFocus();
+		reorgSlot.revalidate();
+		reorgSlot.repaint();
+		controlsSlot.revalidate();
+		controlsSlot.repaint();
 		// Keep the top-of-panel link status in step with the latest sync result (webSyncLinked) and the
 		// repository-enabled state, both of which can change between rebuilds.
 		refreshAccountRow();
@@ -856,7 +997,7 @@ public class BankTemplatesPanel extends PluginPanel
 		listContainer.add(heading);
 		listContainer.add(Box.createVerticalStrut(8));
 
-		// Full update history, newest first, each version separated by a divider.
+		// Full update history, newest first, each version a collapsible block (the latest expanded).
 		boolean first = true;
 		for (Changelog.Entry entry : allUpdates)
 		{
@@ -868,21 +1009,29 @@ public class BankTemplatesPanel extends PluginPanel
 			{
 				addUpdatesDivider();
 			}
+			renderUpdateVersion(entry, first);
 			first = false;
-			renderUpdateVersion(entry);
 		}
 	}
 
-	private void renderUpdateVersion(Changelog.Entry entry)
+	// Caret + version, rendered so the triangle uses a font that has it.
+	private static String versionHeaderText(String version, boolean expanded)
 	{
-		final JLabel version = new JLabel("Version " + entry.version);
-		version.setFont(FontManager.getRunescapeBoldFont());
-		version.setForeground(ColorScheme.BRAND_ORANGE);
-		version.setAlignmentX(Component.LEFT_ALIGNMENT);
-		version.setBorder(BorderFactory.createEmptyBorder(2, 0, 8, 0));
-		listContainer.add(version);
+		return "<html><span style='font-family:Dialog'>" + (expanded ? "▾" : "▸") + "</span> Version " + version + "</html>";
+	}
 
-		// Known issues directly under the version.
+	private void renderUpdateVersion(Changelog.Entry entry, boolean expanded)
+	{
+		// The version's notes live in a content panel the header shows/hides; no "Changelog" label -
+		// under a collapsible version, the notes ARE the changelog.
+		final JPanel content = new JPanel();
+		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+		content.setOpaque(false);
+		content.setAlignmentX(Component.LEFT_ALIGNMENT);
+		content.setBorder(BorderFactory.createEmptyBorder(6, 0, 0, 0));
+		content.setVisible(expanded);
+
+		// Known issues first, then the changelog notes.
 		if (entry.knownIssues != null && !entry.knownIssues.isEmpty())
 		{
 			final JLabel kiHeading = new JLabel("Known issues");
@@ -890,28 +1039,42 @@ public class BankTemplatesPanel extends PluginPanel
 			kiHeading.setForeground(ColorScheme.PROGRESS_ERROR_COLOR);
 			kiHeading.setAlignmentX(Component.LEFT_ALIGNMENT);
 			kiHeading.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
-			listContainer.add(kiHeading);
+			content.add(kiHeading);
 			for (String issue : entry.knownIssues)
 			{
-				listContainer.add(bulletLabel(issue, ColorScheme.LIGHT_GRAY_COLOR));
+				content.add(bulletLabel(issue, ColorScheme.LIGHT_GRAY_COLOR));
 			}
-			listContainer.add(Box.createVerticalStrut(8));
+			content.add(Box.createVerticalStrut(8));
 		}
-
-		// Changelog.
 		if (entry.notes != null && !entry.notes.isEmpty())
 		{
-			final JLabel clHeading = new JLabel("Changelog");
-			clHeading.setFont(FontManager.getRunescapeBoldFont());
-			clHeading.setForeground(Color.WHITE);
-			clHeading.setAlignmentX(Component.LEFT_ALIGNMENT);
-			clHeading.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
-			listContainer.add(clHeading);
 			for (String note : entry.notes)
 			{
-				listContainer.add(bulletLabel(note, Color.WHITE));
+				content.add(bulletLabel(note, Color.WHITE));
 			}
 		}
+
+		// Clickable version header: toggles its content, latest expanded by default.
+		final JLabel version = new JLabel(versionHeaderText(entry.version, expanded));
+		version.setFont(FontManager.getRunescapeBoldFont());
+		version.setForeground(ColorScheme.BRAND_ORANGE);
+		version.setAlignmentX(Component.LEFT_ALIGNMENT);
+		version.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+		version.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		version.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				content.setVisible(!content.isVisible());
+				version.setText(versionHeaderText(entry.version, content.isVisible()));
+				listContainer.revalidate();
+				listContainer.repaint();
+			}
+		});
+
+		listContainer.add(version);
+		listContainer.add(content);
 	}
 
 	// A thin horizontal divider between version blocks in the Updates history.
@@ -945,48 +1108,15 @@ public class BankTemplatesPanel extends PluginPanel
 	private void buildLocalView()
 	{
 		refreshOwnedCanon();
-		if (query.isEmpty())
-		{
-			// Capture / new-template actions sit at the top, directly under the search bar.
-			final JButton captureButton = styledButton("Capture current bank");
-			captureButton.setHorizontalAlignment(SwingConstants.CENTER);
-			captureButton.setAlignmentX(Component.LEFT_ALIGNMENT);
-			captureButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-			captureButton.setToolTipText("Save your current bank (all tabs, in order) as a new template");
-			captureButton.addActionListener(e -> captureCurrentBank());
-			listContainer.add(captureButton);
-
-			listContainer.add(Box.createVerticalStrut(4));
-			final JButton newButton = styledButton("New empty template");
-			newButton.setHorizontalAlignment(SwingConstants.CENTER);
-			newButton.setAlignmentX(Component.LEFT_ALIGNMENT);
-			newButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-			newButton.setToolTipText("Build a template from scratch - add items you don't own as placeholders");
-			newButton.addActionListener(e -> createNewLayout());
-			listContainer.add(newButton);
-			listContainer.add(Box.createVerticalStrut(8));
-
-			final boolean hasActive = templateManager.getActive() != null;
-			final JButton remove = styledButton(hasActive ? "Disable Template" : "No template applied");
-			remove.setEnabled(hasActive);
-			remove.setAlignmentX(Component.LEFT_ALIGNMENT);
-			remove.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
-			remove.setToolTipText("Disable the active template and show your normal bank");
-			if (hasActive)
-			{
-				remove.setBackground(new Color(120, 60, 60));
-			}
-			remove.addActionListener(e -> select(null));
-			listContainer.add(remove);
-			listContainer.add(Box.createVerticalStrut(10));
-		}
-
+		// Self-heal the profile/bank fetch if the first attempt (at construction) failed.
+		maybeFetchMe();
+		// A template is applied by clicking its card (the applied one has a red glow); creating one is the "+"
+		// card at the end of the list.
 		addLocalSection("Presets", templateManager.getPresets());
-		final List<BankTemplate> userTemplates = templateManager.getUserTemplates();
-		if (!userTemplates.isEmpty())
-		{
-			addLocalSection("My templates", userTemplates);
-		}
+		// Sort + open-on-web controls, pinned in the header alongside Browse's (no section heading - the
+		// cards speak for themselves).
+		controlsSlot.add(buildLocalControlsRow(), BorderLayout.CENTER);
+		addLocalMyTemplates(templateManager.getUserTemplates());
 
 		// Explain why My templates isn't syncing with the website, when we know the character isn't linked.
 		if (Boolean.FALSE.equals(webSyncLinked) && repositoryClient.isEnabled())
@@ -1000,19 +1130,63 @@ public class BankTemplatesPanel extends PluginPanel
 
 		listContainer.add(Box.createVerticalStrut(8));
 
-		// Reorganise: the mode dropdown and a description of what the selected mode does, in one card.
-		final JPanel reorgCard = new JPanel();
+		// Reorganise: the mode dropdown and a description of what the selected mode does, styled as the same
+		// rounded card as the template cards. A live mode gives it the gilded (gold) theme; off is neutral.
+		final boolean reorgOn = config.showReorgHelper();
+		final ProfileCard reorgCard = profileCardPanel(reorgOn ? "gilded" : null);
 		reorgCard.setLayout(new BoxLayout(reorgCard, BoxLayout.Y_AXIS));
-		reorgCard.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		reorgCard.setAlignmentX(Component.LEFT_ALIGNMENT);
-		reorgCard.setBorder(reorgCardBorder(config.showReorgHelper()));
+		reorgCard.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+		// Header: the title, and a chevron marking which way the body will move. The card is pinned to the
+		// bottom of the panel, so it opens UPWARDS - collapsed points up ("this opens up"), expanded points
+		// down ("this closes back down").
+		final JPanel reorgHeader = new JPanel(new BorderLayout());
+		reorgHeader.setOpaque(false);
+		reorgHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+		reorgHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
 
 		final JLabel reorgLabel = new JLabel("Reorganise");
-		reorgLabel.setForeground(Color.WHITE);
-		reorgLabel.setToolTipText("Guide for rearranging your real bank to match the active template");
-		reorgLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-		reorgCard.add(reorgLabel);
-		reorgCard.add(Box.createVerticalStrut(4));
+		reorgLabel.setFont(CARD_NAME_FONT);
+		reorgLabel.setForeground(reorgOn ? ColorScheme.BRAND_ORANGE : Color.WHITE);
+		reorgHeader.add(reorgLabel, BorderLayout.WEST);
+
+		// Deliberately a plain JLabel, not one of the clickable icons: the whole card is the button, so a
+		// chevron with its own hover plate would wrongly suggest it's the only hit target.
+		final JLabel reorgChevron = new JLabel(PanelIcons.chevron(ColorScheme.BRAND_ORANGE, !reorgExpanded));
+		reorgHeader.add(reorgChevron, BorderLayout.EAST);
+		reorgCard.add(reorgHeader);
+
+		final String reorgTip = reorgExpanded
+			? "Hide the reorganise options"
+			: "Show the reorganise options - a guide for rearranging your real bank to match the active template";
+		reorgCard.setToolTipText(reorgTip);
+		reorgLabel.setToolTipText(reorgTip);
+		reorgChevron.setToolTipText(reorgTip);
+
+		// The card itself is the button (everything except the dropdown, which keeps its own behaviour).
+		final MouseAdapter reorgToggle = new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				reorgExpanded = !reorgExpanded;
+				rebuildOnEdt();
+			}
+		};
+		for (final JComponent c : new JComponent[]{reorgCard, reorgHeader, reorgLabel, reorgChevron})
+		{
+			c.addMouseListener(reorgToggle);
+			c.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		}
+
+		if (!reorgExpanded)
+		{
+			// Collapsed: header only. Pinned at the bottom as always, just a single row tall.
+			wireHover(reorgCard, reorgHeader, reorgLabel, reorgChevron);
+			reorgSlot.add(reorgCard, BorderLayout.CENTER);
+			return;
+		}
+		reorgCard.add(Box.createVerticalStrut(6));
 
 		final String off = "Off";
 		final JComboBox<String> reorgMode = new JComboBox<>();
@@ -1023,7 +1197,7 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		final String initialSel = config.showReorgHelper() ? config.reorgDisplay().toString() : off;
 		reorgMode.setSelectedItem(initialSel);
-		reorgMode.setFocusable(false);
+		styleCombo(reorgMode);
 		reorgMode.setAlignmentX(Component.LEFT_ALIGNMENT);
 		reorgMode.setMaximumSize(new Dimension(Integer.MAX_VALUE, reorgMode.getPreferredSize().height));
 		reorgCard.add(reorgMode);
@@ -1033,6 +1207,10 @@ public class BankTemplatesPanel extends PluginPanel
 		reorgDesc.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		reorgDesc.setFont(FontManager.getRunescapeSmallFont());
 		reorgDesc.setAlignmentX(Component.LEFT_ALIGNMENT);
+		reorgDesc.addMouseListener(reorgToggle);   // body text is part of the button, the dropdown is not
+		reorgDesc.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		// One call with every part, so the card's own hover listener is registered exactly once.
+		wireHover(reorgCard, reorgHeader, reorgLabel, reorgChevron, reorgDesc);
 		reorgCard.add(reorgDesc);
 
 		reorgMode.addActionListener(e ->
@@ -1051,25 +1229,15 @@ public class BankTemplatesPanel extends PluginPanel
 				}
 				configManager.setConfiguration(BankTemplatesConfig.GROUP, "showReorgHelper", true);
 			}
-			reorgCard.setBorder(reorgCardBorder(!off.equals(sel)));
-			reorgDesc.setText(reorgDescription(sel, off));
-			reorgCard.revalidate();
+			// Rebuild so the card re-renders in the right theme (gilded when a mode is live, neutral when off).
+			rebuildOnEdt();
 			onActiveChanged.run();
 		});
 
-		listContainer.add(reorgCard);
-		listContainer.add(Box.createVerticalGlue());
-	}
-
-	// Reorganise card border: the orange accent bar only when a mode is active; when off, a plain border with
-	// the same content inset (3px bar + 6px = 9px left) so nothing shifts as you toggle it on and off.
-	private static javax.swing.border.Border reorgCardBorder(boolean active)
-	{
-		return active
-			? BorderFactory.createCompoundBorder(
-				BorderFactory.createMatteBorder(0, 3, 0, 0, ColorScheme.BRAND_ORANGE),
-				BorderFactory.createEmptyBorder(6, 6, 6, 6))
-			: BorderFactory.createEmptyBorder(6, 9, 6, 6);
+		// The template list is top-aligned; the Reorganise card is pinned to the panel bottom (in reorgSlot,
+		// outside the scroll, above the Updates button) rather than trailing the list. No glue here - the
+		// list already has one before its bottom pager, and a second would halve the slack between them.
+		reorgSlot.add(reorgCard, BorderLayout.CENTER);
 	}
 
 	// HTML so the text wraps inside the reorganise card. Width is sized to the side panel.
@@ -1111,6 +1279,366 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 	}
 
+	// Your own templates in the chosen sort order, always ending with the "+" create card (so an empty list
+	// still offers a way to make the first one). The "+" card is hidden while searching - it isn't a result.
+	private void addLocalMyTemplates(List<BankTemplate> templates)
+	{
+		final List<BankTemplate> shown = new ArrayList<>();
+		for (BankTemplate t : sortedLocal(templates))
+		{
+			if (matchesQuery(t))
+			{
+				shown.add(t);
+			}
+		}
+		// Paged client-side, same page size and pager as Browse. Clamp the offset so deleting the last
+		// template on a page doesn't strand you past the end.
+		final int total = shown.size();
+		// A just-created template may sort onto any page, so jump to the one it actually landed on before
+		// deciding what to draw - otherwise "scroll to it" would have nothing to scroll to.
+		if (revealName != null)
+		{
+			for (int i = 0; i < total; i++)
+			{
+				if (revealName.equals(shown.get(i).getName()))
+				{
+					localOffset = (i / PAGE_SIZE) * PAGE_SIZE;
+					break;
+				}
+			}
+		}
+		if (localOffset >= total)
+		{
+			localOffset = Math.max(0, ((total - 1) / PAGE_SIZE) * PAGE_SIZE);
+		}
+
+		final int end = Math.min(localOffset + PAGE_SIZE, total);
+		// Same pager at both ends as Browse (see buildBrowseView). It sits ABOVE the create card, so the
+		// pager is the first thing in the list on every page and doesn't shift down when the create card
+		// appears (it's hidden while a search is active).
+		listContainer.add(paginationRow(localOffset, total, end < total, off ->
+		{
+			localOffset = off;
+			rebuildOnEdt();
+		}));
+		listContainer.add(Box.createVerticalStrut(6));
+		// The create card leads the templates themselves, so making a template never needs a scroll.
+		if (query.isEmpty())
+		{
+			listContainer.add(newTemplateCard());
+			listContainer.add(Box.createVerticalStrut(6));
+		}
+		JComponent reveal = null;
+		for (int i = localOffset; i < end; i++)
+		{
+			final BankTemplate t = shown.get(i);
+			final JPanel card = buildLocalCard(t);
+			if (revealName != null && revealName.equals(t.getName()))
+			{
+				reveal = card;
+			}
+			listContainer.add(card);
+			listContainer.add(Box.createVerticalStrut(6));
+		}
+		// Push the bottom pager to the bottom of the visible panel when the page doesn't fill it, so it
+		// stays where it was on the previous page instead of riding up under the last card. Absorbs
+		// nothing once the content is taller than the viewport (see ListPanel).
+		listContainer.add(Box.createVerticalGlue());
+		listContainer.add(paginationRow(localOffset, total, end < total, off ->
+		{
+			localOffset = off;
+			rebuildOnEdt();
+		}));
+
+		// Scroll the new card into view. The card has no bounds yet at this point, and revalidate() only
+		// QUEUES a layout, so read its position after forcing one - otherwise this scrolls to an empty rect
+		// and appears to do nothing. Scroll via the parent, whose coordinate space getBounds() is already in.
+		// Cleared either way, so it only fires for the rebuild that follows a creation.
+		final JComponent target = reveal;
+		revealName = null;
+		if (target != null)
+		{
+			SwingUtilities.invokeLater(() ->
+			{
+				listContainer.validate();
+				listContainer.scrollRectToVisible(target.getBounds());
+			});
+		}
+	}
+
+	// My Templates ordering, applied client-side (these never leave the plugin).
+	private List<BankTemplate> sortedLocal(List<BankTemplate> in)
+	{
+		final List<BankTemplate> list = new ArrayList<>(in);
+		if ("name".equals(localSort))
+		{
+			list.sort(Comparator.comparing(t -> t.getName() == null ? "" : t.getName().toLowerCase(Locale.ROOT)));
+		}
+		else if ("items".equals(localSort))
+		{
+			list.sort(Comparator.comparingInt(BankTemplate::itemCount).reversed());
+		}
+		else
+		{
+			list.sort(Comparator.comparingLong(BankTemplate::getUpdatedAt).reversed());
+		}
+		return list;
+	}
+
+	// Sort dropdown + the Exchange Insights logo that opens YOUR My Templates on the site.
+	private JPanel buildLocalControlsRow()
+	{
+		final JComboBox<String> sort = new JComboBox<>(LOCAL_SORT_LABELS);
+		styleCombo(sort);
+		sort.setSelectedIndex(localSortIndex());
+		sort.addActionListener(e ->
+		{
+			localSort = LOCAL_SORT_KEYS[sort.getSelectedIndex()];
+			rebuildOnEdt();
+		});
+
+		return controlsRow(sort, "Open your My Templates on exchange-insights.gg in your browser",
+			() -> LinkBrowser.browse("https://exchange-insights.gg/tools/osrs-bank-templates?view=mine"));
+	}
+
+	// The sort dropdown + the clickable Exchange Insights logo on one line. Both My Templates and Browse
+	// build their row here, so the dropdown is laid out identically (same width) in each.
+	private JPanel controlsRow(JComboBox<String> sort, String webTooltip, Runnable onWeb)
+	{
+		final IconLabel web = hoverPlate(new IconLabel(null));
+		web.setIcon(EI_ICON);
+		web.setToolTipText(webTooltip);
+		web.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 4));
+		web.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				onWeb.run();
+			}
+		});
+
+		final JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.add(sort, BorderLayout.CENTER);
+		row.add(web, BorderLayout.EAST);
+		return row;
+	}
+
+	private int localSortIndex()
+	{
+		for (int i = 0; i < LOCAL_SORT_KEYS.length; i++)
+		{
+			if (LOCAL_SORT_KEYS[i].equals(localSort))
+			{
+				return i;
+			}
+		}
+		return 0;
+	}
+
+	// A placeholder card with a big green "+": a single entry point for creating a template. Clicking it asks
+	// whether to start from the current bank or from an empty layout (the old Capture / New buttons).
+	private JComponent newTemplateCard()
+	{
+		// Hover state for the whole card. A one-element array because the panel below is anonymous and its
+		// listeners are installed from out here - matching the wash the template cards get from wireHover,
+		// rather than only brightening the glyph.
+		final boolean[] hot = {false};
+		final JPanel card = new JPanel(new GridBagLayout())
+		{
+			@Override
+			protected void paintComponent(Graphics g)
+			{
+				final Graphics2D g2 = (Graphics2D) g.create();
+				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				final int w = getWidth(), h = getHeight();
+				g2.setColor(ColorScheme.DARKER_GRAY_COLOR);
+				g2.fillRoundRect(0, 0, w - 1, h - 1, 10, 10);
+				if (hot[0])
+				{
+					// Same white wash the profile cards use, plus a solid green ring so the dashed
+					// "empty slot" outline reads as a live button under the cursor.
+					g2.setColor(new Color(255, 255, 255, 20));
+					g2.fillRoundRect(0, 0, w - 1, h - 1, 10, 10);
+				}
+				final int ringAlpha = hot[0] ? 220 : 120;
+				g2.setColor(new Color(UPVOTE_COLOR.getRed(), UPVOTE_COLOR.getGreen(), UPVOTE_COLOR.getBlue(), ringAlpha));
+				g2.setStroke(hot[0]
+					? new BasicStroke(1.4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+					: new BasicStroke(1.4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 0, new float[]{5f, 4f}, 0));
+				g2.drawRoundRect(1, 1, w - 3, h - 3, 10, 10);
+				g2.dispose();
+			}
+
+			@Override
+			public Dimension getMaximumSize()
+			{
+				return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+			}
+		};
+		card.setOpaque(false);
+		card.setAlignmentX(Component.LEFT_ALIGNMENT);
+		card.setBorder(BorderFactory.createEmptyBorder(12, 8, 12, 8));
+		card.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		card.setToolTipText("Create a new template");
+
+		final JLabel plus = new JLabel("+");
+		plus.setForeground(UPVOTE_COLOR);
+		plus.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 30));
+		card.add(plus);
+
+		card.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				promptNewTemplate();
+			}
+
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				plus.setForeground(UPVOTE_COLOR.brighter());
+				hot[0] = true;
+				card.repaint();
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				plus.setForeground(UPVOTE_COLOR);
+				// The glyph sits inside the card, so crossing onto it fires an exit on the card - only
+				// drop the wash once the pointer has genuinely left the card's bounds.
+				hot[0] = card.getMousePosition(true) != null;
+				card.repaint();
+			}
+		});
+		// The "+" fills most of the card, and a listener on the card alone never sees the pointer once it
+		// is over the glyph.
+		plus.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				promptNewTemplate();
+			}
+
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				plus.setForeground(UPVOTE_COLOR.brighter());
+				hot[0] = true;
+				card.repaint();
+			}
+		});
+		return card;
+	}
+
+	// Ask how to seed the new template: from the current bank, or from scratch. A small custom dialog so the
+	// choices stack VERTICALLY (JOptionPane lays its option buttons out in a row).
+	private void promptNewTemplate()
+	{
+		final Window owner = SwingUtilities.getWindowAncestor(this);
+		final JDialog dialog = new JDialog(owner, "New template");
+		dialog.setModal(true);
+
+		final JPanel content = new JPanel();
+		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+		content.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		content.setBorder(BorderFactory.createEmptyBorder(14, 14, 14, 14));
+
+		// Logged out there's no live bank to read. Exchange Insights may still hold a snapshot of it, so fall
+		// back to capturing from that; with neither, the capture option is dropped rather than shown broken.
+		final boolean liveBank = repositoryClient.hasIdentity();
+		final TemplateRepositoryClient.Me.Snapshot snap = selfSnapshot;
+		final boolean canCapture = liveBank || snap != null;
+
+		final String how = liveBank
+			? "your current bank (all tabs, in order)"
+			: "your last saved bank on Exchange Insights (" + (snap != null ? snap.itemCount : 0) + " items, "
+				+ (snap != null ? relativeTime(snap.updatedAt) : "") + ")";
+		final JLabel msg = new JLabel("<html><body style='width:230px'>Start the new template from "
+			+ (canCapture ? how + ", or from " : "")
+			+ "an empty layout you build up yourself (add items you don't own as placeholders)."
+			+ (canCapture ? "" : "<br><br>Log in to capture your current bank.")
+			+ "</body></html>");
+		msg.setFont(FontManager.getRunescapeFont());
+		msg.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		msg.setAlignmentX(Component.LEFT_ALIGNMENT);
+		content.add(msg);
+		content.add(Box.createVerticalStrut(12));
+
+		if (canCapture)
+		{
+			content.add(dialogChoice(liveBank ? "Capture current bank" : "Capture last saved bank",
+				ChoiceStyle.PRIMARY, dialog, liveBank ? this::captureCurrentBank : this::captureFromSnapshot));
+			content.add(Box.createVerticalStrut(6));
+		}
+		content.add(dialogChoice("New empty template", canCapture ? ChoiceStyle.NEUTRAL : ChoiceStyle.PRIMARY,
+			dialog, this::createNewLayout));
+		content.add(Box.createVerticalStrut(6));
+		content.add(dialogChoice("Cancel", ChoiceStyle.NEGATIVE, dialog, null));
+
+		dialog.setContentPane(content);
+		dialog.pack();
+		dialog.setLocationRelativeTo(owner);
+		dialog.setVisible(true);
+	}
+
+	/** How a dialog choice reads: the default action, an ordinary alternative, or a negative one (Cancel,
+	 *  and anything destructive) which is always RED. */
+	private enum ChoiceStyle
+	{
+		PRIMARY, NEUTRAL, NEGATIVE
+	}
+
+	// One full-width, stacked choice button in a panel-styled dialog: same rounded corners, fonts and
+	// colours as the side panel rather than the platform look-and-feel's grey blocks. PRIMARY is a filled
+	// orange default; NEUTRAL and NEGATIVE are outlined, NEGATIVE in red. Disposes the dialog, then runs the
+	// action (null = just close).
+	private JButton dialogChoice(String text, ChoiceStyle style, JDialog dialog, Runnable action)
+	{
+		final Color accent = style == ChoiceStyle.PRIMARY ? ColorScheme.BRAND_ORANGE
+			: style == ChoiceStyle.NEGATIVE ? DOWNVOTE_COLOR
+			: ColorScheme.LIGHT_GRAY_COLOR;
+		final Color fill = style == ChoiceStyle.PRIMARY ? ColorScheme.BRAND_ORANGE : null;
+
+		final JButton b = new JButton(text)
+		{
+			@Override
+			protected void paintComponent(Graphics g)
+			{
+				if (fill != null)
+				{
+					RoundedBorder.fill(g, this, fill);
+				}
+				super.paintComponent(g);
+			}
+		};
+		b.setFont(FontManager.getRunescapeFont());
+		b.setHorizontalAlignment(SwingConstants.CENTER);
+		b.setContentAreaFilled(false);
+		b.setOpaque(false);
+		b.setFocusPainted(false);
+		b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		b.setForeground(style == ChoiceStyle.PRIMARY ? Color.BLACK : accent);
+		b.setBorder(new RoundedBorder(accent, new Insets(6, 10, 6, 10)));
+		b.setAlignmentX(Component.LEFT_ALIGNMENT);
+		b.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+		b.addActionListener(e ->
+		{
+			dialog.dispose();
+			if (action != null)
+			{
+				action.run();
+			}
+		});
+		return b;
+	}
+
 	private boolean matchesQuery(BankTemplate t)
 	{
 		if (query.isEmpty())
@@ -1125,54 +1653,151 @@ public class BankTemplatesPanel extends PluginPanel
 	private JPanel buildLocalCard(BankTemplate template)
 	{
 		final boolean active = templateManager.isActive(template);
-		final JPanel card = cardPanel(active);
 
-		// Title in NORTH, buttons in SOUTH. NORTH always gets its full preferred height, so the name can't
-		// be squeezed out; SOUTH gives the button row the card's full width, so WrapLayout wraps correctly
-		// and every button (including Del on the second row) is shown. Putting the title in CENTER instead
-		// let a wrapping button row collapse the title's height to zero and hide the name after sync.
-		card.add(titleBlock(template.getName(), localMeta(template),
-			active ? ColorScheme.BRAND_ORANGE : Color.WHITE), BorderLayout.NORTH);
+		// A profile card matching the Browse cards. An imported-and-unedited template shows the ORIGINAL
+		// owner's captured profile; a self-made or edited (now-owned) template shows YOUR linked account's
+		// profile when the sync has supplied one, and otherwise a fully DEFAULTED card - linking an Exchange
+		// Insights account is opt-in, so nothing here requires one.
+		final BankTemplate.OwnerProfile owner = template.isOwned() ? null : template.getOwnerProfile();
+		final RemoteTemplate.Profile self = owner == null && !template.isPreset() ? selfProfile : null;
+		final String bgKey = owner != null ? owner.bg : self != null ? self.profileBg : null;
+		final Integer avatarItemId = owner != null ? owner.avatarItemId : self != null ? self.avatarItemId : null;
 
-		final JPanel buttons = buttonRow();
-		buttons.add(activeOrUse(active, template));
-		// One button does both: presets are read-only (View); your own templates open the editor (which
-		// previews and edits in one window).
+		final ProfileCard card = profileCardPanel(bgKey, active);
+		card.setLayout(new BorderLayout(8, 4));
+		card.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+		final JComponent avatar = avatarComponent(avatarItemId, bgKey);
+		// Resolved here rather than at the icon row below, because it also decides whether the avatar
+		// becomes the profile button or stays part of the clickable card body.
+		final String cardHandle = owner != null ? owner.handle : self != null ? self.handle : null;
+		final boolean avatarIsProfile = wireAvatarProfile(avatar, cardHandle);
+		card.add(avatar, BorderLayout.WEST);
+
+		final JPanel text = new JPanel();
+		text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
+		text.setOpaque(false);
+
+		final JLabel name = clampedLabel(template.getName(), CARD_NAME_FONT,
+			active ? ColorScheme.BRAND_ORANGE : Color.WHITE, CARD_NAME_MAX_WIDTH);
+		name.setAlignmentX(Component.LEFT_ALIGNMENT);
+		text.add(name);
+
+		final JLabel author = clampedLabel(localByline(template, owner, self), AUTHOR_FONT,
+			ColorScheme.LIGHT_GRAY_COLOR, CARD_AUTHOR_MAX_WIDTH);
+		author.setAlignmentX(Component.LEFT_ALIGNMENT);
+		text.add(author);
+
+		final JLabel meta = new JLabel(localMeta(template));
+		meta.setFont(FontManager.getRunescapeSmallFont());
+		meta.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		meta.setAlignmentX(Component.LEFT_ALIGNMENT);
+		text.add(meta);
+		card.add(text, BorderLayout.CENTER);
+
+		// Apply (or disable) the template by clicking anywhere on the card body - the icon buttons in the SOUTH
+		// row keep their own actions, so a click there doesn't also toggle the template.
+		final MouseAdapter applyClick = new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				select(active ? null : template);
+			}
+		};
+		card.setToolTipText(active ? "Applied - click to stop applying it" : "Click to apply this template to your bank");
+		final JComponent[] body = avatarIsProfile
+			? new JComponent[]{card, text, name, author, meta}
+			: new JComponent[]{card, avatar, text, name, author, meta};
+		for (final JComponent c : body)
+		{
+			c.addMouseListener(applyClick);
+			c.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		}
+		// The avatar still keeps the card's wash while hovered - it's part of the card, just not part of
+		// its click target.
+		wireHover(card, avatar, text, name, author, meta);
+
+		// Same spread-icon row as the Browse card, glue between each item.
+		final JPanel buttons = iconRow();
+		buttons.add(Box.createHorizontalGlue());
+		// Share stats for your OWN templates: how many imported it / reported it. Greyed out until the template
+		// has actually been shared to the community (nothing to count before then).
+		if (!template.isPreset() && template.isOwned())
+		{
+			final boolean shared = template.getRepoId() != null;
+			final Color dCol = shared ? UPVOTE_COLOR : STAT_MUTED;
+			final Color fCol = shared ? DOWNVOTE_COLOR : STAT_MUTED;
+			// Always show a number - a template with no imports/reports reads as 0, never as a bare icon.
+			final int dCount = template.getShareDownloads() != null ? template.getShareDownloads() : 0;
+			final int fCount = template.getShareReports() != null ? template.getShareReports() : 0;
+			buttons.add(statIcon(PanelIcons.download(dCol), dCount, dCol,
+				shared ? "Imports of your shared copy" : "Share this template to track imports"));
+			buttons.add(Box.createHorizontalGlue());
+			buttons.add(statIcon(PanelIcons.flag(fCol), fCount, fCol,
+				shared ? "Reports of your shared copy" : "Share this template to track reports"));
+			buttons.add(Box.createHorizontalGlue());
+		}
+		// A preset is read-only, so it gets the magnifier (preview). Your own templates open the editor, so
+		// they get the PENCIL - orange while the editor is open, to double as the finish toggle.
 		if (template.isPreset())
 		{
-			buttons.add(iconButton("View", "Preview this template", () -> showPreview(template)));
+			buttons.add(clickableIcon(PanelIcons.magnifier(ICON_GOLD), "Preview this template", () -> showPreview(template)));
 		}
 		else
 		{
 			final boolean editingThis = layoutEditor.isEditing(template);
-			buttons.add(iconButton(editingThis ? "Done" : "Edit",
+			buttons.add(clickableIcon(PanelIcons.pencil(editingThis ? ColorScheme.BRAND_ORANGE : ICON_GOLD),
 				editingThis ? "Finish editing this layout" : "View and edit this layout (add, move and arrange items - no need to own them)",
 				() -> editTemplate(template)));
 		}
-		if (!template.isPreset() && repositoryClient.isEnabled())
+		buttons.add(Box.createHorizontalGlue());
+		// First-time Share only (upload icon); updating an already-shared copy is done from the edit screen.
+		if (!template.isPreset() && repositoryClient.isEnabled() && !(template.isOwned() && template.getRepoId() != null))
 		{
-			final boolean update = template.isOwned() && template.getRepoId() != null;
-			buttons.add(iconButton(update ? "Update" : "Share",
-				update ? "Update your shared copy" : "Share to the community repository", () -> share(template)));
+			buttons.add(clickableIcon(PanelIcons.upload(ICON_GOLD), "Share to the community repository", () -> share(template)));
+			buttons.add(Box.createHorizontalGlue());
 		}
 		// Report only makes sense for templates you imported from someone else, not your own.
 		if (template.getRepoId() != null && !template.isOwned() && repositoryClient.isEnabled())
 		{
-			buttons.add(iconButton("Report", "Report the shared version of this template", () -> reportRepo(template.getRepoId())));
+			buttons.add(actionIcon("&#9873;", -1, DOWNVOTE_COLOR, "Report the shared version of this template", () -> reportRepo(template.getRepoId())));
+			buttons.add(Box.createHorizontalGlue());
 		}
 		// A shared, imported or web-synced template has a page on the site; link straight to it. Prefer your
 		// own website copy (webId) over the community source it was imported from.
 		final Long webLinkId = template.getWebId() != null ? template.getWebId() : template.getRepoId();
 		if (webLinkId != null)
 		{
-			buttons.add(iconButton("Web", "Open this template on exchange-insights.gg", () -> openOnWeb(webLinkId)));
+			buttons.add(clickableIcon(PanelIcons.globe(ICON_GOLD), "Open this template on exchange-insights.gg", () -> openOnWeb(webLinkId)));
+			buttons.add(Box.createHorizontalGlue());
 		}
 		if (!template.isPreset())
 		{
-			buttons.add(iconButton("Del", "Delete this template", () -> deleteLocal(template)));
+			buttons.add(clickableIcon(PanelIcons.xMark(DOWNVOTE_COLOR), "Delete this template", () -> deleteLocal(template)));
+			buttons.add(Box.createHorizontalGlue());
 		}
-		card.add(buttons, BorderLayout.SOUTH);
+		card.add(southStack(tabIconStrip(template.getTabs()), buttons), BorderLayout.SOUTH);
 		return card;
+	}
+
+	// The card's bottom half: the tab-icon strip (when there is one) above the action-icon row. The strip
+	// is what makes the card taller - a card for a template with no usable tab icons keeps its old height.
+	private static JComponent southStack(JComponent strip, JComponent buttons)
+	{
+		if (strip == null)
+		{
+			return buttons;
+		}
+		final JPanel south = new JPanel();
+		south.setLayout(new BoxLayout(south, BoxLayout.Y_AXIS));
+		south.setOpaque(false);
+		strip.setAlignmentX(Component.LEFT_ALIGNMENT);
+		buttons.setAlignmentX(Component.LEFT_ALIGNMENT);
+		south.add(strip);
+		south.add(Box.createVerticalStrut(4));
+		south.add(buttons);
+		return south;
 	}
 
 	// ---- Browse repository ------------------------------------------------------------------
@@ -1185,91 +1810,123 @@ public class BankTemplatesPanel extends PluginPanel
 			return;
 		}
 
-		listContainer.add(buildSortRow());
-		listContainer.add(Box.createVerticalStrut(6));
+		// Sort dropdown + the Browse-on-web button share one line, pinned in the header (not the list).
+		controlsSlot.add(buildBrowseControlsRow(), BorderLayout.CENTER);
 
 		if (browseStatus != null)
 		{
-			listContainer.add(buildBrowseOnWebRow());
-			listContainer.add(Box.createVerticalStrut(6));
 			listContainer.add(messageLabel(browseStatus));
 			return;
 		}
 
-		// Sort -> count -> the web button, then the cards: the button sits with the list it
-		// mirrors, and carries the selected sort so the web page opens matching this view.
-		final JLabel count = new JLabel("Count: " + browseTotal);
-		count.setFont(FontManager.getRunescapeSmallFont());
-		count.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		count.setAlignmentX(Component.LEFT_ALIGNMENT);
-		listContainer.add(count);
-		listContainer.add(Box.createVerticalStrut(6));
-		listContainer.add(buildBrowseOnWebRow());
-		listContainer.add(Box.createVerticalStrut(6));
-
 		// Re-sort the fetched page by how much of each template you own (most-owned first). Done here so it
 		// always reflects the latest bank contents, even on a plain rebuild.
-		if (CLOSEST_SORT.equals(browseSort) && ownedCanon != null)
+		if (CLOSEST_SORT.equals(browseSort) && ownedForCounts() != null)
 		{
 			browseResults.sort((a, b) -> Double.compare(ownershipScore(b), ownershipScore(a)));
 		}
 
+		// A pager at BOTH ends: a full page is longer than the panel, so paging from the bottom used to
+		// mean scrolling back up to see what you landed on, and paging from the top meant scrolling down
+		// to find the control. Each call builds its own row - Swing components have a single parent.
+		listContainer.add(buildPaginationRow());
+		listContainer.add(Box.createVerticalStrut(6));
 		for (RemoteTemplate rt : browseResults)
 		{
 			listContainer.add(buildRemoteCard(rt));
 			listContainer.add(Box.createVerticalStrut(6));
 		}
-
+		listContainer.add(Box.createVerticalGlue()); // bottom pager sits at the bottom of the panel
 		listContainer.add(buildPaginationRow());
 	}
 
-	private JPanel buildBrowseOnWebRow()
+	// One line: the sort dropdown (fills) + the Browse-on-web button. No "Sort" label.
+	private JPanel buildBrowseControlsRow()
 	{
-		final JButton web = new JButton("Browse on Exchange Insights");
-		web.setFocusPainted(false);
-		web.setToolTipText("Open the community bank templates on exchange-insights.gg in your browser, sorted like this list");
-		// Carry the panel's sort so the web list opens matching this one. 'Items owned' is
-		// ranked locally against your bank (the site can't see it), so it sends its server
-		// base order instead - the site treats that as Most imported.
-		web.addActionListener(e -> LinkBrowser.browse(
-			"https://exchange-insights.gg/tools/osrs-bank-templates?sort="
-				+ (CLOSEST_SORT.equals(browseSort) ? "imported" : browseSort)));
-
-		final JPanel row = new JPanel(new BorderLayout());
-		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-		row.add(web, BorderLayout.CENTER);
-		return row;
-	}
-
-	// Open a single template's page on the site (?t=<repoId> deep-links straight to it).
-	private void openOnWeb(long repoId)
-	{
-		LinkBrowser.browse("https://exchange-insights.gg/tools/osrs-bank-templates?t=" + repoId);
-	}
-
-	private JPanel buildSortRow()
-	{
-		final JPanel row = new JPanel(new BorderLayout(6, 0));
-		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-		final JLabel label = new JLabel("Sort");
-		label.setFont(FontManager.getRunescapeSmallFont());
-		label.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		row.add(label, BorderLayout.WEST);
-
 		final JComboBox<String> sort = new JComboBox<>(SORT_LABELS);
+		styleCombo(sort);
 		sort.setSelectedIndex(sortIndex());
 		sort.addActionListener(e ->
 		{
 			browseSort = SORT_KEYS[sort.getSelectedIndex()];
 			newSearch();
 		});
-		row.add(sort, BorderLayout.CENTER);
-		return row;
+
+		// The Exchange Insights logo, clickable, opens the web browse page (carrying the panel's sort;
+		// 'Items owned' is ranked locally so it sends the server's base order, which the site treats as
+		// Most imported).
+		return controlsRow(sort,
+			"Open the community bank templates on exchange-insights.gg in your browser, sorted like this list",
+			() -> LinkBrowser.browse("https://exchange-insights.gg/tools/osrs-bank-templates?sort="
+				+ (CLOSEST_SORT.equals(browseSort) ? "imported" : browseSort)));
+	}
+
+	// The avatar IS the profile button - and the only one. The icon row used to carry a second, redundant
+	// profile icon; two controls for one action, on a row where space is tight.
+	//
+	// The avatar IS the profile button. It's a picture of a person sitting on a profile-styled card, so it
+	// reads as one - but it used to carry the card's own action (apply / preview) and the card's wash, so
+	// clicking it did something else entirely and hovering it gave no sign it was its own control. Now it
+	// opens the profile, on its own hover ring. Returns false when the owner has no known handle (anonymous
+	// or unlinked), in which case the caller leaves the avatar as part of the card body.
+	private boolean wireAvatarProfile(JComponent avatar, String handle)
+	{
+		if (handle == null || handle.isEmpty())
+		{
+			return false;
+		}
+		avatar.setToolTipText("View @" + handle + " on the Exchange Insights leaderboard");
+		avatar.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		final Border idle = BorderFactory.createEmptyBorder(2, 2, 2, 2);
+		// Same insets either way, so gaining the ring can't nudge the card's layout.
+		final Border ring = BorderFactory.createCompoundBorder(new RoundedBorder(ICON_GOLD, new Insets(1, 1, 1, 1)), BorderFactory.createEmptyBorder(1, 1, 1, 1));
+		avatar.setBorder(idle);
+		avatar.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				openProfile(handle);
+			}
+
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				avatar.setBorder(ring);
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				avatar.setBorder(idle);
+			}
+		});
+		return true;
+	}
+
+	// Open an uploader's Exchange Insights profile on the leaderboard. Only offered when we actually know
+	// their handle - an anonymous or unlinked upload has no profile to open.
+	private void openProfile(String handle)
+	{
+		// Percent-encode: the site matches the handle against a strict character class, so a raw space or
+		// any other unexpected character in it would fail the match and drop the visitor on the dashboard
+		// instead of the profile. Spaces encode as "+" by default, which is wrong inside a fragment.
+		String encoded;
+		try
+		{
+			encoded = java.net.URLEncoder.encode(handle, java.nio.charset.StandardCharsets.UTF_8.name()).replace("+", "%20");
+		}
+		catch (java.io.UnsupportedEncodingException e)
+		{
+			encoded = handle; // UTF-8 is always available; fall back rather than swallow the click
+		}
+		LinkBrowser.browse("https://exchange-insights.gg/#community?u=" + encoded);
+	}
+
+	// Open a single template's page on the site (?t=<repoId> deep-links straight to it).
+	private void openOnWeb(long repoId)
+	{
+		LinkBrowser.browse("https://exchange-insights.gg/tools/osrs-bank-templates?t=" + repoId);
 	}
 
 	private int sortIndex()
@@ -1286,67 +1943,66 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private JPanel buildPaginationRow()
 	{
-		final int currentPage = browseOffset / PAGE_SIZE + 1;
-		final int totalPages = Math.max(currentPage, (browseTotal + PAGE_SIZE - 1) / PAGE_SIZE);
-		final boolean hasPrev = browseOffset > 0;
+		return paginationRow(browseOffset, browseTotal, browseHasMore, off ->
+		{
+			browseOffset = off;
+			loadBrowse();
+		});
+	}
 
-		// Nav buttons on one row; the "Page X of N" label on its own row below. The list has no horizontal
-		// scrollbar, so a row wider than the panel clips under the scrollbar - keeping the label off the
-		// button row means large (4-6 digit) page counts never widen it.
-		final JPanel nav = new JPanel(new FlowLayout(FlowLayout.CENTER, 3, 2));
+	// Single line: «  <  1-10 of 229  >  ». The range label carries the count, so there's no separate
+	// "Page X of N" row and no separate Count line. Shared by Browse (server-paged, so it's told whether
+	// more exist) and My Templates (paged locally, where the total settles it).
+	private JPanel paginationRow(int offset, int total, boolean hasMore, java.util.function.IntConsumer goTo)
+	{
+		final int currentPage = offset / PAGE_SIZE + 1;
+		final int totalPages = Math.max(currentPage, (total + PAGE_SIZE - 1) / PAGE_SIZE);
+		final boolean hasPrev = offset > 0;
+
+		final JPanel nav = new JPanel(new FlowLayout(FlowLayout.CENTER, 4, 2));
 		nav.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		nav.setAlignmentX(Component.LEFT_ALIGNMENT);
 		nav.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
-		nav.add(pagerButton("«", "First page", hasPrev, () ->
-		{
-			browseOffset = 0;
-			loadBrowse();
-		}));
-		nav.add(pagerButton("< Prev", "Previous page", hasPrev, () ->
-		{
-			browseOffset = Math.max(0, browseOffset - PAGE_SIZE);
-			loadBrowse();
-		}));
-		nav.add(pagerButton("Next >", "Next page", browseHasMore, () ->
-		{
-			browseOffset += PAGE_SIZE;
-			loadBrowse();
-		}));
-		nav.add(pagerButton("»", "Last page", browseTotal > 0 && currentPage < totalPages, () ->
-		{
-			browseOffset = (totalPages - 1) * PAGE_SIZE;
-			loadBrowse();
-		}));
 
-		final JLabel page = new JLabel(browseTotal > 0
-			? "Page " + currentPage + " of " + totalPages
-			: "Page " + currentPage);
-		page.setFont(FontManager.getRunescapeSmallFont());
-		page.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		nav.add(pagerButton("«", "First page", hasPrev, () -> goTo.accept(0)));
+		nav.add(pagerButton("<", "Previous page", hasPrev, () -> goTo.accept(Math.max(0, offset - PAGE_SIZE))));
 
-		final JPanel pageRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
-		pageRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		pageRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-		pageRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
-		pageRow.add(page);
+		final int start = total > 0 ? offset + 1 : 0;
+		final int end = Math.min(offset + PAGE_SIZE, total);
+		final JLabel range = new JLabel(total > 0 ? start + "-" + end + " of " + total : "0 of 0");
+		range.setFont(FontManager.getRunescapeSmallFont());
+		range.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		range.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 4));
+		nav.add(range);
 
-		final JPanel container = new JPanel();
-		container.setLayout(new BoxLayout(container, BoxLayout.Y_AXIS));
-		container.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		container.setAlignmentX(Component.LEFT_ALIGNMENT);
-		container.setMaximumSize(new Dimension(Integer.MAX_VALUE, 52));
-		container.add(nav);
-		container.add(pageRow);
-		return container;
+		nav.add(pagerButton(">", "Next page", hasMore, () -> goTo.accept(offset + PAGE_SIZE)));
+		nav.add(pagerButton("»", "Last page", total > 0 && currentPage < totalPages,
+			() -> goTo.accept((totalPages - 1) * PAGE_SIZE)));
+
+		return nav;
 	}
 
 	// A compact pager button (First/Prev/Next/Last), kept narrow so the row fits the fixed panel width.
-	private JButton pagerButton(String text, String tooltip, boolean enabled, Runnable action)
+	// A bare pager arrow (no button background): white and clickable when enabled, greyed out when not.
+	private JLabel pagerButton(String text, String tooltip, boolean enabled, Runnable action)
 	{
-		final JButton b = styledButton(text);
-		b.setToolTipText(tooltip);
-		b.setEnabled(enabled);
-		b.addActionListener(e -> action.run());
+		final JLabel b = new JLabel(text);
+		b.setForeground(enabled ? Color.WHITE : new Color(0x66, 0x66, 0x66));
+		b.setHorizontalAlignment(SwingConstants.CENTER);
+		b.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 6));
+		if (enabled)
+		{
+			b.setToolTipText(tooltip);
+			b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+			b.addMouseListener(new MouseAdapter()
+			{
+				@Override
+				public void mouseClicked(MouseEvent e)
+				{
+					action.run();
+				}
+			});
+		}
 		return b;
 	}
 
@@ -1358,21 +2014,22 @@ public class BankTemplatesPanel extends PluginPanel
 		final RemoteTemplate.Profile p = rt.profile;
 		final String bg = p != null ? p.profileBg : null;
 
-		final JPanel card = profileCardPanel(bg);
+		final ProfileCard card = profileCardPanel(bg);
 		card.setLayout(new BorderLayout(8, 4));
 		card.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
-		card.add(avatarComponent(rt), BorderLayout.WEST);
+		final JComponent avatar = avatarComponent(rt);
+		card.add(avatar, BorderLayout.WEST);
 
 		final JPanel text = new JPanel();
 		text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
 		text.setOpaque(false);
 
-		final JLabel name = clampedLabel(rt.name, FontManager.getRunescapeFont(), Color.WHITE, CARD_NAME_MAX_WIDTH);
+		final JLabel name = clampedLabel(rt.name, CARD_NAME_FONT, Color.WHITE, CARD_NAME_MAX_WIDTH);
 		name.setAlignmentX(Component.LEFT_ALIGNMENT);
 		text.add(name);
 
-		final JLabel author = clampedLabel(byLine(rt), FontManager.getRunescapeSmallFont(), ColorScheme.LIGHT_GRAY_COLOR, CARD_AUTHOR_MAX_WIDTH);
+		final JLabel author = clampedLabel(byLine(rt), AUTHOR_FONT, ColorScheme.LIGHT_GRAY_COLOR, CARD_AUTHOR_MAX_WIDTH);
 		author.setAlignmentX(Component.LEFT_ALIGNMENT);
 		text.add(author);
 
@@ -1383,21 +2040,98 @@ public class BankTemplatesPanel extends PluginPanel
 		text.add(meta);
 		card.add(text, BorderLayout.CENTER);
 
-		final JPanel actions = buttonRow();
-		// The count icons ARE the buttons: the download glyph imports, the flag glyph reports.
-		actions.add(actionIcon("&#11015;", rt.downloads, UPVOTE_COLOR, "Import a copy to My Templates", () -> importRemote(rt)));
+		// Click anywhere on the card body to preview it - that replaces the magnifier icon, leaving the
+		// remaining icons more room. The icon buttons in the SOUTH row keep their own actions.
+		final MouseAdapter viewClick = new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				showPreview(rt.toTemplate());
+			}
+		};
+		card.setToolTipText("Click to preview this template");
+		final String rtHandle = p != null && p.handle != null && !p.handle.isEmpty() ? p.handle : null;
+		final boolean avatarIsProfile = wireAvatarProfile(avatar, rtHandle);
+		final JComponent[] body = avatarIsProfile
+			? new JComponent[]{card, text, name, author, meta}
+			: new JComponent[]{card, avatar, text, name, author, meta};
+		for (final JComponent c : body)
+		{
+			c.addMouseListener(viewClick);
+			c.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		}
+		wireHover(card, avatar, text, name, author, meta);
+
+		final JPanel actions = iconRow();
+		// The count icons ARE the buttons: download imports, flag reports. Glue around each spreads
+		// them across the card while each keeps its full width (the count is never clipped).
+		actions.add(Box.createHorizontalGlue());
+		actions.add(countIcon(PanelIcons.download(UPVOTE_COLOR), rt.downloads, UPVOTE_COLOR, "Import a copy to My Templates", () -> importRemote(rt)));
+		actions.add(Box.createHorizontalGlue());
 		actions.add(actionIcon("&#9873;", rt.reports, DOWNVOTE_COLOR, "Report this template", () -> reportRepo(rt.id, this::loadBrowse)));
-		actions.add(iconButton("View", "Preview this template", () -> showPreview(rt.toTemplate())));
-		actions.add(iconButton("Web", "Open this template on exchange-insights.gg", () -> openOnWeb(rt.id)));
+		actions.add(Box.createHorizontalGlue());
+		actions.add(clickableIcon(PanelIcons.globe(ICON_GOLD), "Open this template on exchange-insights.gg", () -> openOnWeb(rt.id)));
+		actions.add(Box.createHorizontalGlue());
 		if (ownsRemote(rt.id))
 		{
-			actions.add(iconButton("Del", "Delete your shared template", () -> deleteRemote(rt.id)));
+			actions.add(clickableIcon(PanelIcons.xMark(DOWNVOTE_COLOR), "Delete your shared template", () -> deleteRemote(rt.id)));
+			actions.add(Box.createHorizontalGlue());
 		}
-		card.add(actions, BorderLayout.SOUTH);
+		card.add(southStack(tabIconStrip(rt.tabs), actions), BorderLayout.SOUTH);
 		return card;
 	}
 
 	// The uploader line: prefer their EI display name / @handle, else the template's author, else Anonymous.
+	// Snapshot the uploader's public profile at import time, so an imported card can show the original
+	// owner's name/avatar/theme. Anonymous or unlinked uploads capture just the "Anonymous"/author name,
+	// which still renders as a fully defaulted (neutral) card.
+	private BankTemplate.OwnerProfile capturedOwner(RemoteTemplate rt)
+	{
+		final BankTemplate.OwnerProfile op = new BankTemplate.OwnerProfile();
+		final RemoteTemplate.Profile p = rt.anonymous ? null : rt.profile;
+		if (p != null && p.displayName != null && !p.displayName.isEmpty())
+		{
+			op.name = p.displayName;
+		}
+		else if (p != null && p.handle != null && !p.handle.isEmpty())
+		{
+			op.name = "@" + p.handle;
+		}
+		else
+		{
+			op.name = rt.anonymous || rt.author == null || rt.author.isEmpty() ? "Anonymous" : rt.author;
+		}
+		op.handle = p != null ? p.handle : null;
+		op.bg = p != null ? p.profileBg : null;
+		op.avatarItemId = p != null ? p.avatarItemId : null;
+		return op;
+	}
+
+	// The "by …" line for a My Templates card: a preset's source, an imported template's original owner,
+	// your linked account's own name, or a plain "by you" when there's no linked profile (an EI account is
+	// opt-in, so this always has to read sensibly without one).
+	private String localByline(BankTemplate t, BankTemplate.OwnerProfile owner, RemoteTemplate.Profile self)
+	{
+		if (t.isPreset())
+		{
+			return "Built-in preset";
+		}
+		if (owner != null)
+		{
+			return "by " + (owner.name != null && !owner.name.isEmpty() ? owner.name : "Anonymous");
+		}
+		if (self != null && self.displayName != null && !self.displayName.isEmpty())
+		{
+			return "by " + self.displayName;
+		}
+		if (self != null && self.handle != null && !self.handle.isEmpty())
+		{
+			return "by @" + self.handle;
+		}
+		return "by you";
+	}
+
 	private String byLine(RemoteTemplate rt)
 	{
 		if (rt.profile != null)
@@ -1417,38 +2151,211 @@ public class BankTemplatesPanel extends PluginPanel
 
 	// A card panel that paints the uploader's themed profile background (falls back to the neutral default).
 	// Height is capped to its preferred height, like cardPanel, so the vertical list doesn't stretch it.
-	private JPanel profileCardPanel(final String bgKey)
+	private ProfileCard profileCardPanel(final String bgKey)
 	{
-		final JPanel card = new JPanel()
-		{
-			@Override
-			protected void paintComponent(Graphics g)
-			{
-				final Graphics2D g2 = (Graphics2D) g.create();
-				ProfileCardStyle.paint(g2, getWidth(), getHeight(), 10, bgKey);
-				g2.dispose();
-			}
+		return profileCardPanel(bgKey, false);
+	}
 
-			@Override
-			public Dimension getMaximumSize()
-			{
-				return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
-			}
-		};
+	// active = the currently applied template, drawn with a red highlight glow around its edge.
+	private ProfileCard profileCardPanel(final String bgKey, final boolean active)
+	{
+		final ProfileCard card = new ProfileCard(bgKey, active);
 		card.setOpaque(false);
 		card.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return card;
 	}
 
+	// A template card: the uploader's themed background, a red glow when it's the applied template, and a
+	// lift on hover - the whole card is the click target in both lists, so it needs to say so.
+	private static final class ProfileCard extends JPanel
+	{
+		private final String bgKey;
+		private final boolean active;
+		private boolean hover;
+
+		ProfileCard(String bgKey, boolean active)
+		{
+			this.bgKey = bgKey;
+			this.active = active;
+		}
+
+		void setHover(boolean h)
+		{
+			if (hover != h)
+			{
+				hover = h;
+				repaint();
+			}
+		}
+
+		@Override
+		protected void paintComponent(Graphics g)
+		{
+			final Graphics2D g2 = (Graphics2D) g.create();
+			g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+			final int w = getWidth(), h = getHeight();
+			ProfileCardStyle.paint(g2, w, h, 10, bgKey);
+			if (hover)
+			{
+				// A wash plus a brighter rim, rather than a colour change - the background is the uploader's
+				// theme, so the highlight has to work over any of them.
+				g2.setColor(new Color(255, 255, 255, 20));
+				g2.fill(new RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, 10, 10));
+				g2.setStroke(new BasicStroke(1f));
+				g2.setColor(new Color(255, 255, 255, 70));
+				g2.draw(new RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, 10, 10));
+			}
+			if (active)
+			{
+				// A few concentric red strokes fading inward read as a soft red glow marking the applied one.
+				for (int i = 0; i < 4; i++)
+				{
+					g2.setStroke(new BasicStroke(2f));
+					g2.setColor(new Color(224, 58, 58, 170 - i * 44));
+					final float o = 1.5f + i * 1.6f;
+					g2.draw(new RoundRectangle2D.Float(o, o, w - 1f - o * 2f, h - 1f - o * 2f, 10, 10));
+				}
+			}
+			g2.dispose();
+		}
+
+		@Override
+		public Dimension getMaximumSize()
+		{
+			return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+		}
+	}
+
+	// Highlight the card while the pointer is anywhere inside it. The listener goes on the card AND its
+	// children, because moving onto a child fires mouseExited on the parent; on exit the highlight only
+	// drops once the pointer has genuinely left the card (getMousePosition covers children), so crossing
+	// between the avatar, text and icon buttons doesn't flicker.
+	private static void wireHover(ProfileCard card, JComponent... parts)
+	{
+		final MouseAdapter hover = new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				card.setHover(true);
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				card.setHover(card.getMousePosition(true) != null);
+			}
+		};
+		card.addMouseListener(hover);
+		for (JComponent c : parts)
+		{
+			c.addMouseListener(hover);
+		}
+	}
+
+	// A strip of the template's tab icons, so a card says what's actually IN the template without opening
+	// it - the same buttons you'd see down the side of the bank. Each tab shows its chosen icon, or its
+	// first item when it has none (exactly how the bank picks a tab's button). Empty tabs contribute
+	// nothing. Returns null when there's nothing to draw, so a single-tab template keeps a compact card.
+	private JComponent tabIconStrip(List<TabLayout> tabs)
+	{
+		if (tabs == null || tabs.isEmpty())
+		{
+			return null;
+		}
+		final List<Integer> ids = new ArrayList<>();
+		for (TabLayout t : tabs)
+		{
+			int id = t.getCustomIconId();
+			if (id <= 0)
+			{
+				for (Integer slot : t.getLayout())
+				{
+					if (slot != null && slot > 0)
+					{
+						id = slot;
+						break;
+					}
+				}
+			}
+			if (id > 0)
+			{
+				ids.add(id);
+			}
+		}
+		if (ids.isEmpty())
+		{
+			return null;
+		}
+
+		final int cell = 20;
+		final int padX = 4;
+		final JComponent strip = new JComponent()
+		{
+			private final Image[] imgs = new Image[ids.size()];
+
+			{
+				setPreferredSize(new Dimension(0, cell + 4));
+				setMaximumSize(new Dimension(Integer.MAX_VALUE, cell + 4));
+				for (int i = 0; i < ids.size(); i++)
+				{
+					final AsyncBufferedImage a = itemManager.getImage(ids.get(i));
+					imgs[i] = a;
+					a.onLoaded(this::repaint);
+				}
+			}
+
+			@Override
+			protected void paintComponent(Graphics g)
+			{
+				final Graphics2D g2 = (Graphics2D) g.create();
+				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+				final int w = getWidth(), h = getHeight();
+				// A recessed well behind the icons, so the row reads as one strip rather than as loose art
+				// floating on the card background.
+				g2.setColor(new Color(0, 0, 0, 70));
+				g2.fillRoundRect(0, 0, w - 1, h - 1, 8, 8);
+
+				// Shrink the cells rather than overflowing when a template uses all ten tabs.
+				final int span = Math.max(1, w - padX * 2);
+				final int cw = Math.min(cell, span / imgs.length);
+				int x = padX;
+				for (final Image img : imgs)
+				{
+					final int iw = img != null ? img.getWidth(null) : -1;
+					final int ih = img != null ? img.getHeight(null) : -1;
+					if (iw > 0 && ih > 0)
+					{
+						final double sc = Math.min((double) cw / iw, (double) (h - 4) / ih);
+						final int dw = (int) Math.round(iw * sc);
+						final int dh = (int) Math.round(ih * sc);
+						g2.drawImage(img, x + (cw - dw) / 2, (h - dh) / 2, dw, dh, null);
+					}
+					x += cw;
+				}
+				g2.dispose();
+			}
+		};
+		strip.setToolTipText(ids.size() + (ids.size() == 1 ? " tab in this template" : " tabs in this template"));
+		return strip;
+	}
+
 	// Circular avatar rendered from the uploader's chosen item (via the local item-icon cache, so it stays
-	// current), ringed in the profile's accent colour. Falls back to the name's initial when there's none.
+	// current), ringed in the profile's accent colour. Falls back to a silhouette when there's none.
 	private JComponent avatarComponent(RemoteTemplate rt)
 	{
-		final int size = 44;
 		final RemoteTemplate.Profile p = rt.profile;
-		final Color ring = ProfileCardStyle.border(p != null ? p.profileBg : null);
-		final Integer itemId = p != null ? p.avatarItemId : null;
-		final String initial = rt.name != null && !rt.name.isEmpty() ? rt.name.substring(0, 1).toUpperCase(Locale.ROOT) : "?";
+		return avatarComponent(p != null ? p.avatarItemId : null, p != null ? p.profileBg : null);
+	}
+
+	// Circular avatar for a profile card, driven by explicit fields so both Browse (uploader) and My
+	// Templates (owner / defaulted self) cards can share it. itemId null → the default silhouette; bgKey
+	// null → the default bronze ring.
+	private JComponent avatarComponent(Integer itemId, String bgKey)
+	{
+		final int size = 44;
+		final Color ring = ProfileCardStyle.border(bgKey);
 
 		final JComponent avatar = new JComponent()
 		{
@@ -1477,8 +2384,10 @@ public class BankTemplatesPanel extends PluginPanel
 				final int ih = img != null ? img.getHeight(null) : -1;
 				if (iw > 0 && ih > 0)
 				{
+					// clip() INTERSECTS; setClip() would REPLACE the clip we were handed - including the
+					// scroll viewport's - letting a part-scrolled avatar paint over the pinned bottom bar.
 					final Shape old = g2.getClip();
-					g2.setClip(new Ellipse2D.Float(2, 2, size - 5, size - 5));
+					g2.clip(new Ellipse2D.Float(2, 2, size - 5, size - 5));
 					final int max = size - 12;
 					final double sc = Math.min((double) max / iw, (double) max / ih);
 					final int dw = (int) Math.round(iw * sc);
@@ -1488,10 +2397,20 @@ public class BankTemplatesPanel extends PluginPanel
 				}
 				else
 				{
+					// Default avatar: a person silhouette, matching the website's, rather than an initial.
 					g2.setColor(ring);
-					g2.setFont(FontManager.getRunescapeBoldFont());
-					final FontMetrics fm = g2.getFontMetrics();
-					g2.drawString(initial, (size - fm.stringWidth(initial)) / 2, (size + fm.getAscent() - fm.getDescent()) / 2);
+					final int cx = size / 2;
+					final int headR = size / 7;
+					final int headCy = size / 2 - headR + 1;
+					g2.fillOval(cx - headR, headCy - headR, headR * 2, headR * 2);
+					// Shoulders: the top half of a wide ellipse, clipped to the avatar circle so it reads as
+					// a bust rather than a blob touching the ring.
+					final int bodyW = (int) (size * 0.56);
+					final int bodyH = (int) (size * 0.46);
+					final Shape old = g2.getClip();
+					g2.clip(new Ellipse2D.Float(2, 2, size - 5, size - 5));
+					g2.fillArc(cx - bodyW / 2, headCy + headR + 2, bodyW, bodyH * 2, 0, 180);
+					g2.setClip(old);
 				}
 
 				g2.setColor(ring);
@@ -1504,9 +2423,12 @@ public class BankTemplatesPanel extends PluginPanel
 	}
 
 	// An import/report count shown as its own clickable icon+number (the icon is the action button).
+	// A negative count renders the glyph alone (no number), for actions that have no count to show.
 	private JLabel actionIcon(String glyphEntity, int count, Color color, String tooltip, Runnable action)
 	{
-		final JLabel label = new JLabel("<html><span style='font-family:Dialog'>" + glyphEntity + "</span>&nbsp;" + count + "</html>");
+		final String num = count < 0 ? "" : "&nbsp;" + count;
+		final IconLabel label = hoverPlate(new IconLabel("<html><span style='font-family:Dialog'>" + glyphEntity + "</span>" + num + "</html>"));
+		label.setHorizontalAlignment(SwingConstants.CENTER);
 		label.setForeground(color);
 		label.setToolTipText(tooltip);
 		label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -1530,6 +2452,7 @@ public class BankTemplatesPanel extends PluginPanel
 				label.setForeground(color);
 			}
 		});
+		label.setMaximumSize(label.getPreferredSize());   // don't stretch in the X-axis icon row
 		return label;
 	}
 
@@ -1583,6 +2506,7 @@ public class BankTemplatesPanel extends PluginPanel
 		final BankTemplate t = rt.toTemplate();
 		t.setRepoId(rt.id);
 		t.setOwned(false);
+		t.setOwnerProfile(capturedOwner(rt));   // remember the original owner's profile for the card
 		t.setName(uniqueName(capName(t.getName())));
 		if (templateManager.saveUserTemplate(t))
 		{
@@ -1597,16 +2521,21 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 	}
 
+	// Sharing, reporting and deleting have to be attributable. A logged-in character supplies that directly
+	// (its account hash derives the clientId these are keyed on); logged out, a linked Exchange Insights
+	// token identifies the account instead and the server attributes to it. Only a caller with NEITHER -
+	// logged out AND no linked account - has nothing to attribute to, and is asked to log in.
 	private boolean requireLogin()
 	{
-		if (!repositoryClient.hasIdentity())
+		if (repositoryClient.hasIdentity() || hasEiToken())
 		{
-			JOptionPane.showMessageDialog(this,
-				"Log in to your RuneScape account first - sharing, reporting and deleting are tied to your account.",
-				"Not logged in", JOptionPane.WARNING_MESSAGE);
-			return false;
+			return true;
 		}
-		return true;
+		JOptionPane.showMessageDialog(this,
+			"Log in to your RuneScape account first, or link an Exchange Insights account - sharing, "
+				+ "reporting and deleting have to be tied to one of them.",
+			"Not logged in", JOptionPane.WARNING_MESSAGE);
+		return false;
 	}
 
 	private void reportRepo(long repoId)
@@ -1771,6 +2700,83 @@ public class BankTemplatesPanel extends PluginPanel
 		});
 	}
 
+	// "3 days ago" style age for the stored bank snapshot, so it's obvious how stale the fallback is.
+	private static String relativeTime(long epochSeconds)
+	{
+		final long secs = Math.max(0, System.currentTimeMillis() / 1000L - epochSeconds);
+		if (secs < 3600)
+		{
+			return Math.max(1, secs / 60) + "m ago";
+		}
+		if (secs < 86400)
+		{
+			return secs / 3600 + "h ago";
+		}
+		return secs / 86400 + "d ago";
+	}
+
+	// Builds a template from the last bank snapshot Exchange Insights holds for this account - the same
+	// [id, qty, tab] triples the plugin uploads - so capturing still works while logged out of the game.
+	// The triples carry their own tab, so they're grouped by it rather than re-sliced by varbit counts.
+	private void captureFromSnapshot()
+	{
+		final String input = JOptionPane.showInputDialog(this,
+			"Name for the captured template (max " + MAX_NAME_LENGTH + " chars):", "My bank");
+		if (input == null || input.trim().isEmpty())
+		{
+			return;
+		}
+		final String name = uniqueName(capName(input));
+
+		repositoryClient.fetchMe(true, me -> SwingUtilities.invokeLater(() ->
+		{
+			final List<int[]> items = me != null && me.snapshot != null ? me.snapshot.items : null;
+			if (items == null || items.isEmpty())
+			{
+				JOptionPane.showMessageDialog(this, "Couldn't load your saved bank from Exchange Insights.",
+					"Capture failed", JOptionPane.WARNING_MESSAGE);
+				return;
+			}
+			final BankTemplate captured = new BankTemplate();
+			captured.setName(name);
+			captured.setColumns(BankLayoutRenderer.ITEMS_PER_ROW);
+			for (int tab = 1; tab <= 9; tab++)
+			{
+				final List<Integer> layout = snapshotTab(items, tab);
+				if (!layout.isEmpty())
+				{
+					captured.putTab(tab, layout);
+				}
+			}
+			final List<Integer> main = snapshotTab(items, BankTemplate.MAIN_TAB);
+			if (!main.isEmpty())
+			{
+				captured.putTab(BankTemplate.MAIN_TAB, main);
+			}
+			if (captured.tabCount() == 0 || !templateManager.saveUserTemplate(captured))
+			{
+				JOptionPane.showMessageDialog(this, "Couldn't capture that bank.", "Capture failed", JOptionPane.WARNING_MESSAGE);
+				return;
+			}
+			// No success dialog: the new card scrolled into view is the confirmation.
+			revealName = captured.getName();
+			rebuildOnEdt();
+		}));
+	}
+
+	private static List<Integer> snapshotTab(List<int[]> items, int tab)
+	{
+		final List<Integer> out = new ArrayList<>();
+		for (int[] it : items)
+		{
+			if (it != null && it.length >= 3 && it[2] == tab)
+			{
+				out.add(it[0] > 0 ? it[0] : BankTemplate.EMPTY);
+			}
+		}
+		return out;
+	}
+
 	private void captureCurrentBank()
 	{
 		final String input = JOptionPane.showInputDialog(this, "Name for the captured template (max " + MAX_NAME_LENGTH + " chars):", "My bank");
@@ -1792,9 +2798,10 @@ public class BankTemplatesPanel extends PluginPanel
 				}
 				if (templateManager.saveUserTemplate(captured))
 				{
+					// No success dialog: the new card scrolled into view is the confirmation. Failures below
+					// still speak up, since those leave nothing visible to explain themselves.
+					revealName = captured.getName();
 					rebuildOnEdt();
-					JOptionPane.showMessageDialog(this,
-						"Captured your bank as \"" + name + "\" (" + captured.tabCount() + " tabs).", "Captured", JOptionPane.INFORMATION_MESSAGE);
 				}
 				else
 				{
@@ -1908,8 +2915,35 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private static final Color UPVOTE_COLOR = new Color(110, 190, 110);
 	private static final Color DOWNVOTE_COLOR = new Color(220, 110, 110);
+	private static final Color ICON_GOLD = new Color(0xE8, 0xC0, 0x50); // gold - the view / web actions
+	private static final Color STAT_MUTED = new Color(0x70, 0x70, 0x70); // greyed share stats (not shared yet)
+
+	// The Exchange Insights logo, scaled for the Browse control (clickable to open the web browse page).
+	private static final ImageIcon EI_ICON = loadEiIcon();
+
+	private static ImageIcon loadEiIcon()
+	{
+		try
+		{
+			final BufferedImage img = ImageUtil.loadImageResource(BankTemplatesPlugin.class, "/com/banktemplates/logo.png");
+			final int h = 22;
+			final int w = Math.max(1, img.getWidth() * h / img.getHeight());
+			return new ImageIcon(img.getScaledInstance(w, h, Image.SCALE_SMOOTH));
+		}
+		catch (RuntimeException e)
+		{
+			return null;
+		}
+	}
 	// The narrow side panel can't fit long names (e.g. auto-generated Exchange Insights display names),
 	// so clamp them with an ellipsis and show the full text on hover.
+	// The card's title and its "by <uploader>" line, both bold so the template name and its attribution
+	// carry the card. Passed to clampedLabel so its ellipsis measurement uses the font it renders in.
+	// RuneScape's are BITMAP fonts, so deriveFont(BOLD) synthesises the weight by smearing the glyphs and
+	// renders blurry. Use the real bold face instead - it's a designed weight, so it stays pixel-crisp.
+	private static final Font CARD_NAME_FONT = FontManager.getRunescapeBoldFont();
+	private static final Font AUTHOR_FONT = FontManager.getRunescapeBoldFont();
+
 	private static final int CARD_NAME_MAX_WIDTH = 205;
 	private static final int CARD_AUTHOR_MAX_WIDTH = 118;
 
@@ -1955,8 +2989,9 @@ public class BankTemplatesPanel extends PluginPanel
 		final BankTemplate t = rt.toTemplate();
 		final int total = t.itemCount();
 		final int tabs = t.tabCount();
-		final String items = ownedCanon != null
-			? ownedOfTemplate(t, ownedCanon) + " / " + total + " items"
+		final Set<Integer> ownedSet = ownedForCounts();
+		final String items = ownedSet != null
+			? ownedOfTemplate(t, ownedSet) + " / " + total + " items"
 			: total + " items";
 		return items + (tabs > 1 ? " · " + tabs + " tabs" : "");
 	}
@@ -1966,7 +3001,8 @@ public class BankTemplatesPanel extends PluginPanel
 	// a near-complete small template doesn't outrank a big one you have a lot of - e.g. 487/936 beats 180/276.
 	private double ownershipScore(RemoteTemplate rt)
 	{
-		if (ownedCanon == null)
+		final Set<Integer> ownedSet = ownedForCounts();
+		if (ownedSet == null)
 		{
 			return 0;
 		}
@@ -1976,84 +3012,100 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			return 0;
 		}
-		final int owned = ownedOfTemplate(t, ownedCanon);
+		final int owned = ownedOfTemplate(t, ownedSet);
 		return (double) owned * owned / total;
 	}
 
 
-	private JPanel titleBlock(String nameText, String metaText, Color nameColor)
+	// A non-interactive stat chip (drawn icon + count) for a local card's share stats. count < 0 hides the
+	// number (used until the server reports real counts), leaving just the coloured/greyed icon.
+	private JLabel statIcon(ImageIcon icon, int count, Color color, String tooltip)
 	{
-		final JPanel text = new JPanel();
-		text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
-		text.setOpaque(false);
-
-		// Imported templates keep their remote name, so clamp it exactly like the Browse cards do.
-		final JLabel name = clampedLabel(nameText, FontManager.getRunescapeFont(), nameColor, CARD_NAME_MAX_WIDTH);
-		text.add(name);
-
-		final JLabel meta = new JLabel(metaText);
-		meta.setFont(FontManager.getRunescapeSmallFont());
-		meta.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		meta.setAlignmentX(Component.LEFT_ALIGNMENT);
-		text.add(meta);
-		return text;
+		final JLabel label = new JLabel(count < 0 ? "" : String.valueOf(count));
+		label.setIcon(icon);
+		label.setHorizontalAlignment(SwingConstants.CENTER);
+		label.setForeground(color);
+		label.setToolTipText(tooltip);
+		label.setBorder(BorderFactory.createEmptyBorder(1, 2, 1, 3));
+		label.setMaximumSize(label.getPreferredSize());
+		return label;
 	}
 
-	private JButton activeOrUse(boolean active, BankTemplate template)
+	// Icons spread across the card's full width via horizontal glue between them, so each keeps its
+	// FULL size (counts never get clipped) while the extra space is shared out evenly. Callers add a
+	// glue before the first icon and after each one.
+	// Dresses a dropdown to match the panel: a flat dark field with a thin border and a drawn chevron
+	// instead of the platform look-and-feel's bevelled arrow button, plus padded popup rows that highlight
+	// on hover.
+	private static void styleCombo(JComboBox<String> combo)
 	{
-		final JButton button = styledButton(active ? "Disable" : "Enable");
-		button.setToolTipText(active ? "Stop applying this template" : "Apply this template to your bank view");
-		button.addActionListener(e -> select(active ? null : template));
-		return button;
-	}
-
-	private JPanel buttonRow()
-	{
-		// Left-aligned; WrapLayout flows onto a second row if they don't all fit. Min width 0 so the card can
-		// shrink to the panel width (forcing the wrap) instead of overflowing the right edge and clipping.
-		final JPanel buttons = new JPanel(new WrapLayout(FlowLayout.LEFT, 2, 2));
-		buttons.setOpaque(false);
-		buttons.setMinimumSize(new Dimension(0, 0));
-		return buttons;
-	}
-
-	private JPanel cardPanel(boolean active)
-	{
-		// Cap the card's max height to its own preferred height so the vertical BoxLayout it sits in can't
-		// stretch it to fill leftover space (which left a tall gap in the card before the list filled out).
-		// Width still stretches to the panel.
-		final JPanel card = new JPanel(new BorderLayout(0, 2))
+		combo.setUI(new BasicComboBoxUI()
 		{
 			@Override
-			public Dimension getMaximumSize()
+			protected JButton createArrowButton()
 			{
-				return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+				final JButton arrow = new JButton()
+				{
+					@Override
+					protected void paintComponent(Graphics g)
+					{
+						final Graphics2D g2 = (Graphics2D) g.create();
+						g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+						g2.setColor(ICON_GOLD);
+						g2.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+						final int cx = getWidth() / 2, cy = getHeight() / 2;
+						g2.drawLine(cx - 4, cy - 2, cx, cy + 2);
+						g2.drawLine(cx + 4, cy - 2, cx, cy + 2);
+						g2.dispose();
+					}
+				};
+				arrow.setBorder(BorderFactory.createEmptyBorder());
+				arrow.setContentAreaFilled(false);
+				arrow.setFocusable(false);
+				return arrow;
 			}
-		};
-		card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		card.setBorder(active ? ACTIVE_BORDER : CARD_BORDER);
-		card.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		if (!active)
-		{
-			card.addMouseListener(new MouseAdapter()
+			// The combo stays non-opaque so its body can be painted with the cards' rounded corners
+			// instead of the square fill the look-and-feel would draw.
+			@Override
+			public void paintCurrentValueBackground(Graphics g, Rectangle bounds, boolean hasFocus)
 			{
-				@Override
-				public void mouseEntered(MouseEvent e)
-				{
-					card.setBackground(ColorScheme.DARKER_GRAY_HOVER_COLOR);
-				}
-
-				@Override
-				public void mouseExited(MouseEvent e)
-				{
-					card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-				}
-			});
-		}
-		return card;
+				RoundedBorder.fill(g, comboBox, comboBox.getBackground());
+			}
+		});
+		combo.setOpaque(false);
+		combo.setFocusable(false);
+		combo.setFont(FontManager.getRunescapeFont());
+		combo.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		combo.setForeground(Color.WHITE);
+		combo.setBorder(new RoundedBorder(ColorScheme.MEDIUM_GRAY_COLOR, new Insets(3, 8, 3, 3)));
+		combo.setRenderer(new DefaultListCellRenderer()
+		{
+			@Override
+			public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean selected, boolean focused)
+			{
+				final JLabel row = (JLabel) super.getListCellRendererComponent(list, value, index, selected, focused);
+				row.setFont(FontManager.getRunescapeFont());
+				row.setBorder(BorderFactory.createEmptyBorder(4, 7, 4, 7));
+				row.setBackground(selected ? ColorScheme.MEDIUM_GRAY_COLOR : ColorScheme.DARKER_GRAY_COLOR);
+				row.setForeground(selected ? Color.WHITE : ColorScheme.LIGHT_GRAY_COLOR);
+				return row;
+			}
+		});
 	}
 
+	private JPanel iconRow()
+	{
+		final JPanel row = new JPanel();
+		row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+		row.setOpaque(false);
+		row.setBorder(BorderFactory.createEmptyBorder(4, 4, 0, 4));
+		row.setMinimumSize(new Dimension(0, 0));
+		return row;
+	}
+
+	/** Cap a text button's max size to its preferred size so it can't stretch to fill the glue in an
+	 *  X-axis BoxLayout (icon row) - text buttons default to an unbounded max width. */
 	private JLabel sectionLabel(String text)
 	{
 		final JLabel label = new JLabel(text.toUpperCase());
@@ -2116,33 +3168,143 @@ public class BankTemplatesPanel extends PluginPanel
 		@Override
 		public boolean getScrollableTracksViewportHeight()
 		{
-			return false;
+			// Stretch to the viewport when the content is SHORTER than it, so a vertical glue can push the
+			// bottom pager down to the bottom of the visible panel instead of leaving it floating under the
+			// last card. Content taller than the viewport keeps its own height and scrolls as before.
+			final java.awt.Container parent = getParent();
+			return parent instanceof JViewport && parent.getHeight() > getPreferredSize().height;
 		}
 	}
 
-	private JButton iconButton(String text, String tooltip, Runnable action)
+	// A bare clickable icon (no button background) - matches the count icons' look, for actions with
+	// no count (View / Web). The glyph is already drawn in its colour.
+	// A card icon that says it - not the card - is under the pointer: a rounded plate lights up behind it.
+	// The card's own hover wash covers the whole card, so without this an icon looked identical whether you
+	// were on it or merely near it, and you couldn't tell what a click would hit.
+	private static final class IconLabel extends JLabel
 	{
-		final JButton button = styledButton(text);
-		button.setToolTipText(tooltip);
-		button.addActionListener(e -> action.run());
-		return button;
+		private boolean hot;
+
+		IconLabel(String text)
+		{
+			super(text);
+		}
+
+		void setHot(boolean h)
+		{
+			if (hot != h)
+			{
+				hot = h;
+				repaint();
+			}
+		}
+
+		@Override
+		protected void paintComponent(Graphics g)
+		{
+			if (hot)
+			{
+				final Graphics2D g2 = (Graphics2D) g.create();
+				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				g2.setColor(new Color(255, 255, 255, 34));
+				g2.fill(new RoundRectangle2D.Float(0.5f, 0.5f, getWidth() - 1f, getHeight() - 1f, 7, 7));
+				g2.setColor(new Color(255, 255, 255, 90));
+				g2.setStroke(new BasicStroke(1f));
+				g2.draw(new RoundRectangle2D.Float(0.5f, 0.5f, getWidth() - 1f, getHeight() - 1f, 7, 7));
+				g2.dispose();
+			}
+			super.paintComponent(g);
+		}
+	}
+
+	// Installs the plate + hand cursor on a card icon. Kept separate from the click wiring so the count and
+	// glyph icons get exactly the same treatment as the plain ones.
+	private static IconLabel hoverPlate(IconLabel label)
+	{
+		label.setFocusable(false); // clicking an icon must not pull the caret out of the search box
+		label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		label.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				label.setHot(true);
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				label.setHot(false);
+			}
+		});
+		return label;
+	}
+
+	private JLabel clickableIcon(ImageIcon icon, String tooltip, Runnable action)
+	{
+		final IconLabel label = hoverPlate(new IconLabel(null));
+		label.setIcon(icon);
+		label.setHorizontalAlignment(SwingConstants.CENTER);
+		label.setToolTipText(tooltip);
+		label.setBorder(BorderFactory.createEmptyBorder(1, 3, 1, 3));
+		label.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				action.run();
+			}
+		});
+		label.setMaximumSize(label.getPreferredSize());   // don't stretch in the X-axis icon row
+		return label;
+	}
+
+	// A clickable drawn icon + its count, coloured to match; hover brightens (like the glyph counts).
+	private JLabel countIcon(ImageIcon icon, int count, Color color, String tooltip, Runnable action)
+	{
+		final IconLabel label = hoverPlate(new IconLabel(String.valueOf(count)));
+		label.setIcon(icon);
+		label.setHorizontalAlignment(SwingConstants.CENTER);
+		label.setForeground(color);
+		label.setToolTipText(tooltip);
+		label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		label.setBorder(BorderFactory.createEmptyBorder(1, 2, 1, 3));
+		label.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				action.run();
+			}
+
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				label.setForeground(color.brighter());
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				label.setForeground(color);
+			}
+		});
+		label.setMaximumSize(label.getPreferredSize());   // don't stretch in the X-axis icon row
+		return label;
 	}
 
 	private String localMeta(BankTemplate template)
 	{
-		// Owned = you uploaded it; an imported template has a repo id but isn't owned; otherwise local-only.
-		final String kind = template.isPreset() ? "Preset"
-			: template.isOwned() ? "Shared by you"
-			: template.getRepoId() != null ? "Imported"
-			: "Custom";
 		final int total = template.itemCount();
 		final int tabs = template.tabCount();
 		// "x / y items" when the bank is known (x = how many of the template's items you currently own),
-		// otherwise just "y items" until the bank has loaded.
-		final String items = ownedCanon != null
-			? ownedOfTemplate(template, ownedCanon) + " / " + total + " items"
+		// otherwise just "y items" until the bank has loaded. Ownership is already stated by the card's
+		// "by …" line, so it isn't repeated here.
+		final Set<Integer> ownedSet2 = ownedForCounts();
+		final String items = ownedSet2 != null
+			? ownedOfTemplate(template, ownedSet2) + " / " + total + " items"
 			: total + " items";
-		return kind + " · " + items + (tabs > 1 ? " · " + tabs + " tabs" : "");
+		return items + (tabs > 1 ? " · " + tabs + " tabs" : "");
 	}
 
 	// Recompute the owned-items set on the client thread (reading client state isn't EDT-safe), then refresh
@@ -2370,6 +3532,12 @@ public class BankTemplatesPanel extends PluginPanel
 				templateManager.setSuppressChangeEvents(false);
 			}
 			webSyncLinked = true;
+			// The linked account's own profile, so YOUR cards can carry your avatar/theme/name instead of
+			// the defaulted placeholder. Kept from the last sync that supplied one.
+			if (result.profile != null)
+			{
+				selfProfile = result.profile;
+			}
 			if (result.bankValue != null)
 			{
 				setBankValue(result.bankValue); // fresh heartbeat value - no bank change needed
@@ -2445,6 +3613,22 @@ public class BankTemplatesPanel extends PluginPanel
 				t.setUpdatedAt(wt.updatedAt);
 				t.setName(uniqueName(capName(t.getName())));
 				templateManager.saveSyncedTemplate(t);
+			}
+		}
+
+		// Copies the server refused because the website deleted them. These generally have NO webId (they
+		// were never created up there), so the web-backed pass below can't see them - and the server will
+		// keep refusing them, so they would otherwise sit here forever, absent from the website and
+		// inflating the local count against it. Only keys the server explicitly named are removed.
+		if (result.deleted != null && !result.deleted.isEmpty())
+		{
+			final Set<String> refused = new HashSet<>(result.deleted);
+			for (BankTemplate t : new ArrayList<>(templateManager.getUserTemplates()))
+			{
+				if (!t.isPreset() && !t.isOwned() && t.getClientKey() != null && refused.contains(t.getClientKey()))
+				{
+					templateManager.deleteUserTemplate(t);
+				}
 			}
 		}
 
@@ -2585,14 +3769,31 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		else
 		{
+			final long editedFrom = template.getUpdatedAt();
 			TemplateEditor.open(this, itemManager, itemIndex, clientThread, layoutEditor, templateManager, template,
 				() ->
 				{
+					claimOwnershipIfEdited(template, editedFrom);
 					rebuildOnEdt();
 					maybePromptPushAfterEdit(template);
 				});
 		}
 		rebuildOnEdt();
+	}
+
+	// An imported template the user actually changes becomes their OWN new template: its card switches to
+	// the user's (defaulted) profile, it drops the original owner, and it detaches from the community source
+	// so nothing is pushed back there and it can be shared fresh. Only fires when an edit really happened
+	// (updatedAt moved), so merely opening the editor to look doesn't claim someone else's template.
+	private void claimOwnershipIfEdited(BankTemplate template, long editedFrom)
+	{
+		if (!template.isOwned() && template.getOwnerProfile() != null && template.getUpdatedAt() != editedFrom)
+		{
+			template.setOwned(true);
+			template.setOwnerProfile(null);
+			template.setRepoId(null);
+			templateManager.saveUserTemplate(template);
+		}
 	}
 
 	// After editing a template you've shared, offer to push the changes to your community copy. Imports and
@@ -2654,6 +3855,7 @@ public class BankTemplatesPanel extends PluginPanel
 		t.putTab(BankTemplate.MAIN_TAB, new ArrayList<>());
 		if (templateManager.saveUserTemplate(t))
 		{
+			revealName = t.getName();
 			rebuildOnEdt();
 			TemplateEditor.open(this, itemManager, itemIndex, clientThread, layoutEditor, templateManager, t,
 				() ->

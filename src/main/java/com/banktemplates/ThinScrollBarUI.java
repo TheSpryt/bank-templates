@@ -13,14 +13,15 @@ import javax.swing.JScrollPane;
 import javax.swing.plaf.basic.BasicScrollBarUI;
 
 /**
- * A thin, borderless scrollbar with a rounded translucent-white thumb and no arrow buttons or track,
- * replacing Swing's chunky default. Apply with {@link #style(JScrollPane)}.
+ * A thin, borderless scrollbar with a rounded gold thumb and no arrow buttons or track, replacing Swing's
+ * chunky default. Apply with {@link #style(JScrollPane)}.
  */
 final class ThinScrollBarUI extends BasicScrollBarUI
 {
 	private static final int THICKNESS = 7;
-	private static final Color THUMB = new Color(255, 255, 255, 120);
-	private static final Color THUMB_HOVER = new Color(255, 255, 255, 200);
+	// The panel's icon gold, slightly translucent at rest and solid on hover.
+	private static final Color THUMB = new Color(0xE8, 0xC0, 0x50, 170);
+	private static final Color THUMB_HOVER = new Color(0xE8, 0xC0, 0x50, 255);
 
 	static void style(JScrollPane scrollPane)
 	{

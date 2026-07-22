@@ -1,5 +1,18 @@
 [
   {
+    "version": "2.0.0",
+    "notes": [
+      "My Templates and Browse now show the same profile-styled cards. A template you imported and haven't changed keeps the original owner's name, icon and card; edit it and it becomes yours. Everything about an Exchange Insights account stays opt-in - without one your cards simply show the default styling.",
+      "Capture and New are now a single green '+' card at the top of My Templates, which asks whether to start from your current bank or from an empty layout. Capturing from your bank is only offered when there's a bank to capture. A new template is scrolled into view when it's created, paging there if it landed on another page.",
+      "Click anywhere on a card to apply it (or to preview it, in Browse); the icon buttons keep their own actions. The applied template is ringed in red.",
+      "The avatar on a card is now a button: it opens that player's Exchange Insights profile in your browser. Cards show import and report counts, and how many of the template's items you already own - the item counts now work while logged out too, from your last synced bank.",
+      "Pagination sits at the top and the bottom of both lists, so paging never means scrolling to find the control or to see where you landed.",
+      "Sorting and searching for both tabs, a link out to the same list on the website, and a scrollbar that's always visible.",
+      "Visual pass: the RuneScape font throughout, rounded corners on the inputs, gold dropdown arrows and tab labels, hover feedback on every card and icon, and icons in place of the old buttons.",
+      "Virtual tabs from an active template will now continue to render whilst using a bank tag tab or the Quest Helper plugin's bank tab, etc."
+    ]
+  },
+  {
     "version": "1.6.6",
     "notes": [
       "Bank view: withdrawing items quickly no longer rearranges your template. Dragging to rearrange now only kicks in once the game itself starts a drag, so it follows the client's drag delay and the Anti Drag plugin's settings. Previously a quick withdraw click that slid a few pixels counted as a drag, which could move the item to another slot or send it to the end of the tab, quietly shuffling your layout. Thanks for the report and video!"
