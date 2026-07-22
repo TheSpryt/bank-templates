@@ -1723,9 +1723,15 @@ public class BankTemplatesPanel extends PluginPanel
 		buttons.add(Box.createHorizontalGlue());
 		// Share stats for your OWN templates: how many imported it / reported it. Greyed out until the template
 		// has actually been shared to the community (nothing to count before then).
-		if (!template.isPreset() && template.isOwned())
+		// Yours either way: made in the plugin (owned), or made on the website and pulled down by the duplex
+		// sync (webSynced, which stays owned=false because the website copy is the original). Gating on
+		// owned alone hid the counts on every template its creator made on the site.
+		if (!template.isPreset() && (template.isOwned() || template.isWebSynced()))
 		{
-			final boolean shared = template.getRepoId() != null;
+			// Counts only mean something once a copy is public: a community share (repoId), or a website
+			// template the sync has reported reach for.
+			final boolean shared = template.getRepoId() != null
+				|| (template.isWebSynced() && template.getShareDownloads() != null);
 			final Color dCol = shared ? UPVOTE_COLOR : STAT_MUTED;
 			final Color fCol = shared ? DOWNVOTE_COLOR : STAT_MUTED;
 			// Always show a number - a template with no imports/reports reads as 0, never as a bare icon.
@@ -3716,6 +3722,9 @@ public class BankTemplatesPanel extends PluginPanel
 		localCopy.restoreTabsFrom(fresh); // copies tabs + columns
 		localCopy.setWebId(wt.id);
 		localCopy.setWebSynced(true);
+		// Refreshed on every sync, so the card's import and report counts track the shared copy.
+		localCopy.setShareDownloads(wt.downloads);
+		localCopy.setShareReports(wt.reports);
 		if (wt.clientKey != null)
 		{
 			localCopy.setClientKey(wt.clientKey);
