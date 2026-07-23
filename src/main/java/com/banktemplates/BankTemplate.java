@@ -76,6 +76,13 @@ public class BankTemplate
 		public String handle;          // @handle, when known
 		public String bg;              // profile_bg theme key (null → the neutral default card)
 		public Integer avatarItemId;   // item whose icon is the avatar (null → initial letter)
+		// The ORIGINAL community template's popularity at import time. Kept here, not in shareDownloads/
+		// shareReports, because the My Templates sync overwrites those with YOUR private copy's counts
+		// (which are zero - you haven't shared it), leaving an imported card reading 0 imports while it
+		// still shows the original owner. Snapshot like the rest of this profile; cleared on the edit
+		// that claims the template, so it never lingers once the card becomes yours.
+		public Integer downloads;      // how many imported the original
+		public Integer reports;        // how many reported the original
 	}
 
 	public BankTemplate()

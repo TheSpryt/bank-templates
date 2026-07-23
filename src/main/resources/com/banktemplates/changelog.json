@@ -1,5 +1,14 @@
 [
   {
+    "version": "2.2.0",
+    "notes": [
+      "An imported template now shows the original's live import and report counts instead of 0. The counts refresh in the background while the panel is open, so they track the community template as other players import or report it. Thanks for the report!",
+      "Sharing an imported template you haven't changed now makes it your own: it uploads under your name and its counts start fresh at zero, so you can't republish someone else's template under their name.",
+      "New Placeholder transparency setting under Layout: choose how see-through the faded placeholder icons are, from solid to invisible. It covers both the template's own placeholders and real bank placeholders. Thanks for the request!",
+      "The search box no longer grabs your cursor. A background refresh while you play used to pull the caret into the search field mid-action; it now only takes focus when you were already typing there."
+    ]
+  },
+  {
     "version": "2.1.0",
     "notes": [
       "Item matching: a recoloured or upgraded version of an item now counts as the item your template asks for. Golden prospector matches ordinary prospector, and the same goes for the Forestry outfit and lumberjack, spirit angler and angler, the forestry basket and log basket, radiant oathplate, sanguine torva, twisted ancestral and the corrupted voidwaker. Before this, a template built with one version treated the other as the wrong item and the reorganise helper told you to move a piece that was already in the right place. Thanks for the report!"
