@@ -6,6 +6,8 @@ import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
+import net.runelite.client.config.Range;
+import net.runelite.client.config.Units;
 
 @ConfigGroup(BankTemplatesConfig.GROUP)
 public interface BankTemplatesConfig extends Config
@@ -146,11 +148,27 @@ public interface BankTemplatesConfig extends Config
 		return true;
 	}
 
+	// Percent (not the widget's 0-255 opacity) so the setting reads naturally: 0% solid, 100% invisible.
+	// 47% reproduces the long-standing hardcoded value the renderer used before this was configurable.
+	@Range(max = 100)
+	@Units(Units.PERCENT)
+	@ConfigItem(
+		keyName = "placeholderTransparency",
+		name = "Placeholder transparency",
+		description = "How see-through the faded placeholder icons are while a template is applied. 0% is solid, 100% is invisible. Affects both the template's own unowned-item placeholders and real bank placeholders.",
+		position = 2,
+		section = layoutSection
+	)
+	default int placeholderTransparency()
+	{
+		return 47;
+	}
+
 	@ConfigItem(
 		keyName = "hideNonTemplateItems",
 		name = "Hide items not in the template",
 		description = "When a template is applied, hide bank items it doesn't include instead of showing them below. Note: those items stay invisible in the bank view until you switch the template off.",
-		position = 2,
+		position = 3,
 		section = layoutSection
 	)
 	default boolean hideNonTemplateItems()
