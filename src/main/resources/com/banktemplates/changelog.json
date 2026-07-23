@@ -1,5 +1,11 @@
 [
   {
+    "version": "2.1.0",
+    "notes": [
+      "Item matching: a recoloured or upgraded version of an item now counts as the item your template asks for. Golden prospector matches ordinary prospector, and the same goes for the Forestry outfit and lumberjack, spirit angler and angler, the forestry basket and log basket, radiant oathplate, sanguine torva, twisted ancestral and the corrupted voidwaker. Before this, a template built with one version treated the other as the wrong item and the reorganise helper told you to move a piece that was already in the right place. Thanks for the report!"
+    ]
+  },
+  {
     "version": "2.0.0",
     "notes": [
       "My Templates and Browse now show the same profile-styled cards. A template you imported and haven't changed keeps the original owner's name, icon and card; edit it and it becomes yours. Everything about an Exchange Insights account stays opt-in - without one your cards simply show the default styling.",
