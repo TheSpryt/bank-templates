@@ -17,6 +17,7 @@ import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.Image;
 import java.awt.Insets;
+import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
@@ -932,9 +933,20 @@ public class BankTemplatesPanel extends PluginPanel
 		return w != null && w.isActive();
 	}
 
-	private void restoreSearchFocus()
+	// True when keyboard focus currently sits on some component inside this panel. Used to decide whether a
+	// rebuild should put the caret back in the search box: only when the user was already interacting with
+	// the panel, never when focus is on the game canvas (null to Swing) or another window. Most rebuilds are
+	// background-triggered - a sync poll, a stats refresh, a bank update - and those must not pull the cursor
+	// away from whatever the player is doing.
+	private boolean panelHoldsFocus()
 	{
-		if (UPDATES.equals(mode) || !searchBar.isVisible() || !ownWindowActive())
+		final Component focused = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+		return focused != null && SwingUtilities.isDescendingFrom(focused, this);
+	}
+
+	private void restoreSearchFocus(boolean hadFocus)
+	{
+		if (!hadFocus || UPDATES.equals(mode) || !searchBar.isVisible() || !ownWindowActive())
 		{
 			return;
 		}
@@ -949,6 +961,9 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private void rebuildOnEdt()
 	{
+		// Capture BEFORE removeAll(): tearing the list down can drop the focus owner (say a card the user
+		// just clicked) to null, which afterwards is indistinguishable from the game canvas holding focus.
+		final boolean hadFocus = panelHoldsFocus();
 		listContainer.removeAll();
 		reorgSlot.removeAll();   // refilled by buildLocalView only in My Templates mode
 		controlsSlot.removeAll();
@@ -967,9 +982,9 @@ public class BankTemplatesPanel extends PluginPanel
 		listContainer.revalidate();
 		listContainer.repaint();
 		// Put the caret back in the search box after a rebuild, so clicking a card, an icon or a tab doesn't
-		// silently stop your typing. Skipped whenever another WINDOW holds focus - the template editor and
-		// the dialogs need their own fields to keep it.
-		restoreSearchFocus();
+		// silently stop your typing - but ONLY if focus was already inside the panel. A background rebuild
+		// while you're playing (a sync poll, a stats refresh) must not steal the cursor from the game.
+		restoreSearchFocus(hadFocus);
 		reorgSlot.revalidate();
 		reorgSlot.repaint();
 		controlsSlot.revalidate();
@@ -1725,22 +1740,42 @@ public class BankTemplatesPanel extends PluginPanel
 		// Yours either way: made in the plugin (owned), or made on the website and pulled down by the duplex
 		// sync (webSynced, which stays owned=false because the website copy is the original). Gating on
 		// owned alone hid the counts on every template its creator made on the site.
-		if (!template.isPreset() && (template.isOwned() || template.isWebSynced()))
+		// `owner` is set only for an imported template you haven't edited into your own - its counts are
+		// the ORIGINAL community template's, so it always has real numbers to show.
+		final boolean isImport = owner != null;
+		if (!template.isPreset() && (isImport || template.isOwned() || template.isWebSynced()))
 		{
-			// Counts only mean something once a copy is public: a community share (repoId), or a website
-			// template the sync has reported reach for.
-			final boolean shared = template.getRepoId() != null
-				|| (template.isWebSynced() && template.getShareDownloads() != null);
+			final int dCount, fCount;
+			final boolean shared;
+			final String dTip, fTip;
+			if (isImport)
+			{
+				// Show how the template you imported is doing in the community, not "your shared copy" - you
+				// don't own this one. These come from the import-time snapshot, which the sync leaves alone
+				// (unlike shareDownloads/shareReports, which it zeroes for your own not-yet-shared copy).
+				dCount = owner.downloads != null ? owner.downloads : 0;
+				fCount = owner.reports != null ? owner.reports : 0;
+				shared = true;
+				dTip = "Imports of this template";
+				fTip = "Reports of this template";
+			}
+			else
+			{
+				// Counts only mean something once a copy is public: a community share (repoId), or a website
+				// template the sync has reported reach for.
+				shared = template.getRepoId() != null
+					|| (template.isWebSynced() && template.getShareDownloads() != null);
+				// Always show a number - a template with no imports/reports reads as 0, never as a bare icon.
+				dCount = template.getShareDownloads() != null ? template.getShareDownloads() : 0;
+				fCount = template.getShareReports() != null ? template.getShareReports() : 0;
+				dTip = shared ? "Imports of your shared copy" : "Share this template to track imports";
+				fTip = shared ? "Reports of your shared copy" : "Share this template to track reports";
+			}
 			final Color dCol = shared ? UPVOTE_COLOR : STAT_MUTED;
 			final Color fCol = shared ? DOWNVOTE_COLOR : STAT_MUTED;
-			// Always show a number - a template with no imports/reports reads as 0, never as a bare icon.
-			final int dCount = template.getShareDownloads() != null ? template.getShareDownloads() : 0;
-			final int fCount = template.getShareReports() != null ? template.getShareReports() : 0;
-			buttons.add(statIcon(PanelIcons.download(dCol), dCount, dCol,
-				shared ? "Imports of your shared copy" : "Share this template to track imports"));
+			buttons.add(statIcon(PanelIcons.download(dCol), dCount, dCol, dTip));
 			buttons.add(Box.createHorizontalGlue());
-			buttons.add(statIcon(PanelIcons.flag(fCol), fCount, fCol,
-				shared ? "Reports of your shared copy" : "Share this template to track reports"));
+			buttons.add(statIcon(PanelIcons.flag(fCol), fCount, fCol, fTip));
 			buttons.add(Box.createHorizontalGlue());
 		}
 		// A preset is read-only, so it gets the magnifier (preview). Your own templates open the editor, so
@@ -2110,6 +2145,10 @@ public class BankTemplatesPanel extends PluginPanel
 		op.handle = p != null ? p.handle : null;
 		op.bg = p != null ? p.profileBg : null;
 		op.avatarItemId = p != null ? p.avatarItemId : null;
+		// The original's popularity, so the imported card shows how the community template is doing
+		// rather than the zeros of your own not-yet-shared copy.
+		op.downloads = rt.downloads;
+		op.reports = rt.reports;
 		return op;
 	}
 
@@ -2694,6 +2733,14 @@ public class BankTemplatesPanel extends PluginPanel
 						{
 							template.setRepoId(newId);
 							template.setOwned(true);
+							// Sharing an imported template makes it YOURS. It uploaded under your name and account
+							// (create never sends the original owner), so drop the original owner snapshot too:
+							// the card now shows you, and the new shared copy's counts start at zero instead of
+							// inheriting theirs. A later sync fills in the real numbers as players import it. This
+							// is what stops someone re-publishing another player's template under that player's name.
+							template.setOwnerProfile(null);
+							template.setShareDownloads(0);
+							template.setShareReports(0);
 						}
 						templateManager.saveUserTemplate(template);
 						rebuildOnEdt();
@@ -3506,6 +3553,9 @@ public class BankTemplatesPanel extends PluginPanel
 			return;
 		}
 		lastSyncStartedAt = System.currentTimeMillis(); // throttles the open-panel kick in onActivate
+		// Refresh imported cards' popularity on the same cadence. Independent of the account sync below (imports
+		// work without a linked account), and best-effort - a failure leaves the last-known counts in place.
+		refreshImportStats();
 		// Snapshot the change counter before gathering, so afterSync knows exactly which changes this pass
 		// covers - a change that arrives mid-sync bumps the counter and is retried, never dropped.
 		final long startSeq = changeSeq;
@@ -3519,6 +3569,62 @@ public class BankTemplatesPanel extends PluginPanel
 			}
 		}
 		repositoryClient.sync(local, result -> SwingUtilities.invokeLater(() -> applySyncResult(result, startSeq)));
+	}
+
+	// Pull live import/report counts for every imported-but-unedited template and fold them into the owner
+	// snapshot the card renders from. Only these carry an ownerProfile with a repoId, so the set is naturally
+	// scoped to imports. On any failure the callback leaves the card as-is.
+	private void refreshImportStats()
+	{
+		final Map<Long, BankTemplate> byRepoId = new HashMap<>();
+		for (BankTemplate t : templateManager.getUserTemplates())
+		{
+			if (!t.isPreset() && !t.isOwned() && t.getOwnerProfile() != null && t.getRepoId() != null)
+			{
+				byRepoId.put(t.getRepoId(), t);
+			}
+		}
+		if (byRepoId.isEmpty())
+		{
+			return;
+		}
+		repositoryClient.fetchStats(byRepoId.keySet(),
+			stats -> SwingUtilities.invokeLater(() -> applyImportStats(byRepoId, stats)),
+			err ->
+			{
+				// Keep the last-known snapshot: a blanked card is worse than a slightly stale count.
+			});
+	}
+
+	private void applyImportStats(Map<Long, BankTemplate> byRepoId, Map<Long, int[]> stats)
+	{
+		boolean changed = false;
+		for (Map.Entry<Long, int[]> e : stats.entrySet())
+		{
+			final BankTemplate t = byRepoId.get(e.getKey());
+			// The template may have been edited into the user's own (or deleted) between the request and its
+			// reply; in that case its counts are no longer the original's, so leave it alone.
+			if (t == null || t.isOwned() || t.getOwnerProfile() == null)
+			{
+				continue;
+			}
+			final BankTemplate.OwnerProfile op = t.getOwnerProfile();
+			final int downloads = e.getValue()[0];
+			final int reports = e.getValue()[1];
+			if (!Integer.valueOf(downloads).equals(op.downloads) || !Integer.valueOf(reports).equals(op.reports))
+			{
+				op.downloads = downloads;
+				op.reports = reports;
+				// Not a user edit - saveSyncedTemplate persists without stamping updatedAt, so this refresh
+				// can't masquerade as a local change and trigger a spurious duplex push.
+				templateManager.saveSyncedTemplate(t);
+				changed = true;
+			}
+		}
+		if (changed)
+		{
+			rebuild();
+		}
 	}
 
 	private void applySyncResult(TemplateRepositoryClient.SyncResult result, long startSeq)

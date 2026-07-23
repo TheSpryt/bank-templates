@@ -13,6 +13,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -368,6 +369,59 @@ public class TemplateRepositoryClient
 		addSig(rb, bodyJson);
 		addAuth(rb);
 		send(rb.build(), b -> onSuccess.run(), onError);
+	}
+
+	// Live import/report counts for a set of shared templates, keyed by repo id. An imported card shows the
+	// ORIGINAL community template's popularity, which drifts as others import or report it, so the plugin
+	// refreshes these rather than freezing them at import time. Best-effort by contract: any failure (offline,
+	// bad response, repository off) yields onError, and the caller keeps whatever snapshot it already had.
+	// Ids the server doesn't return (removed or unapproved templates) are simply absent from the map.
+	void fetchStats(java.util.Collection<Long> repoIds, Consumer<Map<Long, int[]>> onSuccess, Consumer<String> onError)
+	{
+		if (!isEnabled() || repoIds == null || repoIds.isEmpty())
+		{
+			onSuccess.accept(Collections.emptyMap());
+			return;
+		}
+		final JsonObject body = new JsonObject();
+		final JsonArray arr = new JsonArray();
+		for (Long id : repoIds)
+		{
+			if (id != null)
+			{
+				arr.add(id);
+			}
+		}
+		body.add("ids", arr);
+		final String bodyJson = gson.toJson(body);
+		final Request.Builder rb = new Request.Builder()
+			.url(baseUrl() + "/api/bank-templates/stats")
+			.post(RequestBody.create(JSON, bodyJson));
+		addSig(rb, bodyJson);
+		send(rb.build(), respBody ->
+		{
+			final Map<Long, int[]> out = new java.util.HashMap<>();
+			try
+			{
+				final JsonObject obj = gson.fromJson(respBody, JsonObject.class);
+				final JsonArray stats = obj != null && obj.has("stats") ? obj.getAsJsonArray("stats") : null;
+				if (stats != null)
+				{
+					for (int i = 0; i < stats.size(); i++)
+					{
+						final JsonObject s = stats.get(i).getAsJsonObject();
+						out.put(s.get("id").getAsLong(), new int[]{s.get("downloads").getAsInt(), s.get("reports").getAsInt()});
+					}
+				}
+			}
+			catch (RuntimeException e)
+			{
+				// Malformed or unexpected JSON: treat as "no update available", never propagate a crash to the panel.
+				onError.accept("Bad stats response.");
+				return;
+			}
+			onSuccess.accept(out);
+		}, onError);
 	}
 
 	private JsonObject payload(BankTemplate template, String author, boolean anonymous)
