@@ -75,7 +75,6 @@ import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.game.ItemManager;
-import net.runelite.client.game.ItemVariationMapping;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import java.awt.image.BufferedImage;
@@ -3392,7 +3391,7 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			if (it.getId() > 0 && it.getId() != BankTemplate.FILLER && it.getQuantity() > 0)
 			{
-				owned.add(ItemVariationMapping.map(it.getId()));
+				owned.add(ItemVariants.base(it.getId()));
 			}
 		}
 		return owned;
@@ -3407,7 +3406,7 @@ public class BankTemplatesPanel extends PluginPanel
 			for (Integer v : t.getLayout())
 			{
 				if (v != null && v > 0 && v != BankTemplate.FILLER
-					&& owned.contains(ItemVariationMapping.map(v)))
+					&& owned.contains(ItemVariants.base(v)))
 				{
 					n++;
 				}
