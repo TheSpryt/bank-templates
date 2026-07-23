@@ -37,7 +37,6 @@ import net.runelite.api.VarClientInt;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.input.MouseListener;
-import net.runelite.client.game.ItemVariationMapping;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -1279,7 +1278,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 	private int reorgId(int id)
 	{
 		final int canon = itemManager.canonicalize(id);
-		return exactShared.contains(canon) ? canon : -(ItemVariationMapping.map(canon) + 1);
+		return exactShared.contains(canon) ? canon : -(ItemVariants.base(canon) + 1);
 	}
 
 	// Canonical ids of everything in the bank (what the player owns).

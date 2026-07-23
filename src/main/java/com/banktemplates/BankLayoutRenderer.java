@@ -29,7 +29,6 @@ import net.runelite.api.widgets.JavaScriptCallback;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetType;
 import net.runelite.client.game.ItemManager;
-import net.runelite.client.game.ItemVariationMapping;
 import net.runelite.client.util.Text;
 
 /**
@@ -1179,8 +1178,8 @@ public class BankLayoutRenderer
 
 	private int matchVariant(Set<Integer> bank, int itemId)
 	{
-		final int baseId = ItemVariationMapping.map(itemId);
-		final Collection<Integer> variations = ItemVariationMapping.getVariations(baseId);
+		final int baseId = ItemVariants.base(itemId);
+		final Collection<Integer> variations = ItemVariants.variations(baseId);
 		if (variations.size() > 1)
 		{
 			for (int variationId : variations)
