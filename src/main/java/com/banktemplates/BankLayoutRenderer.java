@@ -905,7 +905,7 @@ public class BankLayoutRenderer
 			// Show a "0" stack count (top-left, like the real bank's leftover placeholders) so it's clear at a
 			// glance that you own none of this item.
 			c.setItemQuantityMode(ItemQuantityMode.ALWAYS);
-			c.setOpacity(120);
+			c.setOpacity(placeholderOpacity());
 			c.setAction(10 - 1, "Examine");
 		}
 		else
@@ -974,6 +974,15 @@ public class BankLayoutRenderer
 
 		position(c, idx, columns);
 		c.setHidden(false);
+	}
+
+	// The config stores a transparency PERCENT (0 solid .. 100 invisible) because that reads naturally to a
+	// player; the widget's setOpacity wants 0..255 where 0 is fully opaque. Default 47% maps to 120, the
+	// value the renderer hardcoded before this became configurable (issue #38).
+	private int placeholderOpacity()
+	{
+		final int pct = Math.max(0, Math.min(100, config.placeholderTransparency()));
+		return Math.round(pct * 255f / 100f);
 	}
 
 	private void drawFiller(Widget c, int idx, int columns)
