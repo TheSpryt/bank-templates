@@ -21,9 +21,14 @@ import net.runelite.client.game.ItemVariationMapping;
  * the reorganise helper told them to move a helmet that was already exactly where it belonged, down
  * to the bottom of the tab with the items the template does not want.
  *
+ * The rest of the supplement covers the same shape of gap: forestry and lumberjack, spirit angler and
+ * angler, forestry basket and log basket, radiant oathplate, sanguine torva, twisted ancestral.
+ *
  * Only add a family here after confirming RuneLite really does leave it ungrouped, and that the pieces
  * are genuinely interchangeable for the purpose of "does this slot hold the right thing" - a recolour
- * or a cosmetic kit, not a different item that merely shares a name.
+ * or an upgrade of the same item, not a different item that merely shares a name. Most sets need no
+ * entry: crystal armour, the crystal crown, bow of faerdhinen and blade of saeldor already carry all
+ * eight elven clan recolours in RuneLite's own groups, as do slayer helmets, black masks and graceful.
  */
 final class ItemVariants
 {
@@ -42,17 +47,67 @@ final class ItemVariants
 		EXTRA.put(25551, 12014); // Golden prospector jacket -> Prospector jacket
 		EXTRA.put(25553, 12015); // Golden prospector legs   -> Prospector legs
 		EXTRA.put(25555, 12016); // Golden prospector boots  -> Prospector boots
+
+		// Forestry outfit (anima-infused bark recolour) -> lumberjack. Same woodcutting bonus,
+		// and RuneLite groups neither side, so the two sets never matched each other.
+		EXTRA.put(28173, 10941); // Forestry hat   -> Lumberjack hat
+		EXTRA.put(28169, 10939); // Forestry top   -> Lumberjack top
+		EXTRA.put(28171, 10940); // Forestry legs  -> Lumberjack legs
+		EXTRA.put(28175, 10933); // Forestry boots -> Lumberjack boots
+
+		// Spirit angler -> angler. Keyed on 25592, the base of RuneLite's own "spirit angler headband"
+		// group, so its second member (31252) collapses with it rather than being left behind.
+		EXTRA.put(25592, 13258); // Spirit angler headband -> Angler hat
+		EXTRA.put(25594, 13259); // Spirit angler top      -> Angler top
+		EXTRA.put(25596, 13260); // Spirit angler waders   -> Angler waders
+		EXTRA.put(25598, 13261); // Spirit angler boots    -> Angler boots
+
+		// Forestry basket -> log basket, the upgrade of the same storage item. Both sides are grouped,
+		// but as two separate groups, so this links group base to group base and the open forms
+		// (28145 and 28142) follow their own groups.
+		EXTRA.put(28143, 28140); // Forestry basket -> Log basket
+
+		// Radiant oathplate -> oathplate.
+		EXTRA.put(30777, 30750); // Radiant oathplate helm  -> Oathplate helm
+		EXTRA.put(30779, 30753); // Radiant oathplate chest -> Oathplate chest
+		EXTRA.put(30781, 30756); // Radiant oathplate legs  -> Oathplate legs
+
+		// Sanguine torva -> torva. The targets are the ordinary pieces; RuneLite maps those onto the
+		// damaged ids (26376/26378/26380), which is the group identity the rest of the plugin sees.
+		EXTRA.put(28254, 26382); // Sanguine torva full helm -> Torva full helm
+		EXTRA.put(28256, 26384); // Sanguine torva platebody -> Torva platebody
+		EXTRA.put(28258, 26386); // Sanguine torva platelegs -> Torva platelegs
+
+		// Corrupted voidwaker -> voidwaker, the other completed form. RuneLite groups the ordinary and
+		// deadman voidwakers together and leaves the corrupted one out. The blade, hilt and gem stay
+		// separate: they are the pieces you bank before assembling one, not another finished weapon.
+		EXTRA.put(28531, 27690); // Corrupted voidwaker -> Voidwaker
+
+		// Twisted ancestral -> ancestral. The colour kit (24670) is deliberately absent: it is a
+		// separate item a player can bank on its own, not a robe.
+		EXTRA.put(24664, 21018); // Twisted ancestral hat         -> Ancestral hat
+		EXTRA.put(24666, 21021); // Twisted ancestral robe top    -> Ancestral robe top
+		EXTRA.put(24668, 21024); // Twisted ancestral robe bottom -> Ancestral robe bottom
 	}
 
 	/**
 	 * The base id for {@code itemId}, collapsing recolours and other variants onto one identity.
 	 * Falls back to RuneLite's mapping, which returns the id itself when it knows no group.
+	 *
+	 * The supplement is consulted both before and after that mapping. Some variant sets are groups in
+	 * their own right rather than loose ids - spirit angler headband holds 25592 and 31252, forestry
+	 * basket holds the closed and open forms - so a supplement keyed on the group's base only reaches
+	 * the other members once RuneLite has collapsed them onto it first.
 	 */
 	static int base(int itemId)
 	{
-		final Integer extra = EXTRA.get(itemId);
-		final int id = extra != null ? extra : itemId;
-		return ItemVariationMapping.map(id);
+		final int canonical = ItemVariationMapping.map(itemId);
+		Integer extra = EXTRA.get(itemId);
+		if (extra == null)
+		{
+			extra = EXTRA.get(canonical);
+		}
+		return extra != null ? ItemVariationMapping.map(extra) : canonical;
 	}
 
 	/**
@@ -70,6 +125,9 @@ final class ItemVariants
 			if (ItemVariationMapping.map(e.getValue()) == baseId)
 			{
 				out.add(e.getKey());
+				// Pull in the rest of the variant's own group, if it has one, so linking to its base
+				// brings its siblings along: the open forestry basket, the second angler headband.
+				out.addAll(ItemVariationMapping.getVariations(e.getKey()));
 			}
 		}
 		return out;
