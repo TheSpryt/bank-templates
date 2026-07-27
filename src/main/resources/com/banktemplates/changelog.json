@@ -7,7 +7,8 @@
       "New Placeholder transparency setting under Layout: choose how see-through the faded placeholder icons are, from solid to invisible. It covers both the template's own placeholders and real bank placeholders. Thanks for the request!",
       "The search box no longer grabs your cursor. A background refresh while you play used to pull the caret into the search field mid-action; it now only takes focus when you were already typing there.",
       "The Link Exchange Insights account button now shows even before you've turned the community repository on. Clicking it asks to enable the repository first, then links in the same step, instead of hiding until you found the setting yourself.",
-      "Bank sync now skips temporary game mode worlds. Your bank on Leagues, Deadman, tournament and other seasonal worlds is a separate, throwaway bank, so it's no longer uploaded - only your real main-game bank is synced."
+      "Bank sync now skips temporary game mode worlds. Your bank on Leagues, Deadman, tournament and other seasonal worlds is a separate, throwaway bank, so it's no longer uploaded - only your real main-game bank is synced.",
+      "Turning a layout off now fully hands the bank back. Once Apply layout is disabled the plugin no longer touches which tab the bank opens on - previously a tab you'd viewed while a layout was applied kept forcing the bank open on it, and only switching the whole plugin off stopped it. Thanks for the report!"
     ]
   },
   {
