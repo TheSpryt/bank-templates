@@ -423,36 +423,42 @@ public class BankTemplatesPanel extends PluginPanel
 	private void refreshAccountRow()
 	{
 		accountRow.removeAll();
-		if (repositoryClient.isEnabled())
+		accountRow.add(Box.createVerticalStrut(8));
+		final JButton btn;
+		if (!repositoryClient.isEnabled())
 		{
-			accountRow.add(Box.createVerticalStrut(8));
-			final JButton btn;
-			if (linking)
-			{
-				// The browser hint only applies to the device flow; with a token the link is direct.
-				btn = accountButton(repositoryClient.effectiveToken() != null ? "Linking…" : "Linking… approve it in your browser",
-					new Color(96, 74, 30));
-				btn.setEnabled(false);
-			}
-			else if (isLinkedForDisplay())
-			{
-				final String who = linkedHandle != null && !linkedHandle.isEmpty() ? " as " + linkedHandle : "";
-				btn = accountButton("✓ Account linked · Unlink", new Color(35, 78, 42));
-				btn.setToolTipText("Linked" + who + ". Click to unlink this character from your Exchange Insights account.");
-				btn.addActionListener(e -> startUnlink());
-			}
-			else
-			{
-				btn = accountButton("Link Exchange Insights account", new Color(94, 44, 44));
-				btn.setToolTipText(repositoryClient.effectiveToken() != null
-					? "Links this character to your Exchange Insights account using your existing token."
-					: "One-click: opens exchange-insights.gg to approve linking this character - no token to copy.");
-				btn.addActionListener(e -> startOneClickLink());
-			}
-			btn.setAlignmentX(Component.LEFT_ALIGNMENT);
-			btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-			accountRow.add(btn);
+			// Shown even before the user has opted in, so linking is always discoverable. No third-party
+			// contact happens from just showing it - clicking presents the opt-in first (startOneClickLink),
+			// and only a yes there turns the repository on and proceeds.
+			btn = accountButton("Link Exchange Insights account", new Color(94, 44, 44));
+			btn.setToolTipText("Links this character to your Exchange Insights account. You'll be asked to turn on the community repository first.");
+			btn.addActionListener(e -> startOneClickLink());
 		}
+		else if (linking)
+		{
+			// The browser hint only applies to the device flow; with a token the link is direct.
+			btn = accountButton(repositoryClient.effectiveToken() != null ? "Linking…" : "Linking… approve it in your browser",
+				new Color(96, 74, 30));
+			btn.setEnabled(false);
+		}
+		else if (isLinkedForDisplay())
+		{
+			final String who = linkedHandle != null && !linkedHandle.isEmpty() ? " as " + linkedHandle : "";
+			btn = accountButton("✓ Account linked · Unlink", new Color(35, 78, 42));
+			btn.setToolTipText("Linked" + who + ". Click to unlink this character from your Exchange Insights account.");
+			btn.addActionListener(e -> startUnlink());
+		}
+		else
+		{
+			btn = accountButton("Link Exchange Insights account", new Color(94, 44, 44));
+			btn.setToolTipText(repositoryClient.effectiveToken() != null
+				? "Links this character to your Exchange Insights account using your existing token."
+				: "One-click: opens exchange-insights.gg to approve linking this character - no token to copy.");
+			btn.addActionListener(e -> startOneClickLink());
+		}
+		btn.setAlignmentX(Component.LEFT_ALIGNMENT);
+		btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		accountRow.add(btn);
 		accountRow.revalidate();
 		accountRow.repaint();
 	}
@@ -547,10 +553,19 @@ public class BankTemplatesPanel extends PluginPanel
 	{
 		if (!repositoryClient.isEnabled())
 		{
-			JOptionPane.showMessageDialog(this,
-				"Turn on the community repository in the plugin settings first, then link your account.",
-				"Enable the repository", JOptionPane.INFORMATION_MESSAGE);
-			return;
+			// Present the opt-in at the point of linking rather than sending the user off to find a setting.
+			// Accepting turns the repository on (its own config-change handler picks it up) and we link now;
+			// declining leaves everything off and contacts no third-party server.
+			final int ok = JOptionPane.showConfirmDialog(this,
+				"<html><body style='width:260px'>Linking your Exchange Insights account uses the community repository, which contacts exchange-insights.gg."
+					+ "<br><br>This submits your IP address to a third-party server not controlled or verified by RuneLite developers."
+					+ "<br><br>Turn it on and link this character now?</body></html>",
+				"Enable the community repository", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+			if (ok != JOptionPane.OK_OPTION)
+			{
+				return;
+			}
+			configManager.setConfiguration(BankTemplatesConfig.GROUP, "enableRepository", true);
 		}
 		if (linking)
 		{
