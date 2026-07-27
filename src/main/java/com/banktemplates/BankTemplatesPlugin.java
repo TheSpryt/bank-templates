@@ -3,7 +3,9 @@ package com.banktemplates;
 import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -18,6 +20,7 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.Point;
+import net.runelite.api.WorldType;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
@@ -298,6 +301,34 @@ public class BankTemplatesPlugin extends Plugin
 		}
 	}
 
+	// Temporary game modes keep their own separate bank that isn't the player's real main-game bank, so
+	// syncing it would pollute their tracked bank value and Banked XP. Never send a snapshot from one.
+	private static final Set<WorldType> TEMPORARY_WORLDS = EnumSet.of(
+		WorldType.SEASONAL,          // Leagues (and other seasonal events)
+		WorldType.DEADMAN,           // Deadman Mode
+		WorldType.TOURNAMENT_WORLD,  // tournament worlds
+		WorldType.QUEST_SPEEDRUNNING,
+		WorldType.FRESH_START_WORLD,
+		WorldType.BETA_WORLD,
+		WorldType.NOSAVE_MODE);
+
+	private boolean onTemporaryWorld()
+	{
+		final EnumSet<WorldType> types = client.getWorldType();
+		if (types == null)
+		{
+			return false;
+		}
+		for (final WorldType t : TEMPORARY_WORLDS)
+		{
+			if (types.contains(t))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	// (Re)arm the debounced snapshot send, replacing any pending one so a burst of bank changes
 	// collapses into a single read + send once things settle.
 	private synchronized void scheduleBankSnapshot(long delayMs)
@@ -325,7 +356,7 @@ public class BankTemplatesPlugin extends Plugin
 		// link state is still unknown (before the first sync answers), we skip; the next bank change after
 		// confirmation sends normally.
 		if (snapshotStopped || !config.syncBankSnapshot() || !repositoryClient.isEnabled()
-			|| !repositoryClient.hasIdentity() || !panel.isWebLinked())
+			|| !repositoryClient.hasIdentity() || !panel.isWebLinked() || onTemporaryWorld())
 		{
 			return;
 		}
