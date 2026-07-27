@@ -17,7 +17,6 @@ import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.Image;
 import java.awt.Insets;
-import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
@@ -941,44 +940,8 @@ public class BankTemplatesPanel extends PluginPanel
 		});
 	}
 
-	// True when this panel's own window is the active one, so a modal editor/dialog elsewhere keeps focus.
-	private boolean ownWindowActive()
-	{
-		final Window w = SwingUtilities.getWindowAncestor(this);
-		return w != null && w.isActive();
-	}
-
-	// True when keyboard focus currently sits on some component inside this panel. Used to decide whether a
-	// rebuild should put the caret back in the search box: only when the user was already interacting with
-	// the panel, never when focus is on the game canvas (null to Swing) or another window. Most rebuilds are
-	// background-triggered - a sync poll, a stats refresh, a bank update - and those must not pull the cursor
-	// away from whatever the player is doing.
-	private boolean panelHoldsFocus()
-	{
-		final Component focused = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
-		return focused != null && SwingUtilities.isDescendingFrom(focused, this);
-	}
-
-	private void restoreSearchFocus(boolean hadFocus)
-	{
-		if (!hadFocus || UPDATES.equals(mode) || !searchBar.isVisible() || !ownWindowActive())
-		{
-			return;
-		}
-		SwingUtilities.invokeLater(() ->
-		{
-			if (searchBar.isVisible() && ownWindowActive())
-			{
-				searchBar.requestFocusInWindow();
-			}
-		});
-	}
-
 	private void rebuildOnEdt()
 	{
-		// Capture BEFORE removeAll(): tearing the list down can drop the focus owner (say a card the user
-		// just clicked) to null, which afterwards is indistinguishable from the game canvas holding focus.
-		final boolean hadFocus = panelHoldsFocus();
 		listContainer.removeAll();
 		reorgSlot.removeAll();   // refilled by buildLocalView only in My Templates mode
 		controlsSlot.removeAll();
@@ -996,10 +959,8 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		listContainer.revalidate();
 		listContainer.repaint();
-		// Put the caret back in the search box after a rebuild, so clicking a card, an icon or a tab doesn't
-		// silently stop your typing - but ONLY if focus was already inside the panel. A background rebuild
-		// while you're playing (a sync poll, a stats refresh) must not steal the cursor from the game.
-		restoreSearchFocus(hadFocus);
+		// The search field is a plain text input: it never asks for focus on its own, so a background rebuild
+		// (a sync poll, a stats refresh, a bank update) never pulls the cursor away from the game.
 		reorgSlot.revalidate();
 		reorgSlot.repaint();
 		controlsSlot.revalidate();
