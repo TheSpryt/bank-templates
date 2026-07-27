@@ -321,6 +321,15 @@ public class BankLayoutRenderer
 	// Detected by the reset itself: a virtual tab reads back as 0 on open, a real tab as its own number.
 	void restoreViewedTabOnOpen()
 	{
+		// Only the applied layout creates the virtual tabs the game resets, so only then may we re-select
+		// one. With the layout disabled (or the reorg helper on, or no active template) the plugin must not
+		// touch the bank tab at all - otherwise a tab remembered while the layout was on keeps forcing the
+		// bank open on it even after the user turns the layout off (issue #39). Clear the stale memory too.
+		if (!config.applyLayout() || config.showReorgHelper() || templateManager.getActive() == null)
+		{
+			lastViewedTab = BankTemplate.MAIN_TAB;
+			return;
+		}
 		final int tab = lastViewedTab;
 		if (tab != BankTemplate.MAIN_TAB && client.getVarbitValue(VarbitID.BANK_CURRENTTAB) != tab)
 		{
