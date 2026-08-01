@@ -1,5 +1,11 @@
 [
   {
+    "version": "2.3.0",
+    "notes": [
+      "Bank value now counts what you are wearing and carrying, not just what is in the bank. Gear you keep equipped used to vanish from your total the moment you took it out; it is now included, so the figure reflects everything you own. Withdrawn items go back into their own placeholder slot, so a synced bank still looks the way you arranged it."
+    ]
+  },
+  {
     "version": "2.2.0",
     "notes": [
       "An imported template now shows the original's live import and report counts instead of 0. The counts refresh in the background while the panel is open, so they track the community template as other players import or report it. Thanks for the report!",
