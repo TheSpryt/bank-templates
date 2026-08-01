@@ -390,6 +390,12 @@ public class BankTemplatesPlugin extends Plugin
 		{
 			checksum = addSnapshotItem(items, all[idx], 0, checksum);
 		}
+		// Worn and carried items count as part of the bank. Withdrawing usually leaves a placeholder
+		// behind, so merging into it puts the item back in the slot the player keeps it in and the
+		// rendered bank looks the way it does in game. Anything with no slot to merge into (no
+		// placeholder, never banked) goes on the end of the main tab.
+		checksum = addHeldItems(items, client.getItemContainer(InventoryID.INV), checksum);
+		checksum = addHeldItems(items, client.getItemContainer(InventoryID.WORN), checksum);
 		if (items.isEmpty() || checksum == lastBankSnapshotChecksum)
 		{
 			return;
@@ -437,6 +443,52 @@ public class BankTemplatesPlugin extends Plugin
 		checksum = checksum * 31 + id;
 		checksum = checksum * 31 + qty;
 		return checksum * 31 + tab;
+	}
+
+	// Merge a held container (inventory or worn equipment) into the snapshot. An entry already present
+	// for the same item - a placeholder sitting at quantity 0, or a stack still partly banked - absorbs
+	// the quantity so the item keeps its bank position; otherwise it is appended to the main tab.
+	private long addHeldItems(List<int[]> items, ItemContainer container, long checksum)
+	{
+		if (container == null)
+		{
+			return checksum;
+		}
+		for (Item item : container.getItems())
+		{
+			if (item == null || item.getId() <= 0 || item.getQuantity() <= 0)
+			{
+				continue;
+			}
+			int id = item.getId();
+			final ItemComposition comp = itemManager.getItemComposition(id);
+			// Held items are never placeholders, but a noted stack points back at the real item.
+			if (comp.getNote() != -1 && comp.getLinkedNoteId() > 0)
+			{
+				id = comp.getLinkedNoteId();
+			}
+			final int qty = item.getQuantity();
+			int slot = -1;
+			for (int i = 0; i < items.size(); i++)
+			{
+				if (items.get(i)[0] == id)
+				{
+					slot = i;
+					break;
+				}
+			}
+			if (slot >= 0)
+			{
+				items.get(slot)[1] += qty;
+			}
+			else
+			{
+				items.add(new int[]{id, qty, 0});
+			}
+			checksum = checksum * 31 + id;
+			checksum = checksum * 31 + qty;
+		}
+		return checksum;
 	}
 
 	@Subscribe
