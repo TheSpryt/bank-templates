@@ -655,11 +655,10 @@ public class BankTemplatesPlugin extends Plugin
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
-		// The Exchange Insights plugin's token changed on this client. When we have no token of our
-		// own we borrow that one (see TemplateRepositoryClient.effectiveToken), so re-run the same
+		// The shared account token changed on this client. When we have no token of our own we
+		// use that one (see TemplateRepositoryClient.effectiveToken), so re-run the same
 		// link/refresh path as if our own token changed - set, cleared or replaced.
-		if (TemplateRepositoryClient.EI_PLUGIN_CONFIG_GROUP.equals(event.getGroup())
-			&& TemplateRepositoryClient.EI_PLUGIN_TOKEN_KEY.equals(event.getKey()))
+		if (SharedAccountToken.isTokenKey(event.getGroup(), event.getKey()))
 		{
 			eiLinkedHash = -1;
 			maybeLinkEiAccount(false);
