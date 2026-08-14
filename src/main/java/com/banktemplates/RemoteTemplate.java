@@ -48,6 +48,10 @@ class RemoteTemplate
 			for (TabLayout tl : tabs)
 			{
 				t.putTab(tl.getTab(), tl.getLayout());
+				// The uploader's chosen tab icons are part of the layout they shared, so an import gets
+				// them too. putTab can't carry them here: it only keeps an icon a tab already had, and
+				// this template was built empty just above.
+				t.setTabIcon(tl.getTab(), tl.getCustomIconId());
 			}
 		}
 		return t;
