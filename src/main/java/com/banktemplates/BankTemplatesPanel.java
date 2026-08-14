@@ -729,6 +729,8 @@ public class BankTemplatesPanel extends PluginPanel
 			// so the same token can be pasted into the Exchange Insights plugin if the player wants both. Setting
 			// it fires onConfigChanged(eiAccountToken) in the plugin, which (idempotently) re-links identity too.
 			configManager.setConfiguration(BankTemplatesConfig.GROUP, "eiAccountToken", token);
+			// Also publish to the shared slot so every plugin in the family is linked at once.
+			SharedAccountToken.set(configManager, token);
 		}
 		webSyncLinked = true;
 		linkedHandle = null;

@@ -88,15 +88,20 @@ public class TemplateRepositoryClient
 	 *  never copied into our config, so clearing or revoking it in either plugin takes effect here
 	 *  immediately. Nothing is ever fetched from the server - a token only exists locally once the
 	 *  user has linked one of the two plugins themselves. Null when neither plugin has a token. */
+	/** This plugin's own configured token when set, otherwise the shared account slot. The
+	 *  plugins used to read each other's config keys directly, which meant every new plugin
+	 *  required editing all the existing ones; they now meet at a single agreed location
+	 *  instead (see SharedAccountToken). Null when nothing is linked. */
 	String effectiveToken()
 	{
-		String t = config.eiAccountToken();
+		final String t = config.eiAccountToken();
 		if (t != null && !t.trim().isEmpty())
 		{
+			// Promote an explicitly pasted token so the other plugins pick it up too.
+			SharedAccountToken.set(configManager, t.trim());
 			return t.trim();
 		}
-		t = configManager.getConfiguration(EI_PLUGIN_CONFIG_GROUP, EI_PLUGIN_TOKEN_KEY);
-		return t == null || t.trim().isEmpty() ? null : t.trim();
+		return SharedAccountToken.get(configManager);
 	}
 
 	// The Exchange Insights plugin's config coordinates (see ExchangeInsightsConfig in that plugin).
