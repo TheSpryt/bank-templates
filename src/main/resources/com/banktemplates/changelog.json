@@ -1,5 +1,12 @@
 [
   {
+    "version": "2.3.1",
+    "notes": [
+      "Custom tab icons now survive a sync. On a linked account the copy coming back from the website wiped the icon you had picked, a few seconds after you set it, every time you tried. Templates imported from the community lost the uploader's icons the same way. The website held on to your icons throughout, so they come back on the next sync. Thanks for the report!",
+      "Linking your Exchange Insights account now happens in one shared place instead of each plugin reading the others' settings. Link once and every plugin that uses it is linked, whichever one you installed first, and uninstalling one no longer takes the link with it. Accounts linked before this keep working."
+    ]
+  },
+  {
     "version": "2.3.0",
     "notes": [
       "Bank value now counts what you are wearing and carrying, not just what is in the bank. Gear you keep equipped used to vanish from your total the moment you took it out; it is now included, so the figure reflects everything you own. Withdrawn items go back into their own placeholder slot, so a synced bank still looks the way you arranged it."

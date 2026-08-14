@@ -644,6 +644,10 @@ public class TemplateRepositoryClient
 				for (TabLayout tl : tabs)
 				{
 					t.putTab(tl.getTab(), tl.getLayout());
+					// putTab only carries an icon the tab ALREADY had, and this template was built empty a
+					// few lines up, so the tab it just created has none. Without this the icon the server
+					// sent is dropped, and the sync mirrors that blank back over the user's chosen icon.
+					t.setTabIcon(tl.getTab(), tl.getCustomIconId());
 				}
 			}
 			return t;
