@@ -205,10 +205,22 @@ public class BankTemplatesPanel extends PluginPanel
 	private static final long ACTIVATE_SYNC_MIN_MS = 10_000;
 	private static final long SYNC_RETRY_MIN_MS = 4_000;
 	private static final long SYNC_POLL_MS = 90_000;
+	// The server answers `linked: false` when this character belongs to no Exchange Insights account, and
+	// then there is nothing on the website to pull: the reply is an empty set every time. Most installs are
+	// in that state, so polling them on the normal cadence was the bulk of the traffic the website sees.
+	// It backs off rather than stopping, because the account can appear WITHOUT the panel being touched:
+	// the Exchange Insights plugin links the character ambiently on login, and if we lost that race on this
+	// login a hard stop would leave the plugin idle until the next one.
+	private static final long SYNC_POLL_UNLINKED_MS = 900_000;
+	// With the panel open and nothing changing, step the poll down instead of asking every 20s forever.
+	private static final long SYNC_POLL_IDLE_MAX_MS = 80_000;
 	private ScheduledFuture<?> pendingSyncTask;
 	private volatile long changeSeq; // bumped on each local change
 	private long syncedSeq; // highest changeSeq confirmed pushed to the website
 	private long syncBackoffMs;
+	// Consecutive idle passes with the panel open, driving the step-down above. Reset by any local change,
+	// by the panel being opened, and by a pass that actually brought something back.
+	private long syncIdleMs;
 
 	private final List<RemoteTemplate> browseResults = new ArrayList<>();
 	private String browseStatus;
@@ -3451,6 +3463,7 @@ public class BankTemplatesPanel extends PluginPanel
 	void syncWebTemplates()
 	{
 		syncStopped = false; // an explicit kick (login, repo enabled) restarts a stopped loop
+		syncIdleMs = 0;
 		scheduleSync(0);
 	}
 
@@ -3463,10 +3476,15 @@ public class BankTemplatesPanel extends PluginPanel
 	public void onActivate()
 	{
 		panelActive = true;
-		if (repositoryClient.isEnabled() && !syncStopped
-			&& System.currentTimeMillis() - lastSyncStartedAt > ACTIVATE_SYNC_MIN_MS)
+		syncIdleMs = 0; // a freshly opened panel polls fast again, however long it had stepped down to
+		if (repositoryClient.isEnabled() && !syncStopped)
 		{
-			scheduleSync(0);
+			// ALWAYS re-arm, because closing the panel now stops the loop rather than slowing it. Opening
+			// again is the only thing that restarts it, so skipping the schedule when a sync happened in the
+			// last ACTIVATE_SYNC_MIN_MS would leave it stopped for good. Wait out the remainder of that
+			// throttle instead of ignoring the open: rapid open/close still collapses into one sync.
+			final long since = System.currentTimeMillis() - lastSyncStartedAt;
+			scheduleSync(Math.max(0, ACTIVATE_SYNC_MIN_MS - since));
 		}
 	}
 
@@ -3480,6 +3498,7 @@ public class BankTemplatesPanel extends PluginPanel
 	void requestSync()
 	{
 		syncStopped = false;
+		syncIdleMs = 0; // the user did something - stop stepping down
 		changeSeq++;
 		scheduleSync(SYNC_DEBOUNCE_MS);
 	}
@@ -3776,7 +3795,31 @@ public class BankTemplatesPanel extends PluginPanel
 			}
 			// A rate-limited push (linked + privateSync + !applied) advances neither, so it retries soon.
 			final boolean pending = changeSeq > syncedSeq;
-			next = pending ? SYNC_RETRY_MIN_MS : (panelActive ? SYNC_POLL_ACTIVE_MS : SYNC_POLL_MS);
+			if (pending)
+			{
+				syncIdleMs = 0;
+				next = SYNC_RETRY_MIN_MS;
+			}
+			else if (!result.linked)
+			{
+				// Nothing to push and no account to pull from: the slowest cadence we keep.
+				syncIdleMs = 0;
+				next = SYNC_POLL_UNLINKED_MS;
+			}
+			else if (!panelActive)
+			{
+				// Linked, but nobody is looking. Stop rather than poll a panel no one can see - onActivate()
+				// syncs on open, requestSync() on any local edit and syncWebTemplates() on login all restart
+				// the loop, so every way a change can reach the user already re-arms this.
+				syncIdleMs = 0;
+				return;
+			}
+			else
+			{
+				// Panel open and idle: 20s, then 40s, then 80s, until something actually happens.
+				syncIdleMs = syncIdleMs <= 0 ? SYNC_POLL_ACTIVE_MS : Math.min(syncIdleMs * 2, SYNC_POLL_IDLE_MAX_MS);
+				next = syncIdleMs;
+			}
 		}
 		scheduleSync(next);
 	}

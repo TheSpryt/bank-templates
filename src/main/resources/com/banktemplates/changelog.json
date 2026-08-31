@@ -1,5 +1,11 @@
 [
   {
+    "version": "2.3.2",
+    "notes": [
+      "The plugin now syncs on a much lighter schedule when there is nothing to sync. Without an Exchange Insights account there is nothing on the website to fetch, so it checks occasionally instead of every ninety seconds. With the side panel closed it waits until you open it again rather than polling in the background, and while the panel sits open with nothing changing it eases off gradually. Opening the panel, logging in, or editing a template syncs straight away, so nothing you actually do waits any longer than it used to."
+    ]
+  },
+  {
     "version": "2.3.1",
     "notes": [
       "Custom tab icons now survive a sync. On a linked account the copy coming back from the website wiped the icon you had picked, a few seconds after you set it, every time you tried. Templates imported from the community lost the uploader's icons the same way. The website held on to your icons throughout, so they come back on the next sync. Thanks for the report!",
