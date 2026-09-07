@@ -1,5 +1,11 @@
 [
   {
+    "version": "2.3.3",
+    "notes": [
+      "The panel header carries three shortcuts in its top right corner. A bell opens the changelog, a cog opens this plugin's settings, and the third reports a problem or asks for help with the form already pointed at Bank Templates. The Updates button that used to sit along the bottom of the panel is gone: the bell reaches the same page without spending a whole row on it."
+    ]
+  },
+  {
     "version": "2.3.2",
     "notes": [
       "The plugin now syncs on a much lighter schedule when there is nothing to sync. Without an Exchange Insights account there is nothing on the website to fetch, so it checks occasionally instead of every ninety seconds. With the side panel closed it waits until you open it again rather than polling in the background, and while the panel sits open with nothing changing it eases off gradually. Opening the panel, logging in, or editing a template syncs straight away, so nothing you actually do waits any longer than it used to."

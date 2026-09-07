@@ -305,18 +305,27 @@ public class BankTemplatesPanel extends PluginPanel
 		reorgSlot.setOpaque(false);
 		reorgSlot.setAlignmentX(Component.LEFT_ALIGNMENT);
 		south.add(reorgSlot);
-		if (updatesTabShown())
-		{
-			updatesTab.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-			updatesTab.setAlignmentX(Component.LEFT_ALIGNMENT);
-			south.add(Box.createVerticalStrut(8));
-			south.add(updatesTab);
-		}
+			// The Updates button used to sit here, taking a full-width row at the bottom for something
+			// people read once per release. The bell in the header opens the same tab.
 		add(south, BorderLayout.SOUTH);
 
 		// If a token is already stored (from a previous session or the Exchange Insights plugin), resolve the
 		// linked handle so the top-of-panel status can show "linked as …" straight away.
 		refreshLinkStatus();
+	}
+
+	// Opening this plugin's config page needs the plugin (it posts the overlay menu event), and the
+	// panel is injected, so it cannot hold one without a cycle. Same shape as onActiveChanged: the
+	// plugin hands the panel a Runnable during startUp.
+	private Runnable onOpenSettings = () ->
+	{
+	};
+
+	void setOnOpenSettings(Runnable r)
+	{
+		this.onOpenSettings = r != null ? r : () ->
+		{
+		};
 	}
 
 	void setOnActiveChanged(Runnable r)
@@ -332,6 +341,33 @@ public class BankTemplatesPanel extends PluginPanel
 		header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
 		header.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		header.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+
+		// Three shortcuts, right-aligned above everything else. They are deliberately icon-only and
+		// unpainted: the panel is narrow, and three more labelled buttons would crowd out the account
+		// row and the tabs that people actually came for.
+		final JPanel icons = new JPanel();
+		icons.setLayout(new BoxLayout(icons, BoxLayout.X_AXIS));
+		icons.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		icons.setAlignmentX(Component.LEFT_ALIGNMENT);
+		icons.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+		icons.add(Box.createHorizontalGlue()); // everything after this is pushed to the right edge
+		// The bell is only worth a slot when there is a changelog behind it. Gated on the changelog
+		// itself rather than on alertUpdates: that setting governs whether we nag about a new version,
+		// while this is someone deliberately going to look.
+		if (!allUpdates.isEmpty())
+		{
+			icons.add(headerIcon(BELL_ICON, "Updates",
+				"What changed in the latest version of the plugin.", () -> switchMode(UPDATES)));
+			icons.add(Box.createHorizontalStrut(6));
+		}
+		icons.add(headerIcon(COG_ICON, "Settings",
+			"Opens this plugin's configuration page.", () -> onOpenSettings.run()));
+		icons.add(Box.createHorizontalStrut(6));
+		icons.add(headerIcon(SUPPORT_ICON, "Support",
+			"Report a problem or ask for help.",
+			() -> LinkBrowser.browse(SUPPORT_URL)));
+		header.add(icons);
+		header.add(Box.createVerticalStrut(6));
 
 		// Account link/unlink status pinned at the very top, above the tabs. Populated by
 		// refreshAccountRow().
@@ -2962,6 +2998,48 @@ public class BankTemplatesPanel extends PluginPanel
 
 	// The Exchange Insights logo, scaled for the Browse control (clickable to open the web browse page).
 	private static final ImageIcon EI_ICON = loadEiIcon();
+
+	// Header icons. Drawn small and light so they read on the dark panel without competing with the
+	// account row underneath them. A missing resource yields null, and every use is null-guarded, so a
+	// bad build loses a button rather than the whole panel.
+	private static final ImageIcon BELL_ICON = loadPanelIcon("bell.png");
+	private static final ImageIcon COG_ICON = loadPanelIcon("cog.png");
+	private static final ImageIcon SUPPORT_ICON = loadPanelIcon("support.png");
+
+	// Deep-links into the support form with the plugin and area already chosen, so somebody who
+	// already has a problem is not also asked to classify it.
+	private static final String SUPPORT_URL =
+		"https://exchange-insights.gg/support?group=plugins&cat=plugin-bank-templates";
+
+	/** A flat, icon-only header button. Falls back to a short text label when the icon is missing. */
+	private JButton headerIcon(ImageIcon icon, String alt, String tooltip, Runnable action)
+	{
+		final JButton b = icon != null ? new JButton(icon) : new JButton(alt);
+		b.setToolTipText(tooltip);
+		b.getAccessibleContext().setAccessibleName(alt);
+		b.setFocusPainted(false);
+		b.setBorderPainted(false);
+		b.setContentAreaFilled(false);
+		b.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
+		b.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		b.setCursor(new java.awt.Cursor(java.awt.Cursor.HAND_CURSOR));
+		b.addActionListener(e -> action.run());
+		return b;
+	}
+
+	private static ImageIcon loadPanelIcon(String file)
+	{
+		try
+		{
+			final java.awt.image.BufferedImage img =
+				ImageUtil.loadImageResource(BankTemplatesPlugin.class, "/com/banktemplates/" + file);
+			return img == null ? null : new ImageIcon(img);
+		}
+		catch (Exception e)
+		{
+			return null;
+		}
+	}
 
 	private static ImageIcon loadEiIcon()
 	{

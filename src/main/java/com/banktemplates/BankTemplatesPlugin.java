@@ -148,6 +148,7 @@ public class BankTemplatesPlugin extends Plugin
 		templateManager.load();
 
 		panel.setOnActiveChanged(this::requestBankRebuild);
+		panel.setOnOpenSettings(this::openConfigPanel);
 		// Editing a layout should redraw the bank and refresh the panel (Edit/Done state, item counts).
 		layoutListener = () ->
 		{
@@ -732,6 +733,35 @@ public class BankTemplatesPlugin extends Plugin
 				error -> {});
 			return true;
 		});
+	}
+
+	/**
+	 * Open this plugin's own settings, for the cog in the panel header. There is no public "show me this
+	 * config page" call, so it posts the same OverlayMenuClicked that RuneLite raises when someone picks
+	 * Configure on an overlay.
+	 *
+	 * ConfigPlugin reads the PLUGIN off the overlay the event carries and ignores the target string,
+	 * returning immediately when that plugin is null. Both of our overlays are Guice-built and were never
+	 * handed a plugin - Overlay keeps it in a final field only its constructor sets, and taking one would
+	 * make the plugin and the overlay depend on each other - so an earlier version of this posted an
+	 * overlay with no plugin on it and the cog did nothing at all. This hands over a bare overlay that
+	 * exists for no other purpose. It is never registered and never rendered; it carries the reference.
+	 */
+	void openConfigPanel()
+	{
+		final net.runelite.client.ui.overlay.Overlay anchor =
+			new net.runelite.client.ui.overlay.Overlay(this)
+			{
+				@Override
+				public java.awt.Dimension render(java.awt.Graphics2D graphics)
+				{
+					return null;
+				}
+			};
+		eventBus.post(new net.runelite.client.events.OverlayMenuClicked(
+			new net.runelite.client.ui.overlay.OverlayMenuEntry(
+				net.runelite.api.MenuAction.RUNELITE_OVERLAY_CONFIG, "Configure", "Bank Templates"),
+			anchor));
 	}
 
 	/** Rebuilds the bank interface so the active template (or normal view) is re-applied. */
