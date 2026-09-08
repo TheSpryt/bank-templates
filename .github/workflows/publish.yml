@@ -1,0 +1,43 @@
+# Publishes the Bank Templates Lite catalogue to R2. Started by the Worker after a write
+# (repository_dispatch), on a schedule to fold in import counts and catch a missed poke, or by
+# hand. Runs from the default branch only, which is how GitHub treats both dispatch and schedule.
+name: Publish catalogue
+
+on:
+  repository_dispatch:
+    types: [publish]
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Publish even if nothing is marked dirty
+        type: boolean
+        default: false
+
+# One publish at a time. GitHub holds at most one queued run per group and collapses the rest,
+# which is exactly the debounce a burst of writes needs.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/publish.mjs
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          D1_DATABASE_ID: 2637b88b-a4df-4657-8cfd-3078f55b7422
+          R2_BUCKET: bank-templates-lite
+          PUBLIC_BASE: https://pub-b3f8a01834d74fb3a6360430c8a4e843.r2.dev
+          FORCE: ${{ (github.event_name == 'workflow_dispatch' && inputs.force) && '1' || '0' }}
