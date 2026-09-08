@@ -18,7 +18,7 @@ import javax.swing.border.Border;
  */
 final class RoundedBorder implements Border
 {
-	/** Corner radius shared by the cards (ProfileCardStyle) and every input. */
+	/** Corner radius shared by the cards and every input. */
 	static final int ARC = 10;
 
 	private final Color line;

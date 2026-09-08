@@ -1,5 +1,19 @@
 [
   {
+      "version": "3.0.0",
+      "notes": [
+        "The community repository has moved to a new home that does not depend on the Exchange Insights website, so browsing, importing and sharing keep working after that site is retired. Everything already shared carries over, and nothing on your side needs redoing.",
+        "Browse now loads the whole catalogue in one go and searches, sorts and pages instantly on your machine, with search matching as you type. The list refreshes itself at most once a minute; opening a template fetches just that template.",
+        "Right-click any card, in My templates or Browse, for a menu of everything you can do with it: preview, edit, share or update, import, report and delete. The icon buttons are still there for those who prefer them.",
+        "Account linking, website sync, bank value sync and profile-styled cards are gone, along with the Exchange Insights section in settings. The plugin no longer sends your bank contents anywhere. Sharing, updating and deleting your own shared templates work as before, tied to the character you are logged in as, and if you ever reinstall, importing one of your own shared templates from Browse makes it yours again.",
+        "The Items owned sort and the owned-item counts on cards are gone; cards show how many items and tabs a template has instead.",
+        "The help icon in the panel header now opens a new issue on the plugin's GitHub page."
+      ],
+      "knownIssues": [
+        "Templates that were shared from the website rather than from the plugin can still be browsed and imported, but nobody can edit them any more."
+      ]
+    },
+    {
     "version": "2.3.3",
     "notes": [
       "The panel header carries three shortcuts in its top right corner. A bell opens the changelog, a cog opens this plugin's settings, and the third reports a problem or asks for help with the form already pointed at Bank Templates. The Updates button that used to sit along the bottom of the panel is gone: the bell reaches the same page without spending a whole row on it."

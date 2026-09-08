@@ -11,6 +11,7 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.FontMetrics;
+import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridBagLayout;
@@ -22,7 +23,6 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.Window;
-import java.awt.geom.Ellipse2D;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.event.HierarchyEvent;
 import java.awt.event.KeyAdapter;
@@ -31,17 +31,12 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -57,6 +52,8 @@ import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
+import javax.swing.JMenuItem;
+import javax.swing.JPopupMenu;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JViewport;
@@ -68,16 +65,12 @@ import javax.swing.border.Border;
 import javax.swing.plaf.basic.BasicComboBoxUI;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
-import net.runelite.api.Item;
-import net.runelite.api.ItemContainer;
 import net.runelite.api.Player;
-import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
-import java.awt.image.BufferedImage;
 import net.runelite.client.util.AsyncBufferedImage;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.ui.PluginPanel;
@@ -99,14 +92,12 @@ public class BankTemplatesPanel extends PluginPanel
 	private static final int MAX_NAME_LENGTH = 25;
 	private static final int MAX_DESCRIPTION_LENGTH = 500;
 
-	private static final String[] SORT_LABELS = {"Most imported", "Newest", "Popular (30 days)", "Items owned"};
-	private static final String[] SORT_KEYS = {"imported", "newest", "popular", "closest"};
-	// My Templates sorting (local only - these never hit the server).
+	// Browse sorting, applied locally over the fetched index.
+	private static final String[] SORT_LABELS = {"Most imported", "Newest", "Popular (30 days)"};
+	private static final String[] SORT_KEYS = {"imported", "newest", "popular"};
+	// My Templates sorting.
 	private static final String[] LOCAL_SORT_LABELS = {"Recently updated", "Name (A-Z)", "Most items"};
 	private static final String[] LOCAL_SORT_KEYS = {"updated", "name", "items"};
-	// Client-only sort: the server can't rank by your bank (and we don't send it your items), so results are
-	// fetched in this base order and re-sorted locally by how much of each template you already own.
-	private static final String CLOSEST_SORT = "closest";
 
 	private final TemplateManager templateManager;
 	private final ItemManager itemManager;
@@ -117,9 +108,6 @@ public class BankTemplatesPanel extends PluginPanel
 	private final BankTemplatesConfig config;
 	private final LayoutEditor layoutEditor;
 	private final ItemIndex itemIndex;
-	private final ScheduledExecutorService executor;
-	// Persists each account's owned-item set so "x / y items" counts can show before the bank loads this session.
-	private final OwnedBankCache ownedCache;
 
 	// Tracks the scroll viewport's width so it never grows wider than the panel (e.g. a long dropdown item or
 	// label can't push it out). Without this, "full-width" buttons stretch past the visible area and their
@@ -127,9 +115,6 @@ public class BankTemplatesPanel extends PluginPanel
 	private final JPanel listContainer = new ListPanel();
 	private final SearchBar searchBar = new SearchBar();
 	private final JPanel tabsPanel = new JPanel();
-	// Account link status/action row, pinned at the very top of the header (rebuilt in place as the link
-	// state changes: a "Link account" button, a "Linking…" note, or a "linked as …" confirmation).
-	private final JPanel accountRow = new JPanel();
 	private final JButton localTab = new JButton("My Templates");
 	private final JButton browseTab = new JButton("Browse");
 	private final JButton updatesTab = new JButton("Updates");
@@ -139,7 +124,7 @@ public class BankTemplatesPanel extends PluginPanel
 	// Reorganise card: collapsed to its title row by default so it costs one line of the panel, expanded on
 	// click. Session state - it isn't worth a config entry.
 	private boolean reorgExpanded;
-	// Pinned under the search box, OUTSIDE the scroll, so the sort/open-on-web controls stay put and only
+	// Pinned under the search box, OUTSIDE the scroll, so the sort control stays put and only
 	// the cards scroll. Filled per mode on every rebuild (empty in Updates).
 	private final JPanel controlsSlot = new JPanel(new BorderLayout());
 	// Local (client-side) paging offset for My Templates.
@@ -153,83 +138,19 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private String mode = LOCAL;
 	private String query = "";
-	// Variant-collapsed ids the player owns in their bank (qty > 0), for the "x / y items" card meta. Computed
-	// on the client thread (reading client state isn't EDT-safe), or loaded from the per-account cache until the
-	// live bank has loaded; null when neither is available yet.
-	private volatile Set<Integer> ownedCanon;
-	// Owned-items set built from the last stored bank snapshot, used when the live bank isn't readable
-	// (logged out, or before the bank has been opened this session). Null until /me answers with items.
-	private volatile Set<Integer> ownedSnapshot;
-
-	// The set to count "x / y items" against: the live bank first, else the stored snapshot. Null when we
-	// have neither - no linked account, no opt-in, or no snapshot yet - and the cards then just show "y items".
-	private Set<Integer> ownedForCounts()
-	{
-		return ownedCanon != null ? ownedCanon : ownedSnapshot;
-	}
-	// The account ownedCanon belongs to, so it's discarded (and reloaded) when the player switches accounts.
-	private volatile long ownedAccountHash = -1;
-
-	// Whether the last duplex sync found this character linked to an Exchange Insights account. null until
-	// the first sync has answered, so the "link your account" note only shows once we actually know.
-	// Volatile: written on the EDT (sync results), read from the client thread as the bank-snapshot
-	// privacy gate (isWebLinked).
-	private volatile Boolean webSyncLinked;
-
-	// One-click device-link state. `linking` is true from the moment the browser is opened until the poll
-	// loop resolves (approved/denied/expired/timeout); linkedHandle is the Exchange Insights handle shown in
-	// the status row once known (from a token ping). linkPollTask is the self-rescheduling poll, cancelled on
-	// shutdown. All touched only on the EDT except linking (read from the poll thread).
-	private volatile boolean linking;
-	private String linkedHandle;
-	// The linked Exchange Insights account's own public profile, supplied by the duplex sync. Drives the
-	// styling of YOUR OWN My Templates cards (display name, avatar, card theme). Null until a sync answers,
-	// or whenever the character isn't linked - linking is opt-in, so the cards fall back to a fully
-	// defaulted look rather than requiring an account.
-	private RemoteTemplate.Profile selfProfile;
-	// The last bank snapshot Exchange Insights holds for this account (null when there is none). Lets the
-	// "New template" dialog still offer a capture while the player is logged out, sourced from that bank.
-	private TemplateRepositoryClient.Me.Snapshot selfSnapshot;
-	private long lastMeAttempt;
-	private ScheduledFuture<?> linkPollTask;
-	// Total time we'll wait for the browser approval before giving up (the server code lives ~10 minutes).
-	private static final long LINK_WINDOW_MS = 10 * 60 * 1_000L;
-
-	// Duplex sync scheduling. A single self-rescheduling task drives sync: it runs on login, ~1.5s after any
-	// local change (debounced), and every SYNC_POLL_MS as a backstop to pull website-side changes down. On a
-	// failed or rate-limited push it retries with backoff so a change is never lost to a brief outage.
-	private static final long SYNC_DEBOUNCE_MS = 1_500;
-	// While the side panel is open, poll fast so website-side imports and edits show up in My
-	// Templates within seconds; opening the panel also kicks an immediate sync (lightly throttled).
-	private static final long SYNC_POLL_ACTIVE_MS = 20_000;
-	private static final long ACTIVATE_SYNC_MIN_MS = 10_000;
-	private static final long SYNC_RETRY_MIN_MS = 4_000;
-	private static final long SYNC_POLL_MS = 90_000;
-	// The server answers `linked: false` when this character belongs to no Exchange Insights account, and
-	// then there is nothing on the website to pull: the reply is an empty set every time. Most installs are
-	// in that state, so polling them on the normal cadence was the bulk of the traffic the website sees.
-	// It backs off rather than stopping, because the account can appear WITHOUT the panel being touched:
-	// the Exchange Insights plugin links the character ambiently on login, and if we lost that race on this
-	// login a hard stop would leave the plugin idle until the next one.
-	private static final long SYNC_POLL_UNLINKED_MS = 900_000;
-	// With the panel open and nothing changing, step the poll down instead of asking every 20s forever.
-	private static final long SYNC_POLL_IDLE_MAX_MS = 80_000;
-	private ScheduledFuture<?> pendingSyncTask;
-	private volatile long changeSeq; // bumped on each local change
-	private long syncedSeq; // highest changeSeq confirmed pushed to the website
-	private long syncBackoffMs;
-	// Consecutive idle passes with the panel open, driving the step-down above. Reset by any local change,
-	// by the panel being opened, and by a pass that actually brought something back.
-	private long syncIdleMs;
-
-	private final List<RemoteTemplate> browseResults = new ArrayList<>();
+	// The catalogue as last fetched (metadata only, no layouts). Browse sorts, searches and pages this
+	// list in memory; a layout is only fetched when a card is previewed or imported.
+	private final List<RemoteTemplate> browseIndex = new ArrayList<>();
 	private String browseStatus;
 	private String browseSort = "imported";
 	private String localSort = "updated";
 	private int browseOffset = 0;
-	private boolean browseHasMore = false;
-	// Total templates matching the current browse filter (from the server), for the count + pager labels.
-	private int browseTotal = 0;
+
+	// Ids this character owns on the server, so its own shares still read as "yours" after a reinstall
+	// wiped the local owned flags. Asked for once per identity: mineFetchedFor is the clientId it was
+	// fetched for, null when logged out.
+	private final Set<Long> mineIds = new HashSet<>();
+	private String mineFetchedFor;
 
 	private Runnable onActiveChanged = () ->
 	{
@@ -238,7 +159,7 @@ public class BankTemplatesPanel extends PluginPanel
 	@Inject
 	BankTemplatesPanel(TemplateManager templateManager, ItemManager itemManager, TemplateRepositoryClient repositoryClient,
 		Client client, ClientThread clientThread, ConfigManager configManager, BankTemplatesConfig config,
-		LayoutEditor layoutEditor, ItemIndex itemIndex, ScheduledExecutorService executor, Gson gson)
+		LayoutEditor layoutEditor, ItemIndex itemIndex, Gson gson)
 	{
 		// Don't let PluginPanel wrap us in its own scrollpane - we manage our own so the Updates bar can
 		// stay pinned to the bottom while only the template list scrolls.
@@ -252,14 +173,8 @@ public class BankTemplatesPanel extends PluginPanel
 		this.config = config;
 		this.layoutEditor = layoutEditor;
 		this.itemIndex = itemIndex;
-		this.executor = executor;
-		this.ownedCache = new OwnedBankCache(gson);
 		this.latestUpdate = Changelog.latest(gson);
 		this.allUpdates = Changelog.all(gson);
-
-		// A genuine local template change (save/delete/rename) schedules a debounced duplex sync so it's
-		// pushed to the website without waiting for the next login.
-		templateManager.setChangeListener(this::requestSync);
 
 		// Open onto the Updates tab the first time after an update, but only until the user has seen these
 		// notes - after that, default to My Templates.
@@ -308,10 +223,6 @@ public class BankTemplatesPanel extends PluginPanel
 			// The Updates button used to sit here, taking a full-width row at the bottom for something
 			// people read once per release. The bell in the header opens the same tab.
 		add(south, BorderLayout.SOUTH);
-
-		// If a token is already stored (from a previous session or the Exchange Insights plugin), resolve the
-		// linked handle so the top-of-panel status can show "linked as …" straight away.
-		refreshLinkStatus();
 	}
 
 	// Opening this plugin's config page needs the plugin (it posts the overlay menu event), and the
@@ -343,8 +254,8 @@ public class BankTemplatesPanel extends PluginPanel
 		header.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
 
 		// Three shortcuts, right-aligned above everything else. They are deliberately icon-only and
-		// unpainted: the panel is narrow, and three more labelled buttons would crowd out the account
-		// row and the tabs that people actually came for.
+		// unpainted: the panel is narrow, and three more labelled buttons would crowd out the tabs that
+		// people actually came for.
 		final JPanel icons = new JPanel();
 		icons.setLayout(new BoxLayout(icons, BoxLayout.X_AXIS));
 		icons.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -367,15 +278,6 @@ public class BankTemplatesPanel extends PluginPanel
 			"Report a problem or ask for help.",
 			() -> LinkBrowser.browse(SUPPORT_URL)));
 		header.add(icons);
-		header.add(Box.createVerticalStrut(6));
-
-		// Account link/unlink status pinned at the very top, above the tabs. Populated by
-		// refreshAccountRow().
-		accountRow.setLayout(new BoxLayout(accountRow, BoxLayout.Y_AXIS));
-		accountRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		accountRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-		header.add(accountRow);
-		refreshAccountRow();
 		header.add(Box.createVerticalStrut(8));
 
 		tabsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -399,38 +301,16 @@ public class BankTemplatesPanel extends PluginPanel
 			@Override
 			public void keyReleased(KeyEvent e)
 			{
-				if (LOCAL.equals(mode))
-				{
-					query = searchBar.getText().trim().toLowerCase(Locale.ROOT);
-					rebuildOnEdt();
-				}
+				setQuery(searchBar.getText());
 			}
 		});
-		searchBar.addActionListener(e ->
-		{
-			if (BROWSE.equals(mode))
-			{
-				newSearch();
-			}
-		});
-		searchBar.addClearListener(() ->
-		{
-			query = "";
-			if (LOCAL.equals(mode))
-			{
-				rebuildOnEdt();
-			}
-			else
-			{
-				newSearch();
-			}
-		});
+		searchBar.addClearListener(() -> setQuery(""));
 		// No search box on the Updates/changelog view - there's nothing to search there.
 		searchBar.setVisible(!UPDATES.equals(mode));
 		header.add(searchBar);
 
-		// Sort + open-on-web live here rather than in the scrolling list, so they stay put while the cards
-		// scroll under them. Filled per mode by the view builders.
+		// The sort dropdown lives here rather than in the scrolling list, so it stays put while the cards
+		// scroll under it. Filled per mode by the view builders.
 		controlsSlot.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		controlsSlot.setAlignmentX(Component.LEFT_ALIGNMENT);
 		controlsSlot.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
@@ -440,459 +320,20 @@ public class BankTemplatesPanel extends PluginPanel
 		return header;
 	}
 
-	// True if a linked account should be shown: either the last sync confirmed the link, or (before any sync)
-	// a token is set so we optimistically treat it as linked - the next sync corrects this if it's stale.
-	// A character the user explicitly unlinked never shows the optimistic state.
-	private boolean isLinkedForDisplay()
+	// Filters whichever list is showing. Browse is filtered over the fetched index, so typing never sends
+	// a request; its page resets so a narrower match doesn't strand the pager past the end.
+	private void setQuery(String text)
 	{
-		if (Boolean.TRUE.equals(webSyncLinked))
+		final String q = text == null ? "" : text.trim().toLowerCase(Locale.ROOT);
+		if (!q.equals(query))
 		{
-			return true;
+			query = q;
+			browseOffset = 0;
 		}
-		if (webSyncLinked != null || !hasEiToken())
+		if (!UPDATES.equals(mode))
 		{
-			return false;
-		}
-		final Long hash = repositoryClient.currentAccountHash();
-		return hash == null || !repositoryClient.isUnlinkOptedOut(hash);
-	}
-
-	private boolean hasEiToken()
-	{
-		// Own token or one borrowed live from the Exchange Insights plugin on this client.
-		return repositoryClient.effectiveToken() != null;
-	}
-
-	// (Re)draw the link/unlink button below the search box for the current state. One button, colored
-	// by status - green when linked (click unlinks), red when not (click links) - with the bank value
-	// line underneath when linked. Only shown when the community repository is enabled (all third-party
-	// server contact, including linking, is behind that opt-in).
-	private void refreshAccountRow()
-	{
-		accountRow.removeAll();
-		accountRow.add(Box.createVerticalStrut(8));
-		final JButton btn;
-		if (!repositoryClient.isEnabled())
-		{
-			// Shown even before the user has opted in, so linking is always discoverable. No third-party
-			// contact happens from just showing it - clicking presents the opt-in first (startOneClickLink),
-			// and only a yes there turns the repository on and proceeds.
-			btn = accountButton("Link Exchange Insights account", new Color(94, 44, 44));
-			btn.setToolTipText("Links this character to your Exchange Insights account. You'll be asked to turn on the community repository first.");
-			btn.addActionListener(e -> startOneClickLink());
-		}
-		else if (linking)
-		{
-			// The browser hint only applies to the device flow; with a token the link is direct.
-			btn = accountButton(repositoryClient.effectiveToken() != null ? "Linking…" : "Linking… approve it in your browser",
-				new Color(96, 74, 30));
-			btn.setEnabled(false);
-		}
-		else if (isLinkedForDisplay())
-		{
-			final String who = linkedHandle != null && !linkedHandle.isEmpty() ? " as " + linkedHandle : "";
-			btn = accountButton("✓ Account linked · Unlink", new Color(35, 78, 42));
-			btn.setToolTipText("Linked" + who + ". Click to unlink this character from your Exchange Insights account.");
-			btn.addActionListener(e -> startUnlink());
-		}
-		else
-		{
-			btn = accountButton("Link Exchange Insights account", new Color(94, 44, 44));
-			btn.setToolTipText(repositoryClient.effectiveToken() != null
-				? "Links this character to your Exchange Insights account using your existing token."
-				: "One-click: opens exchange-insights.gg to approve linking this character - no token to copy.");
-			btn.addActionListener(e -> startOneClickLink());
-		}
-		btn.setAlignmentX(Component.LEFT_ALIGNMENT);
-		btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-		accountRow.add(btn);
-		accountRow.revalidate();
-		accountRow.repaint();
-	}
-
-	// The account link/unlink control: a filled status button carrying the panel's rounded corners and bold
-	// font, so it reads as part of the same family as the cards and inputs rather than a plain Swing block.
-	private static JButton accountButton(String text, Color bg)
-	{
-		final JButton b = new JButton(text)
-		{
-			@Override
-			protected void paintComponent(Graphics g)
-			{
-				RoundedBorder.fill(g, this, getBackground());
-				super.paintComponent(g);
-			}
-		};
-		b.setFont(FontManager.getRunescapeBoldFont());
-		b.setHorizontalAlignment(SwingConstants.CENTER);
-		b.setForeground(Color.WHITE);
-		b.setBackground(bg);
-		b.setContentAreaFilled(false);
-		b.setOpaque(false);
-		b.setFocusPainted(false);
-		b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		b.setBorder(new RoundedBorder(bg.brighter(), new Insets(5, 10, 5, 10)));
-		return b;
-	}
-
-	// Confirm, then unlink the logged-in character from the Exchange Insights account server-side and
-	// remember the choice locally so auto-linking (own or borrowed token) doesn't silently relink it.
-	private void startUnlink()
-	{
-		final int choice = JOptionPane.showConfirmDialog(this,
-			"Unlink this character from your Exchange Insights account?\n\n"
-				+ "New bank snapshots and template sync stop for this character. Anything\n"
-				+ "already stored stays until you delete your Exchange Insights account,\n"
-				+ "and your account token keeps working for everything else.",
-			"Unlink account", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
-		if (choice != JOptionPane.OK_OPTION)
-		{
-			return;
-		}
-		final String token = repositoryClient.effectiveToken();
-		clientThread.invokeLater(() ->
-		{
-			final long hash = client.getAccountHash();
-			SwingUtilities.invokeLater(() -> doUnlink(token, hash));
-		});
-	}
-
-	private void doUnlink(String token, long accountHash)
-	{
-		if (accountHash == -1)
-		{
-			JOptionPane.showMessageDialog(this,
-				"Log into OSRS first (so the plugin knows which character to unlink), then try again.",
-				"Not logged in", JOptionPane.INFORMATION_MESSAGE);
-			return;
-		}
-		// Opt out FIRST so auto-linking can't race the server call and immediately relink.
-		repositoryClient.setUnlinkOptOut(accountHash, true);
-		if (token == null)
-		{
-			// Nothing to tell the server without a token (stale optimistic display) - clear locally.
-			webSyncLinked = false;
-			linkedHandle = null;
-			bankValue = -1;
-			refreshAccountRow();
-			return;
-		}
-		repositoryClient.unlinkEiAccount(token, accountHash,
-			() -> SwingUtilities.invokeLater(() ->
-			{
-				webSyncLinked = false;
-				linkedHandle = null;
-				bankValue = -1;
-				refreshAccountRow();
-				rebuildOnEdt(); // linked-only affordances refresh
-			}),
-			error -> SwingUtilities.invokeLater(() ->
-			{
-				repositoryClient.setUnlinkOptOut(accountHash, false); // nothing was unlinked - don't block auto-link
-				JOptionPane.showMessageDialog(this, error, "Couldn't unlink", JOptionPane.WARNING_MESSAGE);
-			}));
-	}
-
-	// Kick off the one-click device link (from the top-of-panel button or the config toggle). Requires the
-	// community repository to be enabled and a logged-in character; reads the account identity on the client
-	// thread before starting.
-	void startOneClickLink()
-	{
-		if (!repositoryClient.isEnabled())
-		{
-			// Present the opt-in at the point of linking rather than sending the user off to find a setting.
-			// Accepting turns the repository on (its own config-change handler picks it up) and we link now;
-			// declining leaves everything off and contacts no third-party server.
-			final int ok = JOptionPane.showConfirmDialog(this,
-				"<html><body style='width:260px'>Linking your Exchange Insights account uses the community repository, which contacts exchange-insights.gg."
-					+ "<br><br>This submits your IP address to a third-party server not controlled or verified by RuneLite developers."
-					+ "<br><br>Turn it on and link this character now?</body></html>",
-				"Enable the community repository", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
-			if (ok != JOptionPane.OK_OPTION)
-			{
-				return;
-			}
-			configManager.setConfiguration(BankTemplatesConfig.GROUP, "enableRepository", true);
-		}
-		if (linking)
-		{
-			return; // a link is already in progress
-		}
-		// Claim the flag NOW (on the EDT), not in beginLink after the client-thread round-trip - two quick
-		// clicks (or button + config toggle) would otherwise both pass the check and open two browser tabs.
-		linking = true;
-		refreshAccountRow();
-		clientThread.invokeLater(() ->
-		{
-			final long hash = client.getAccountHash();
-			final Player local = client.getLocalPlayer();
-			final String name = local != null ? local.getName() : null;
-			SwingUtilities.invokeLater(() -> beginLink(hash, name));
-		});
-	}
-
-	private void beginLink(long accountHash, String rsn)
-	{
-		if (accountHash == -1 || rsn == null || rsn.isEmpty())
-		{
-			linking = false; // release the flag claimed in startOneClickLink
-			refreshAccountRow();
-			JOptionPane.showMessageDialog(this,
-				"Log into OSRS first (so the plugin knows which character to link), then try again.",
-				"Not logged in", JOptionPane.INFORMATION_MESSAGE);
-			return;
-		}
-		// The user explicitly asked to link: lift any earlier unlink opt-out for this character.
-		repositoryClient.setUnlinkOptOut(accountHash, false);
-		// A token already exists (our own, or borrowed from the Exchange Insights plugin): link
-		// directly, no browser round-trip needed.
-		final String token = repositoryClient.effectiveToken();
-		if (token != null)
-		{
-			repositoryClient.linkEiAccount(token, accountHash, rsn, true,
-				() -> SwingUtilities.invokeLater(() -> finishLink(null)),
-				error -> SwingUtilities.invokeLater(() ->
-				{
-					linking = false;
-					refreshAccountRow();
-					JOptionPane.showMessageDialog(this, error, "Couldn't link", JOptionPane.WARNING_MESSAGE);
-				}));
-			return;
-		}
-		linking = true;
-		refreshAccountRow();
-		repositoryClient.startDeviceLink(accountHash, rsn,
-			start -> SwingUtilities.invokeLater(() -> onLinkStarted(start)),
-			error -> SwingUtilities.invokeLater(() ->
-			{
-				linking = false;
-				refreshAccountRow();
-				JOptionPane.showMessageDialog(this, error, "Couldn't start linking", JOptionPane.WARNING_MESSAGE);
-			}));
-	}
-
-	private void onLinkStarted(TemplateRepositoryClient.LinkStart start)
-	{
-		if (!linking)
-		{
-			return; // cancelled before the server answered
-		}
-		LinkBrowser.browse(start.verificationUrl);
-		final long deadline = System.currentTimeMillis() + LINK_WINDOW_MS;
-		final long intervalMs = Math.max(2, start.pollSeconds) * 1_000L;
-		scheduleLinkPoll(start.deviceSecret, deadline, intervalMs);
-	}
-
-	private synchronized void scheduleLinkPoll(String deviceSecret, long deadline, long intervalMs)
-	{
-		if (linkPollTask != null)
-		{
-			linkPollTask.cancel(false);
-		}
-		linkPollTask = executor.schedule(
-			() -> pollOnce(deviceSecret, deadline, intervalMs), intervalMs, TimeUnit.MILLISECONDS);
-	}
-
-	// One poll tick (executor thread). Stops on timeout; otherwise asks the server and routes the answer.
-	private void pollOnce(String deviceSecret, long deadline, long intervalMs)
-	{
-		if (!linking)
-		{
-			return;
-		}
-		if (System.currentTimeMillis() > deadline)
-		{
-			SwingUtilities.invokeLater(() ->
-			{
-				if (linking)
-				{
-					linking = false;
-					refreshAccountRow();
-					JOptionPane.showMessageDialog(this,
-						"The link request timed out. Click Link account to try again.",
-						"Link timed out", JOptionPane.INFORMATION_MESSAGE);
-				}
-			});
-			return;
-		}
-		repositoryClient.pollDeviceLink(deviceSecret,
-			poll -> SwingUtilities.invokeLater(() -> handlePoll(poll, deviceSecret, deadline, intervalMs)),
-			err -> reschedulePoll(deviceSecret, deadline, intervalMs)); // transient error - keep trying until the deadline
-	}
-
-	private void reschedulePoll(String deviceSecret, long deadline, long intervalMs)
-	{
-		if (linking && System.currentTimeMillis() <= deadline)
-		{
-			scheduleLinkPoll(deviceSecret, deadline, intervalMs);
-		}
-		else if (linking)
-		{
-			SwingUtilities.invokeLater(() ->
-			{
-				linking = false;
-				refreshAccountRow();
-			});
-		}
-	}
-
-	private void handlePoll(TemplateRepositoryClient.LinkPoll poll, String deviceSecret, long deadline, long intervalMs)
-	{
-		if (!linking)
-		{
-			return;
-		}
-		final String status = poll != null && poll.status != null ? poll.status : "";
-		switch (status)
-		{
-			case "approved":
-				finishLink(poll.token);
-				break;
-			case "pending":
-				reschedulePoll(deviceSecret, deadline, intervalMs);
-				break;
-			case "denied":
-				linking = false;
-				refreshAccountRow();
-				JOptionPane.showMessageDialog(this,
-					"The link was denied in the browser. Nothing was linked.",
-					"Not linked", JOptionPane.INFORMATION_MESSAGE);
-				break;
-			default: // expired / invalid / claimed
-				linking = false;
-				refreshAccountRow();
-				JOptionPane.showMessageDialog(this,
-					"The link request is no longer valid. Click Link account to try again.",
-					"Link expired", JOptionPane.INFORMATION_MESSAGE);
-				break;
-		}
-	}
-
-	private void finishLink(String token)
-	{
-		linking = false;
-		if (token != null && !token.isEmpty())
-		{
-			// Persist the issued token so the link survives restarts and future logins re-assert identity, and
-			// so the same token can be pasted into the Exchange Insights plugin if the player wants both. Setting
-			// it fires onConfigChanged(eiAccountToken) in the plugin, which (idempotently) re-links identity too.
-			configManager.setConfiguration(BankTemplatesConfig.GROUP, "eiAccountToken", token);
-			// Also publish to the shared slot so every plugin in the family is linked at once.
-			SharedAccountToken.set(configManager, token);
-		}
-		webSyncLinked = true;
-		linkedHandle = null;
-		refreshLinkStatus(); // fetch the handle for the "linked as …" label
-		refreshAccountRow();
-		syncWebTemplates();  // pull this account's website templates down now
-		rebuildOnEdt();
-		JOptionPane.showMessageDialog(this,
-			"Your account is linked. Your bank templates now sync with exchange-insights.gg.",
-			"Account linked", JOptionPane.INFORMATION_MESSAGE);
-	}
-
-	// Whether the last duplex sync confirmed this character is linked to an Exchange Insights account.
-	// Gates the bank snapshot: contents must never leave the client for unlinked (or not-yet-confirmed)
-	// characters, exactly as the setting's description promises.
-	boolean isWebLinked()
-	{
-		return Boolean.TRUE.equals(webSyncLinked);
-	}
-
-	// Login / account switch: the new character's link state (and bank value) are unknown until its
-	// first sync answers - clearing immediately keeps the snapshot gate closed for the new character
-	// rather than trusting the previous one's state. Safe from any thread.
-	void resetLinkState()
-	{
-		webSyncLinked = null; // volatile - closes the snapshot gate at once
-		SwingUtilities.invokeLater(() ->
-		{
-			bankValue = -1;
-			refreshAccountRow();
-		});
-	}
-
-	// Latest bank value reported by the snapshot sync (gp at live GE mid prices); -1 until the first sync.
-	private long bankValue = -1;
-
-	// Called (on the EDT) when a bank snapshot lands and the server reports the bank's live value.
-	void setBankValue(long value)
-	{
-		bankValue = value;
-		refreshAccountRow();
-	}
-
-	// Fetch the linked Exchange Insights handle for the status row, when a token is set. Best-effort: a
-	// failure (offline, revoked) just leaves the row without a name.
-	// Fetch the account's OWN profile and last stored bank (token only, so it works logged out). Retried
-	// rather than fired once at construction: a single attempt is lost to any transient failure - a cold
-	// start before the network is up, or a server that hasn't answered yet - and the cards would then sit on
-	// the defaulted look for the whole session. Backs off to at most one attempt per 30s, and stops asking
-	// once it has an answer.
-	private void maybeFetchMe()
-	{
-		final long now = System.currentTimeMillis();
-		if (!repositoryClient.isEnabled() || !hasEiToken() || selfProfile != null
-			|| now - lastMeAttempt < 30_000L)
-		{
-			return;
-		}
-		lastMeAttempt = now;
-		repositoryClient.fetchMe(false, me -> SwingUtilities.invokeLater(() ->
-		{
-			if (me == null)
-			{
-				return;
-			}
-			if (me.profile != null)
-			{
-				selfProfile = me.profile;
-			}
-			selfSnapshot = me.snapshot;
 			rebuildOnEdt();
-			// Pull the snapshot's item ids too, so "x / y items" still means something with no live bank.
-			if (me.snapshot != null && ownedSnapshot == null)
-			{
-				repositoryClient.fetchMe(true, full -> SwingUtilities.invokeLater(() ->
-				{
-					final List<int[]> items = full != null && full.snapshot != null ? full.snapshot.items : null;
-					if (items == null || items.isEmpty())
-					{
-						return;
-					}
-					final Set<Integer> owned = new HashSet<>();
-					for (int[] it : items)
-					{
-						if (it != null && it.length >= 1 && it[0] > 0)
-						{
-							owned.add(it[0]);
-						}
-					}
-					ownedSnapshot = owned;
-					rebuildOnEdt();
-				}));
-			}
-		}));
-	}
-
-	void refreshLinkStatus()
-	{
-		// All third-party server contact stays behind the community-repository opt-in - including this
-		// token ping (it sends the stored bearer token).
-		if (!repositoryClient.isEnabled() || !hasEiToken())
-		{
-			return;
 		}
-		maybeFetchMe();
-		repositoryClient.pingLink(repositoryClient.effectiveToken(),
-			handle -> SwingUtilities.invokeLater(() ->
-			{
-				linkedHandle = handle;
-				refreshAccountRow();
-			}),
-			err ->
-			{
-			});
 	}
 
 	private void switchMode(String newMode)
@@ -1010,14 +451,11 @@ public class BankTemplatesPanel extends PluginPanel
 		listContainer.revalidate();
 		listContainer.repaint();
 		// The search field is a plain text input: it never asks for focus on its own, so a background rebuild
-		// (a sync poll, a stats refresh, a bank update) never pulls the cursor away from the game.
+		// (the index arriving, say) never pulls the cursor away from the game.
 		reorgSlot.revalidate();
 		reorgSlot.repaint();
 		controlsSlot.revalidate();
 		controlsSlot.repaint();
-		// Keep the top-of-panel link status in step with the latest sync result (webSyncLinked) and the
-		// repository-enabled state, both of which can change between rebuilds.
-		refreshAccountRow();
 	}
 
 	// ---- Updates ----------------------------------------------------------------------------
@@ -1147,33 +585,20 @@ public class BankTemplatesPanel extends PluginPanel
 
 	private void buildLocalView()
 	{
-		refreshOwnedCanon();
-		// Self-heal the profile/bank fetch if the first attempt (at construction) failed.
-		maybeFetchMe();
 		// A template is applied by clicking its card (the applied one has a red glow); creating one is the "+"
 		// card at the end of the list.
 		addLocalSection("Presets", templateManager.getPresets());
-		// Sort + open-on-web controls, pinned in the header alongside Browse's (no section heading - the
-		// cards speak for themselves).
+		// Sort control, pinned in the header alongside Browse's (no section heading - the cards speak for
+		// themselves).
 		controlsSlot.add(buildLocalControlsRow(), BorderLayout.CENTER);
 		addLocalMyTemplates(templateManager.getUserTemplates());
-
-		// Explain why My templates isn't syncing with the website, when we know the character isn't linked.
-		if (Boolean.FALSE.equals(webSyncLinked) && repositoryClient.isEnabled())
-		{
-			listContainer.add(messageLabel("Your templates sync with the web at exchange-insights.gg when this "
-				+ "character is linked to a free Exchange Insights account. Link it in one click with the "
-				+ "\"Link Exchange Insights account\" button at the top of this panel (or paste your account token in "
-				+ "the plugin's settings) - then create and edit these templates in your browser too."));
-			listContainer.add(Box.createVerticalStrut(6));
-		}
 
 		listContainer.add(Box.createVerticalStrut(8));
 
 		// Reorganise: the mode dropdown and a description of what the selected mode does, styled as the same
-		// rounded card as the template cards. A live mode gives it the gilded (gold) theme; off is neutral.
+		// rounded card as the template cards. A live mode turns the title orange.
 		final boolean reorgOn = config.showReorgHelper();
-		final ProfileCard reorgCard = profileCardPanel(reorgOn ? "gilded" : null);
+		final Card reorgCard = cardPanel();
 		reorgCard.setLayout(new BoxLayout(reorgCard, BoxLayout.Y_AXIS));
 		reorgCard.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
@@ -1269,7 +694,7 @@ public class BankTemplatesPanel extends PluginPanel
 				}
 				configManager.setConfiguration(BankTemplatesConfig.GROUP, "showReorgHelper", true);
 			}
-			// Rebuild so the card re-renders in the right theme (gilded when a mode is live, neutral when off).
+			// Rebuild so the title picks up the new state (orange while a mode is live).
 			rebuildOnEdt();
 			onActiveChanged.run();
 		});
@@ -1425,7 +850,7 @@ public class BankTemplatesPanel extends PluginPanel
 		return list;
 	}
 
-	// Sort dropdown + the Exchange Insights logo that opens YOUR My Templates on the site.
+	// The My Templates sort dropdown.
 	private JPanel buildLocalControlsRow()
 	{
 		final JComboBox<String> sort = new JComboBox<>(LOCAL_SORT_LABELS);
@@ -1437,33 +862,18 @@ public class BankTemplatesPanel extends PluginPanel
 			rebuildOnEdt();
 		});
 
-		return controlsRow(sort, "Open your My Templates on exchange-insights.gg in your browser",
-			() -> LinkBrowser.browse("https://exchange-insights.gg/tools/osrs-bank-templates?view=mine"));
+		return controlsRow(sort);
 	}
 
-	// The sort dropdown + the clickable Exchange Insights logo on one line. Both My Templates and Browse
-	// build their row here, so the dropdown is laid out identically (same width) in each.
-	private JPanel controlsRow(JComboBox<String> sort, String webTooltip, Runnable onWeb)
+	// The sort dropdown on one line. Both My Templates and Browse build their row here, so the dropdown
+	// is laid out identically (same width) in each.
+	private JPanel controlsRow(JComboBox<String> sort)
 	{
-		final IconLabel web = hoverPlate(new IconLabel(null));
-		web.setIcon(EI_ICON);
-		web.setToolTipText(webTooltip);
-		web.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 4));
-		web.addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mouseClicked(MouseEvent e)
-			{
-				onWeb.run();
-			}
-		});
-
 		final JPanel row = new JPanel(new BorderLayout(6, 0));
 		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
 		row.add(sort, BorderLayout.CENTER);
-		row.add(web, BorderLayout.EAST);
 		return row;
 	}
 
@@ -1590,18 +1000,11 @@ public class BankTemplatesPanel extends PluginPanel
 		content.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		content.setBorder(BorderFactory.createEmptyBorder(14, 14, 14, 14));
 
-		// Logged out there's no live bank to read. Exchange Insights may still hold a snapshot of it, so fall
-		// back to capturing from that; with neither, the capture option is dropped rather than shown broken.
-		final boolean liveBank = repositoryClient.hasIdentity();
-		final TemplateRepositoryClient.Me.Snapshot snap = selfSnapshot;
-		final boolean canCapture = liveBank || snap != null;
+		// Logged out there's no live bank to read, so the capture option is dropped rather than shown broken.
+		final boolean canCapture = repositoryClient.hasIdentity();
 
-		final String how = liveBank
-			? "your current bank (all tabs, in order)"
-			: "your last saved bank on Exchange Insights (" + (snap != null ? snap.itemCount : 0) + " items, "
-				+ (snap != null ? relativeTime(snap.updatedAt) : "") + ")";
 		final JLabel msg = new JLabel("<html><body style='width:230px'>Start the new template from "
-			+ (canCapture ? how + ", or from " : "")
+			+ (canCapture ? "your current bank (all tabs, in order), or from " : "")
 			+ "an empty layout you build up yourself (add items you don't own as placeholders)."
 			+ (canCapture ? "" : "<br><br>Log in to capture your current bank.")
 			+ "</body></html>");
@@ -1613,8 +1016,7 @@ public class BankTemplatesPanel extends PluginPanel
 
 		if (canCapture)
 		{
-			content.add(dialogChoice(liveBank ? "Capture current bank" : "Capture last saved bank",
-				ChoiceStyle.PRIMARY, dialog, liveBank ? this::captureCurrentBank : this::captureFromSnapshot));
+			content.add(dialogChoice("Capture current bank", ChoiceStyle.PRIMARY, dialog, this::captureCurrentBank));
 			content.add(Box.createVerticalStrut(6));
 		}
 		content.add(dialogChoice("New empty template", canCapture ? ChoiceStyle.NEUTRAL : ChoiceStyle.PRIMARY,
@@ -1694,25 +1096,13 @@ public class BankTemplatesPanel extends PluginPanel
 	{
 		final boolean active = templateManager.isActive(template);
 
-		// A profile card matching the Browse cards. An imported-and-unedited template shows the ORIGINAL
-		// owner's captured profile; a self-made or edited (now-owned) template shows YOUR linked account's
-		// profile when the sync has supplied one, and otherwise a fully DEFAULTED card - linking an Exchange
-		// Insights account is opt-in, so nothing here requires one.
+		// An imported template you haven't edited still names the player who shared it; anything self-made
+		// or edited into your own reads "by you".
 		final BankTemplate.OwnerProfile owner = template.isOwned() ? null : template.getOwnerProfile();
-		final RemoteTemplate.Profile self = owner == null && !template.isPreset() ? selfProfile : null;
-		final String bgKey = owner != null ? owner.bg : self != null ? self.profileBg : null;
-		final Integer avatarItemId = owner != null ? owner.avatarItemId : self != null ? self.avatarItemId : null;
 
-		final ProfileCard card = profileCardPanel(bgKey, active);
+		final Card card = cardPanel(active);
 		card.setLayout(new BorderLayout(8, 4));
 		card.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-
-		final JComponent avatar = avatarComponent(avatarItemId, bgKey);
-		// Resolved here rather than at the icon row below, because it also decides whether the avatar
-		// becomes the profile button or stays part of the clickable card body.
-		final String cardHandle = owner != null ? owner.handle : self != null ? self.handle : null;
-		final boolean avatarIsProfile = wireAvatarProfile(avatar, cardHandle);
-		card.add(avatar, BorderLayout.WEST);
 
 		final JPanel text = new JPanel();
 		text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
@@ -1723,7 +1113,7 @@ public class BankTemplatesPanel extends PluginPanel
 		name.setAlignmentX(Component.LEFT_ALIGNMENT);
 		text.add(name);
 
-		final JLabel author = clampedLabel(localByline(template, owner, self), AUTHOR_FONT,
+		final JLabel author = clampedLabel(localByline(template, owner), AUTHOR_FONT,
 			ColorScheme.LIGHT_GRAY_COLOR, CARD_AUTHOR_MAX_WIDTH);
 		author.setAlignmentX(Component.LEFT_ALIGNMENT);
 		text.add(author);
@@ -1742,43 +1132,35 @@ public class BankTemplatesPanel extends PluginPanel
 			@Override
 			public void mouseClicked(MouseEvent e)
 			{
+				if (!SwingUtilities.isLeftMouseButton(e))
+				{
+					return;
+				}
 				select(active ? null : template);
 			}
 		};
 		card.setToolTipText(active ? "Applied - click to stop applying it" : "Click to apply this template to your bank");
-		final JComponent[] body = avatarIsProfile
-			? new JComponent[]{card, text, name, author, meta}
-			: new JComponent[]{card, avatar, text, name, author, meta};
-		for (final JComponent c : body)
+		for (final JComponent c : new JComponent[]{card, text, name, author, meta})
 		{
 			c.addMouseListener(applyClick);
 			c.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		}
-		// The avatar still keeps the card's wash while hovered - it's part of the card, just not part of
-		// its click target.
-		wireHover(card, avatar, text, name, author, meta);
+		wireHover(card, text, name, author, meta);
 
 		// Same spread-icon row as the Browse card, glue between each item.
 		final JPanel buttons = iconRow();
 		buttons.add(Box.createHorizontalGlue());
-		// Share stats for your OWN templates: how many imported it / reported it. Greyed out until the template
-		// has actually been shared to the community (nothing to count before then).
-		// Yours either way: made in the plugin (owned), or made on the website and pulled down by the duplex
-		// sync (webSynced, which stays owned=false because the website copy is the original). Gating on
-		// owned alone hid the counts on every template its creator made on the site.
-		// `owner` is set only for an imported template you haven't edited into your own - its counts are
-		// the ORIGINAL community template's, so it always has real numbers to show.
+		// Share stats: how many imported it / reported it. An import you haven't edited shows the ORIGINAL
+		// community template's numbers (it isn't yours); your own template shows its shared copy's, greyed
+		// out until it has actually been shared (nothing to count before then).
 		final boolean isImport = owner != null;
-		if (!template.isPreset() && (isImport || template.isOwned() || template.isWebSynced()))
+		if (!template.isPreset() && (isImport || template.isOwned()))
 		{
 			final int dCount, fCount;
 			final boolean shared;
 			final String dTip, fTip;
 			if (isImport)
 			{
-				// Show how the template you imported is doing in the community, not "your shared copy" - you
-				// don't own this one. These come from the import-time snapshot, which the sync leaves alone
-				// (unlike shareDownloads/shareReports, which it zeroes for your own not-yet-shared copy).
 				dCount = owner.downloads != null ? owner.downloads : 0;
 				fCount = owner.reports != null ? owner.reports : 0;
 				shared = true;
@@ -1787,10 +1169,7 @@ public class BankTemplatesPanel extends PluginPanel
 			}
 			else
 			{
-				// Counts only mean something once a copy is public: a community share (repoId), or a website
-				// template the sync has reported reach for.
-				shared = template.getRepoId() != null
-					|| (template.isWebSynced() && template.getShareDownloads() != null);
+				shared = template.getRepoId() != null;
 				// Always show a number - a template with no imports/reports reads as 0, never as a bare icon.
 				dCount = template.getShareDownloads() != null ? template.getShareDownloads() : 0;
 				fCount = template.getShareReports() != null ? template.getShareReports() : 0;
@@ -1830,25 +1209,96 @@ public class BankTemplatesPanel extends PluginPanel
 			buttons.add(actionIcon("&#9873;", -1, DOWNVOTE_COLOR, "Report the shared version of this template", () -> reportRepo(template.getRepoId())));
 			buttons.add(Box.createHorizontalGlue());
 		}
-		// A shared, imported or web-synced template has a page on the site; link straight to it. Prefer your
-		// own website copy (webId) over the community source it was imported from.
-		final Long webLinkId = template.getWebId() != null ? template.getWebId() : template.getRepoId();
-		if (webLinkId != null)
-		{
-			buttons.add(clickableIcon(PanelIcons.globe(ICON_GOLD), "Open this template on exchange-insights.gg", () -> openOnWeb(webLinkId)));
-			buttons.add(Box.createHorizontalGlue());
-		}
 		if (!template.isPreset())
 		{
 			buttons.add(clickableIcon(PanelIcons.xMark(DOWNVOTE_COLOR), "Delete this template", () -> deleteLocal(template)));
 			buttons.add(Box.createHorizontalGlue());
 		}
-		card.add(southStack(tabIconStrip(template.getTabs()), buttons), BorderLayout.SOUTH);
+		// Right-click anywhere on the card body: the icon row's actions again, as a labelled list. Same
+		// conditions as the icons, so the menu never offers something the card wouldn't.
+		final JPopupMenu menu = new JPopupMenu();
+		if (template.isPreset())
+		{
+			menuItem(menu, "Preview", () -> showPreview(template));
+		}
+		else
+		{
+			menuItem(menu, layoutEditor.isEditing(template) ? "Finish editing" : "Edit layout", () -> editTemplate(template));
+			if (repositoryClient.isEnabled())
+			{
+				final boolean shared = template.isOwned() && template.getRepoId() != null;
+				menuItem(menu, shared ? "Update shared copy" : "Share to the community", () -> share(template));
+			}
+		}
+		if (template.getRepoId() != null && !template.isOwned() && repositoryClient.isEnabled())
+		{
+			menuItem(menu, "Report shared version", () -> reportRepo(template.getRepoId()));
+		}
+		if (!template.isPreset())
+		{
+			menu.addSeparator();
+			menuItem(menu, "Delete", () -> deleteLocal(template));
+		}
+		attachPopup(menu, card, text, name, author, meta);
+		card.add(southStack(tabIconStrip(tabIconsOf(template.getTabs())), buttons), BorderLayout.SOUTH);
 		return card;
 	}
 
 	// The card's bottom half: the tab-icon strip (when there is one) above the action-icon row. The strip
 	// is what makes the card taller - a card for a template with no usable tab icons keeps its old height.
+	private static void menuItem(JPopupMenu menu, String text, Runnable action)
+	{
+		final JMenuItem item = new JMenuItem(text);
+		item.addActionListener(e -> action.run());
+		menu.add(item);
+	}
+
+	// Opens the menu on the platform's popup gesture, which arrives on press (Linux, macOS) or release
+	// (Windows), so both are checked. Attached to every part of the card body, like the click handlers.
+	private static void attachPopup(JPopupMenu menu, JComponent... parts)
+	{
+		final MouseAdapter trigger = new MouseAdapter()
+		{
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				maybeShow(e);
+			}
+
+			@Override
+			public void mouseReleased(MouseEvent e)
+			{
+				maybeShow(e);
+			}
+
+			private void maybeShow(MouseEvent e)
+			{
+				if (e.isPopupTrigger())
+				{
+					menu.show(e.getComponent(), e.getX(), e.getY());
+					e.consume();
+				}
+			}
+		};
+		for (final JComponent c : parts)
+		{
+			c.addMouseListener(trigger);
+		}
+	}
+
+	// The local, owned copy behind a Browse card, when this character shared it and still has it.
+	private BankTemplate localOwnedCopy(long repoId)
+	{
+		for (BankTemplate t : templateManager.getUserTemplates())
+		{
+			if (t.isOwned() && t.getRepoId() != null && t.getRepoId() == repoId)
+			{
+				return t;
+			}
+		}
+		return null;
+	}
+
 	private static JComponent southStack(JComponent strip, JComponent buttons)
 	{
 		if (strip == null)
@@ -1875,8 +1325,9 @@ public class BankTemplatesPanel extends PluginPanel
 			listContainer.add(buildEnablePrompt());
 			return;
 		}
+		maybeFetchMine();
 
-		// Sort dropdown + the Browse-on-web button share one line, pinned in the header (not the list).
+		// The sort dropdown, pinned in the header (not the list).
 		controlsSlot.add(buildBrowseControlsRow(), BorderLayout.CENTER);
 
 		if (browseStatus != null)
@@ -1885,28 +1336,78 @@ public class BankTemplatesPanel extends PluginPanel
 			return;
 		}
 
-		// Re-sort the fetched page by how much of each template you own (most-owned first). Done here so it
-		// always reflects the latest bank contents, even on a plain rebuild.
-		if (CLOSEST_SORT.equals(browseSort) && ownedForCounts() != null)
+		final List<RemoteTemplate> shown = filteredBrowse();
+		final int total = shown.size();
+		if (total == 0)
 		{
-			browseResults.sort((a, b) -> Double.compare(ownershipScore(b), ownershipScore(a)));
+			listContainer.add(messageLabel(browseIndex.isEmpty()
+				? "No templates have been shared yet."
+				: "No templates match your search."));
+			return;
 		}
+		// Clamp the offset so a narrower search doesn't strand you past the end.
+		if (browseOffset >= total)
+		{
+			browseOffset = ((total - 1) / PAGE_SIZE) * PAGE_SIZE;
+		}
+		final int end = Math.min(browseOffset + PAGE_SIZE, total);
 
 		// A pager at BOTH ends: a full page is longer than the panel, so paging from the bottom used to
 		// mean scrolling back up to see what you landed on, and paging from the top meant scrolling down
 		// to find the control. Each call builds its own row - Swing components have a single parent.
-		listContainer.add(buildPaginationRow());
+		listContainer.add(buildPaginationRow(total, end < total));
 		listContainer.add(Box.createVerticalStrut(6));
-		for (RemoteTemplate rt : browseResults)
+		for (int i = browseOffset; i < end; i++)
 		{
-			listContainer.add(buildRemoteCard(rt));
+			listContainer.add(buildRemoteCard(shown.get(i)));
 			listContainer.add(Box.createVerticalStrut(6));
 		}
 		listContainer.add(Box.createVerticalGlue()); // bottom pager sits at the bottom of the panel
-		listContainer.add(buildPaginationRow());
+		listContainer.add(buildPaginationRow(total, end < total));
 	}
 
-	// One line: the sort dropdown (fills) + the Browse-on-web button. No "Sort" label.
+	// The index narrowed to the search text and put in the chosen order. Redone on every rebuild rather
+	// than cached: the whole catalogue is a few hundred entries of metadata.
+	private List<RemoteTemplate> filteredBrowse()
+	{
+		final List<RemoteTemplate> out = new ArrayList<>();
+		for (RemoteTemplate rt : browseIndex)
+		{
+			if (matchesQuery(rt))
+			{
+				out.add(rt);
+			}
+		}
+		final Comparator<RemoteTemplate> order;
+		if ("newest".equals(browseSort))
+		{
+			order = Comparator.comparingLong((RemoteTemplate rt) -> rt.created).reversed();
+		}
+		else if ("popular".equals(browseSort))
+		{
+			order = Comparator.comparingInt((RemoteTemplate rt) -> rt.recent).reversed();
+		}
+		else
+		{
+			order = Comparator.comparingInt((RemoteTemplate rt) -> rt.downloads).reversed();
+		}
+		// Ties fall back to newest first, so a page holds the same cards from one rebuild to the next.
+		out.sort(order.thenComparing(Comparator.comparingLong((RemoteTemplate rt) -> rt.id).reversed()));
+		return out;
+	}
+
+	// Name, author and description, case-insensitively.
+	private boolean matchesQuery(RemoteTemplate rt)
+	{
+		return query.isEmpty() || containsQuery(rt.name) || containsQuery(rt.author) || containsQuery(rt.description);
+	}
+
+	private boolean containsQuery(String s)
+	{
+		return s != null && s.toLowerCase(Locale.ROOT).contains(query);
+	}
+
+	// One line: the sort dropdown. Changing it re-orders the fetched index in place; nothing is requested.
 	private JPanel buildBrowseControlsRow()
 	{
 		final JComboBox<String> sort = new JComboBox<>(SORT_LABELS);
@@ -1915,84 +1416,10 @@ public class BankTemplatesPanel extends PluginPanel
 		sort.addActionListener(e ->
 		{
 			browseSort = SORT_KEYS[sort.getSelectedIndex()];
-			newSearch();
+			browseOffset = 0;
+			rebuildOnEdt();
 		});
-
-		// The Exchange Insights logo, clickable, opens the web browse page (carrying the panel's sort;
-		// 'Items owned' is ranked locally so it sends the server's base order, which the site treats as
-		// Most imported).
-		return controlsRow(sort,
-			"Open the community bank templates on exchange-insights.gg in your browser, sorted like this list",
-			() -> LinkBrowser.browse("https://exchange-insights.gg/tools/osrs-bank-templates?sort="
-				+ (CLOSEST_SORT.equals(browseSort) ? "imported" : browseSort)));
-	}
-
-	// The avatar IS the profile button - and the only one. The icon row used to carry a second, redundant
-	// profile icon; two controls for one action, on a row where space is tight.
-	//
-	// The avatar IS the profile button. It's a picture of a person sitting on a profile-styled card, so it
-	// reads as one - but it used to carry the card's own action (apply / preview) and the card's wash, so
-	// clicking it did something else entirely and hovering it gave no sign it was its own control. Now it
-	// opens the profile, on its own hover ring. Returns false when the owner has no known handle (anonymous
-	// or unlinked), in which case the caller leaves the avatar as part of the card body.
-	private boolean wireAvatarProfile(JComponent avatar, String handle)
-	{
-		if (handle == null || handle.isEmpty())
-		{
-			return false;
-		}
-		avatar.setToolTipText("View @" + handle + " on the Exchange Insights leaderboard");
-		avatar.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		final Border idle = BorderFactory.createEmptyBorder(2, 2, 2, 2);
-		// Same insets either way, so gaining the ring can't nudge the card's layout.
-		final Border ring = BorderFactory.createCompoundBorder(new RoundedBorder(ICON_GOLD, new Insets(1, 1, 1, 1)), BorderFactory.createEmptyBorder(1, 1, 1, 1));
-		avatar.setBorder(idle);
-		avatar.addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mouseClicked(MouseEvent e)
-			{
-				openProfile(handle);
-			}
-
-			@Override
-			public void mouseEntered(MouseEvent e)
-			{
-				avatar.setBorder(ring);
-			}
-
-			@Override
-			public void mouseExited(MouseEvent e)
-			{
-				avatar.setBorder(idle);
-			}
-		});
-		return true;
-	}
-
-	// Open an uploader's Exchange Insights profile on the leaderboard. Only offered when we actually know
-	// their handle - an anonymous or unlinked upload has no profile to open.
-	private void openProfile(String handle)
-	{
-		// Percent-encode: the site matches the handle against a strict character class, so a raw space or
-		// any other unexpected character in it would fail the match and drop the visitor on the dashboard
-		// instead of the profile. Spaces encode as "+" by default, which is wrong inside a fragment.
-		String encoded;
-		try
-		{
-			encoded = java.net.URLEncoder.encode(handle, java.nio.charset.StandardCharsets.UTF_8.name()).replace("+", "%20");
-		}
-		catch (java.io.UnsupportedEncodingException e)
-		{
-			encoded = handle; // UTF-8 is always available; fall back rather than swallow the click
-		}
-		LinkBrowser.browse("https://exchange-insights.gg/#community?u=" + encoded);
-	}
-
-	// Open a single template's page on the site (?t=<repoId> deep-links straight to it).
-	private void openOnWeb(long repoId)
-	{
-		LinkBrowser.browse("https://exchange-insights.gg/tools/osrs-bank-templates?t=" + repoId);
+		return controlsRow(sort);
 	}
 
 	private int sortIndex()
@@ -2007,18 +1434,17 @@ public class BankTemplatesPanel extends PluginPanel
 		return 0;
 	}
 
-	private JPanel buildPaginationRow()
+	private JPanel buildPaginationRow(int total, boolean hasMore)
 	{
-		return paginationRow(browseOffset, browseTotal, browseHasMore, off ->
+		return paginationRow(browseOffset, total, hasMore, off ->
 		{
 			browseOffset = off;
-			loadBrowse();
+			rebuildOnEdt();
 		});
 	}
 
 	// Single line: «  <  1-10 of 229  >  ». The range label carries the count, so there's no separate
-	// "Page X of N" row and no separate Count line. Shared by Browse (server-paged, so it's told whether
-	// more exist) and My Templates (paged locally, where the total settles it).
+	// "Page X of N" row and no separate Count line. Shared by Browse and My Templates, both paged locally.
 	private JPanel paginationRow(int offset, int total, boolean hasMore, java.util.function.IntConsumer goTo)
 	{
 		final int currentPage = offset / PAGE_SIZE + 1;
@@ -2072,20 +1498,13 @@ public class BankTemplatesPanel extends PluginPanel
 		return b;
 	}
 
-	// A Browse card styled after the uploader's Exchange Insights profile: their themed background and
-	// avatar, with the import/report counts as clickable icons. The whole thing is rebuilt from the freshly
-	// fetched profile on each redraw, so a change to the uploader's avatar/background shows next refresh.
+	// A Browse card built from the index entry alone: name, author, size and counts. The layout behind it
+	// is only fetched when the card is previewed or imported.
 	private JPanel buildRemoteCard(RemoteTemplate rt)
 	{
-		final RemoteTemplate.Profile p = rt.profile;
-		final String bg = p != null ? p.profileBg : null;
-
-		final ProfileCard card = profileCardPanel(bg);
+		final Card card = cardPanel();
 		card.setLayout(new BorderLayout(8, 4));
 		card.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-
-		final JComponent avatar = avatarComponent(rt);
-		card.add(avatar, BorderLayout.WEST);
 
 		final JPanel text = new JPanel();
 		text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
@@ -2113,21 +1532,20 @@ public class BankTemplatesPanel extends PluginPanel
 			@Override
 			public void mouseClicked(MouseEvent e)
 			{
-				showPreview(rt.toTemplate());
+				if (!SwingUtilities.isLeftMouseButton(e))
+				{
+					return;
+				}
+				previewRemote(rt);
 			}
 		};
 		card.setToolTipText("Click to preview this template");
-		final String rtHandle = p != null && p.handle != null && !p.handle.isEmpty() ? p.handle : null;
-		final boolean avatarIsProfile = wireAvatarProfile(avatar, rtHandle);
-		final JComponent[] body = avatarIsProfile
-			? new JComponent[]{card, text, name, author, meta}
-			: new JComponent[]{card, avatar, text, name, author, meta};
-		for (final JComponent c : body)
+		for (final JComponent c : new JComponent[]{card, text, name, author, meta})
 		{
 			c.addMouseListener(viewClick);
 			c.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		}
-		wireHover(card, avatar, text, name, author, meta);
+		wireHover(card, text, name, author, meta);
 
 		final JPanel actions = iconRow();
 		// The count icons ARE the buttons: download imports, flag reports. Glue around each spreads
@@ -2135,53 +1553,74 @@ public class BankTemplatesPanel extends PluginPanel
 		actions.add(Box.createHorizontalGlue());
 		actions.add(countIcon(PanelIcons.download(UPVOTE_COLOR), rt.downloads, UPVOTE_COLOR, "Import a copy to My Templates", () -> importRemote(rt)));
 		actions.add(Box.createHorizontalGlue());
-		actions.add(actionIcon("&#9873;", rt.reports, DOWNVOTE_COLOR, "Report this template", () -> reportRepo(rt.id, this::loadBrowse)));
-		actions.add(Box.createHorizontalGlue());
-		actions.add(clickableIcon(PanelIcons.globe(ICON_GOLD), "Open this template on exchange-insights.gg", () -> openOnWeb(rt.id)));
+		actions.add(actionIcon("&#9873;", rt.reports, DOWNVOTE_COLOR, "Report this template", () -> reportRepo(rt.id)));
 		actions.add(Box.createHorizontalGlue());
 		if (ownsRemote(rt.id))
 		{
 			actions.add(clickableIcon(PanelIcons.xMark(DOWNVOTE_COLOR), "Delete your shared template", () -> deleteRemote(rt.id)));
 			actions.add(Box.createHorizontalGlue());
 		}
-		card.add(southStack(tabIconStrip(rt.tabs), actions), BorderLayout.SOUTH);
-		return card;
-	}
-
-	// The uploader line: prefer their EI display name / @handle, else the template's author, else Anonymous.
-	// Snapshot the uploader's public profile at import time, so an imported card can show the original
-	// owner's name/avatar/theme. Anonymous or unlinked uploads capture just the "Anonymous"/author name,
-	// which still renders as a fully defaulted (neutral) card.
-	private BankTemplate.OwnerProfile capturedOwner(RemoteTemplate rt)
-	{
-		final BankTemplate.OwnerProfile op = new BankTemplate.OwnerProfile();
-		final RemoteTemplate.Profile p = rt.anonymous ? null : rt.profile;
-		if (p != null && p.displayName != null && !p.displayName.isEmpty())
+		// Right-click menu, mirroring the icon row. Edit appears only when this is one of your shares and
+		// its local copy is still here - editing happens on that copy, then Update pushes it.
+		final JPopupMenu menu = new JPopupMenu();
+		menuItem(menu, "Preview", () -> previewRemote(rt));
+		menuItem(menu, ownsRemote(rt.id) ? "Restore to My Templates" : "Import to My Templates", () -> importRemote(rt));
+		final BankTemplate ownedCopy = localOwnedCopy(rt.id);
+		if (ownedCopy != null)
 		{
-			op.name = p.displayName;
+			menuItem(menu, "Edit layout", () -> editTemplate(ownedCopy));
+			menuItem(menu, "Update shared copy", () -> share(ownedCopy));
 		}
-		else if (p != null && p.handle != null && !p.handle.isEmpty())
+		if (!ownsRemote(rt.id))
 		{
-			op.name = "@" + p.handle;
+			menuItem(menu, "Report", () -> reportRepo(rt.id));
 		}
 		else
 		{
-			op.name = rt.anonymous || rt.author == null || rt.author.isEmpty() ? "Anonymous" : rt.author;
+			menu.addSeparator();
+			menuItem(menu, "Delete shared template", () -> deleteRemote(rt.id));
 		}
-		op.handle = p != null ? p.handle : null;
-		op.bg = p != null ? p.profileBg : null;
-		op.avatarItemId = p != null ? p.avatarItemId : null;
-		// The original's popularity, so the imported card shows how the community template is doing
-		// rather than the zeros of your own not-yet-shared copy.
+		attachPopup(menu, card, text, name, author, meta);
+		card.add(southStack(tabIconStrip(tabIconsOf(rt)), actions), BorderLayout.SOUTH);
+		return card;
+	}
+
+	// Fetch a card's layout, then hand it on. Nothing is shown while it loads: the file is small, and a
+	// repeat view of the same revision comes straight from the disk cache. A failure gets a dialog.
+	private void withLayout(RemoteTemplate rt, Consumer<TemplateRepositoryClient.LayoutFile> then)
+	{
+		repositoryClient.fetchLayout(rt.id, rt.rev,
+			layout -> SwingUtilities.invokeLater(() -> then.accept(layout)),
+			error -> SwingUtilities.invokeLater(() ->
+				JOptionPane.showMessageDialog(this, error, "Couldn't load template", JOptionPane.WARNING_MESSAGE)));
+	}
+
+	private void previewRemote(RemoteTemplate rt)
+	{
+		withLayout(rt, layout -> showPreview(rt.toTemplate(layout)));
+	}
+
+	// Snapshot who shared a template at import time, so the imported card can still name them (and show
+	// how the original is doing) once it lives in My Templates.
+	private BankTemplate.OwnerProfile capturedOwner(RemoteTemplate rt)
+	{
+		final BankTemplate.OwnerProfile op = new BankTemplate.OwnerProfile();
+		op.name = authorOf(rt);
 		op.downloads = rt.downloads;
 		op.reports = rt.reports;
 		return op;
 	}
 
-	// The "by …" line for a My Templates card: a preset's source, an imported template's original owner,
-	// your linked account's own name, or a plain "by you" when there's no linked profile (an EI account is
-	// opt-in, so this always has to read sensibly without one).
-	private String localByline(BankTemplate t, BankTemplate.OwnerProfile owner, RemoteTemplate.Profile self)
+	// The name a card shows for an uploader: "Anonymous" when they asked for that (the server blanks the
+	// author too, but the flag is the promise) or when there's no name to show.
+	private static String authorOf(RemoteTemplate rt)
+	{
+		return rt.anonymous || rt.author == null || rt.author.trim().isEmpty() ? "Anonymous" : rt.author.trim();
+	}
+
+	// The "by ..." line for a My Templates card: a preset's source, an imported template's original
+	// uploader, or "by you".
+	private String localByline(BankTemplate t, BankTemplate.OwnerProfile owner)
 	{
 		if (t.isPreset())
 		{
@@ -2191,61 +1630,42 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			return "by " + (owner.name != null && !owner.name.isEmpty() ? owner.name : "Anonymous");
 		}
-		if (self != null && self.displayName != null && !self.displayName.isEmpty())
-		{
-			return "by " + self.displayName;
-		}
-		if (self != null && self.handle != null && !self.handle.isEmpty())
-		{
-			return "by @" + self.handle;
-		}
 		return "by you";
 	}
 
 	private String byLine(RemoteTemplate rt)
 	{
-		if (rt.profile != null)
-		{
-			if (rt.profile.displayName != null && !rt.profile.displayName.isEmpty())
-			{
-				return "by " + rt.profile.displayName;
-			}
-			if (rt.profile.handle != null && !rt.profile.handle.isEmpty())
-			{
-				return "by @" + rt.profile.handle;
-			}
-		}
-		final String by = rt.anonymous || rt.author == null || rt.author.isEmpty() ? "Anonymous" : rt.author;
-		return "by " + by;
+		return "by " + authorOf(rt);
 	}
 
-	// A card panel that paints the uploader's themed profile background (falls back to the neutral default).
-	// Height is capped to its preferred height, like cardPanel, so the vertical list doesn't stretch it.
-	private ProfileCard profileCardPanel(final String bgKey)
+	// A card panel. Height is capped to its preferred height so the vertical list doesn't stretch it.
+	private Card cardPanel()
 	{
-		return profileCardPanel(bgKey, false);
+		return cardPanel(false);
 	}
 
 	// active = the currently applied template, drawn with a red highlight glow around its edge.
-	private ProfileCard profileCardPanel(final String bgKey, final boolean active)
+	private Card cardPanel(final boolean active)
 	{
-		final ProfileCard card = new ProfileCard(bgKey, active);
+		final Card card = new Card(active);
 		card.setOpaque(false);
 		card.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return card;
 	}
 
-	// A template card: the uploader's themed background, a red glow when it's the applied template, and a
+	// A template card: a dark gradient with a bronze rim, a red glow when it's the applied template, and a
 	// lift on hover - the whole card is the click target in both lists, so it needs to say so.
-	private static final class ProfileCard extends JPanel
+	private static final class Card extends JPanel
 	{
-		private final String bgKey;
+		private static final Color TOP = new Color(0x22, 0x22, 0x22);
+		private static final Color BOTTOM = new Color(0x16, 0x16, 0x16);
+		private static final Color RIM = new Color(205, 127, 50, 130);
+
 		private final boolean active;
 		private boolean hover;
 
-		ProfileCard(String bgKey, boolean active)
+		Card(boolean active)
 		{
-			this.bgKey = bgKey;
 			this.active = active;
 		}
 
@@ -2264,16 +1684,23 @@ public class BankTemplatesPanel extends PluginPanel
 			final Graphics2D g2 = (Graphics2D) g.create();
 			g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 			final int w = getWidth(), h = getHeight();
-			ProfileCardStyle.paint(g2, w, h, 10, bgKey);
+			final RoundRectangle2D shape = new RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, 10, 10);
+			// clip() INTERSECTS the clip we were handed (the scroll viewport's, among others); setClip()
+			// would replace it and let a part-scrolled card paint over the pinned bottom bar.
+			final Shape oldClip = g2.getClip();
+			g2.clip(shape);
+			g2.setPaint(new GradientPaint(0, 0, TOP, w, h, BOTTOM));
+			g2.fillRect(0, 0, w, h);
+			g2.setClip(oldClip);
+			g2.setColor(RIM);
+			g2.draw(shape);
 			if (hover)
 			{
-				// A wash plus a brighter rim, rather than a colour change - the background is the uploader's
-				// theme, so the highlight has to work over any of them.
 				g2.setColor(new Color(255, 255, 255, 20));
-				g2.fill(new RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, 10, 10));
+				g2.fill(shape);
 				g2.setStroke(new BasicStroke(1f));
 				g2.setColor(new Color(255, 255, 255, 70));
-				g2.draw(new RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, 10, 10));
+				g2.draw(shape);
 			}
 			if (active)
 			{
@@ -2299,8 +1726,8 @@ public class BankTemplatesPanel extends PluginPanel
 	// Highlight the card while the pointer is anywhere inside it. The listener goes on the card AND its
 	// children, because moving onto a child fires mouseExited on the parent; on exit the highlight only
 	// drops once the pointer has genuinely left the card (getMousePosition covers children), so crossing
-	// between the avatar, text and icon buttons doesn't flicker.
-	private static void wireHover(ProfileCard card, JComponent... parts)
+	// between the text and icon buttons doesn't flicker.
+	private static void wireHover(Card card, JComponent... parts)
 	{
 		final MouseAdapter hover = new MouseAdapter()
 		{
@@ -2323,17 +1750,16 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 	}
 
-	// A strip of the template's tab icons, so a card says what's actually IN the template without opening
-	// it - the same buttons you'd see down the side of the bank. Each tab shows its chosen icon, or its
-	// first item when it has none (exactly how the bank picks a tab's button). Empty tabs contribute
-	// nothing. Returns null when there's nothing to draw, so a single-tab template keeps a compact card.
-	private JComponent tabIconStrip(List<TabLayout> tabs)
+	// The icons a local template's tabs would show down the side of the bank: each tab's chosen icon, or
+	// its first item when it has none (exactly how the bank picks a tab's button). Empty tabs contribute
+	// nothing.
+	private static List<Integer> tabIconsOf(List<TabLayout> tabs)
 	{
-		if (tabs == null || tabs.isEmpty())
-		{
-			return null;
-		}
 		final List<Integer> ids = new ArrayList<>();
+		if (tabs == null)
+		{
+			return ids;
+		}
 		for (TabLayout t : tabs)
 		{
 			int id = t.getCustomIconId();
@@ -2353,7 +1779,33 @@ public class BankTemplatesPanel extends PluginPanel
 				ids.add(id);
 			}
 		}
-		if (ids.isEmpty())
+		return ids;
+	}
+
+	// The same for an index entry: the server already applied that rule, so this only drops the tabs it
+	// marked empty.
+	private static List<Integer> tabIconsOf(RemoteTemplate rt)
+	{
+		final List<Integer> ids = new ArrayList<>();
+		if (rt.tabs == null)
+		{
+			return ids;
+		}
+		for (RemoteTemplate.TabRef t : rt.tabs)
+		{
+			if (t != null && t.icon > 0)
+			{
+				ids.add(t.icon);
+			}
+		}
+		return ids;
+	}
+
+	// A strip of the template's tab icons, so a card says what's actually IN the template without opening
+	// it. Returns null when there's nothing to draw, so a single-tab template keeps a compact card.
+	private JComponent tabIconStrip(List<Integer> ids)
+	{
+		if (ids == null || ids.isEmpty())
 		{
 			return null;
 		}
@@ -2411,87 +1863,6 @@ public class BankTemplatesPanel extends PluginPanel
 		return strip;
 	}
 
-	// Circular avatar rendered from the uploader's chosen item (via the local item-icon cache, so it stays
-	// current), ringed in the profile's accent colour. Falls back to a silhouette when there's none.
-	private JComponent avatarComponent(RemoteTemplate rt)
-	{
-		final RemoteTemplate.Profile p = rt.profile;
-		return avatarComponent(p != null ? p.avatarItemId : null, p != null ? p.profileBg : null);
-	}
-
-	// Circular avatar for a profile card, driven by explicit fields so both Browse (uploader) and My
-	// Templates (owner / defaulted self) cards can share it. itemId null → the default silhouette; bgKey
-	// null → the default bronze ring.
-	private JComponent avatarComponent(Integer itemId, String bgKey)
-	{
-		final int size = 44;
-		final Color ring = ProfileCardStyle.border(bgKey);
-
-		final JComponent avatar = new JComponent()
-		{
-			private Image img;
-
-			{
-				setPreferredSize(new Dimension(size, size));
-				setMaximumSize(new Dimension(size, size));
-				if (itemId != null && itemId > 0)
-				{
-					final AsyncBufferedImage a = itemManager.getImage(itemId);
-					img = a;
-					a.onLoaded(this::repaint);
-				}
-			}
-
-			@Override
-			protected void paintComponent(Graphics g)
-			{
-				final Graphics2D g2 = (Graphics2D) g.create();
-				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-				g2.setColor(new Color(0, 0, 0, 90));
-				g2.fillOval(1, 1, size - 3, size - 3);
-
-				final int iw = img != null ? img.getWidth(null) : -1;
-				final int ih = img != null ? img.getHeight(null) : -1;
-				if (iw > 0 && ih > 0)
-				{
-					// clip() INTERSECTS; setClip() would REPLACE the clip we were handed - including the
-					// scroll viewport's - letting a part-scrolled avatar paint over the pinned bottom bar.
-					final Shape old = g2.getClip();
-					g2.clip(new Ellipse2D.Float(2, 2, size - 5, size - 5));
-					final int max = size - 12;
-					final double sc = Math.min((double) max / iw, (double) max / ih);
-					final int dw = (int) Math.round(iw * sc);
-					final int dh = (int) Math.round(ih * sc);
-					g2.drawImage(img, (size - dw) / 2, (size - dh) / 2, dw, dh, null);
-					g2.setClip(old);
-				}
-				else
-				{
-					// Default avatar: a person silhouette, matching the website's, rather than an initial.
-					g2.setColor(ring);
-					final int cx = size / 2;
-					final int headR = size / 7;
-					final int headCy = size / 2 - headR + 1;
-					g2.fillOval(cx - headR, headCy - headR, headR * 2, headR * 2);
-					// Shoulders: the top half of a wide ellipse, clipped to the avatar circle so it reads as
-					// a bust rather than a blob touching the ring.
-					final int bodyW = (int) (size * 0.56);
-					final int bodyH = (int) (size * 0.46);
-					final Shape old = g2.getClip();
-					g2.clip(new Ellipse2D.Float(2, 2, size - 5, size - 5));
-					g2.fillArc(cx - bodyW / 2, headCy + headR + 2, bodyW, bodyH * 2, 0, 180);
-					g2.setClip(old);
-				}
-
-				g2.setColor(ring);
-				g2.setStroke(new BasicStroke(1.5f));
-				g2.drawOval(1, 1, size - 4, size - 4);
-				g2.dispose();
-			}
-		};
-		return avatar;
-	}
-
 	// An import/report count shown as its own clickable icon+number (the icon is the action button).
 	// A negative count renders the glyph alone (no number), for actions that have no count to show.
 	private JLabel actionIcon(String glyphEntity, int count, Color color, String tooltip, Runnable action)
@@ -2526,8 +1897,14 @@ public class BankTemplatesPanel extends PluginPanel
 		return label;
 	}
 
+	// Yours if a local owned copy points at it, or if the server says this character shared it (which
+	// survives a reinstall that wiped the local flag).
 	private boolean ownsRemote(long repoId)
 	{
+		if (mineIds.contains(repoId))
+		{
+			return true;
+		}
 		for (BankTemplate t : templateManager.getUserTemplates())
 		{
 			if (t.isOwned() && t.getRepoId() != null && t.getRepoId() == repoId)
@@ -2538,82 +1915,99 @@ public class BankTemplatesPanel extends PluginPanel
 		return false;
 	}
 
+	// Entering Browse: back to the first page, with the index loaded.
 	private void newSearch()
 	{
 		browseOffset = 0;
-		loadBrowse();
+		loadBrowse(false);
 	}
 
-	private void loadBrowse()
+	// Loads the catalogue index. Within 60 seconds of the last fetch the client hands the cached list
+	// straight back, so switching tabs costs nothing; force asks the origin again regardless.
+	private void loadBrowse(boolean force)
 	{
-		browseStatus = "Searching…";
-		browseResults.clear();
+		if (!repositoryClient.isEnabled())
+		{
+			rebuildOnEdt(); // the enable prompt
+			return;
+		}
+		// Only announce the wait when there's nothing to show meanwhile; a refresh keeps the old list up.
+		browseStatus = browseIndex.isEmpty() ? "Loading…" : null;
 		rebuildOnEdt();
-		// "Closest to my bank" is sorted client-side (see buildBrowseView); fetch in a neutral order.
-		final String serverSort = CLOSEST_SORT.equals(browseSort) ? "imported" : browseSort;
-		repositoryClient.search(searchBar.getText(), serverSort, browseOffset,
-			page -> SwingUtilities.invokeLater(() ->
+		repositoryClient.fetchIndex(force,
+			list -> SwingUtilities.invokeLater(() ->
 			{
-				browseResults.clear();
-				if (page.templates != null)
-				{
-					browseResults.addAll(page.templates);
-				}
-				browseHasMore = page.hasMore;
-				browseTotal = page.total;
-				browseStatus = browseResults.isEmpty() ? "No templates found." : null;
+				browseIndex.clear();
+				browseIndex.addAll(list);
+				browseStatus = null;
+				applyIndexStats(list);
 				rebuildOnEdt();
 			}),
 			error -> SwingUtilities.invokeLater(() ->
 			{
-				browseStatus = error;
+				// A list we already have beats an error message; the failure only matters with nothing to show.
+				if (browseIndex.isEmpty())
+				{
+					browseStatus = error;
+				}
 				rebuildOnEdt();
 			}));
 	}
 
 	private void importRemote(RemoteTemplate rt)
 	{
-		final BankTemplate t = rt.toTemplate();
-		t.setRepoId(rt.id);
-		t.setOwned(false);
-		t.setOwnerProfile(capturedOwner(rt));   // remember the original owner's profile for the card
-		t.setName(uniqueName(capName(t.getName())));
-		if (templateManager.saveUserTemplate(t))
+		withLayout(rt, layout ->
 		{
-			// Record the import, then refresh the Browse list so the count reflects the server's
-			// (deduped) truth rather than an optimistic guess.
-			repositoryClient.recordImport(rt.id, () -> SwingUtilities.invokeLater(this::loadBrowse));
-			JOptionPane.showMessageDialog(this, "Imported \"" + t.getName() + "\" to My Templates.", "Imported", JOptionPane.INFORMATION_MESSAGE);
-		}
-		else
-		{
-			JOptionPane.showMessageDialog(this, "Could not import that template.", "Import failed", JOptionPane.ERROR_MESSAGE);
-		}
+			final BankTemplate t = rt.toTemplate(layout);
+			t.setRepoId(rt.id);
+			final boolean mine = mineIds.contains(rt.id);
+			if (mine)
+			{
+				// One of this character's own shares (a reinstall dropped the local copy): re-link it as
+				// owned so it can be updated and deleted from here again.
+				t.setOwned(true);
+				t.setSharedAnonymously(rt.anonymous);
+				t.setShareDownloads(rt.downloads);
+				t.setShareReports(rt.reports);
+			}
+			else
+			{
+				t.setOwned(false);
+				t.setOwnerProfile(capturedOwner(rt));   // remember who shared it, for the card
+			}
+			t.setName(uniqueName(capName(t.getName())));
+			if (!templateManager.saveUserTemplate(t))
+			{
+				JOptionPane.showMessageDialog(this, "Could not import that template.", "Import failed", JOptionPane.ERROR_MESSAGE);
+				return;
+			}
+			if (!mine)
+			{
+				// Best effort and deduped server-side. The card's count catches up when the index is next
+				// rebuilt, so there's nothing to refresh here.
+				repositoryClient.recordImport(rt.id, null);
+			}
+			JOptionPane.showMessageDialog(this,
+				(mine ? "Restored your shared \"" : "Imported \"") + t.getName() + "\" to My Templates.",
+				"Imported", JOptionPane.INFORMATION_MESSAGE);
+		});
 	}
 
-	// Sharing, reporting and deleting have to be attributable. A logged-in character supplies that directly
-	// (its account hash derives the clientId these are keyed on); logged out, a linked Exchange Insights
-	// token identifies the account instead and the server attributes to it. Only a caller with NEITHER -
-	// logged out AND no linked account - has nothing to attribute to, and is asked to log in.
+	// Sharing, reporting and deleting are keyed on the logged-in character (its account hash derives the
+	// clientId the server treats as the owner), so logged out there is nothing to attribute them to.
 	private boolean requireLogin()
 	{
-		if (repositoryClient.hasIdentity() || hasEiToken())
+		if (repositoryClient.hasIdentity())
 		{
 			return true;
 		}
 		JOptionPane.showMessageDialog(this,
-			"Log in to your RuneScape account first, or link an Exchange Insights account - sharing, "
-				+ "reporting and deleting have to be tied to one of them.",
+			"Log in to your RuneScape account first. Sharing, reporting and deleting are tied to the character you're logged in as.",
 			"Not logged in", JOptionPane.WARNING_MESSAGE);
 		return false;
 	}
 
 	private void reportRepo(long repoId)
-	{
-		reportRepo(repoId, null);
-	}
-
-	private void reportRepo(long repoId, Runnable onReported)
 	{
 		if (!requireLogin())
 		{
@@ -2627,13 +2021,7 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 		repositoryClient.report(repoId,
 			() -> SwingUtilities.invokeLater(() ->
-			{
-				if (onReported != null)
-				{
-					onReported.run();
-				}
-				JOptionPane.showMessageDialog(this, "Reported. Thanks.", "Reported", JOptionPane.INFORMATION_MESSAGE);
-			}),
+				JOptionPane.showMessageDialog(this, "Reported. Thanks.", "Reported", JOptionPane.INFORMATION_MESSAGE)),
 			error -> SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, error, "Report failed", JOptionPane.WARNING_MESSAGE)));
 	}
 
@@ -2653,7 +2041,8 @@ public class BankTemplatesPanel extends PluginPanel
 			() -> SwingUtilities.invokeLater(() ->
 			{
 				unlinkLocal(repoId);
-				loadBrowse();
+				mineIds.remove(repoId);
+				loadBrowse(false); // the client dropped its 60 second floor, so this asks the origin
 			}),
 			error -> SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, error, "Delete failed", JOptionPane.WARNING_MESSAGE)));
 	}
@@ -2759,10 +2148,11 @@ public class BankTemplatesPanel extends PluginPanel
 						{
 							template.setRepoId(newId);
 							template.setOwned(true);
+							mineIds.add(newId);
 							// Sharing an imported template makes it YOURS. It uploaded under your name and account
 							// (create never sends the original owner), so drop the original owner snapshot too:
 							// the card now shows you, and the new shared copy's counts start at zero instead of
-							// inheriting theirs. A later sync fills in the real numbers as players import it. This
+							// inheriting theirs. The index fills in the real numbers as players import it. This
 							// is what stops someone re-publishing another player's template under that player's name.
 							template.setOwnerProfile(null);
 							template.setShareDownloads(0);
@@ -2776,83 +2166,6 @@ public class BankTemplatesPanel extends PluginPanel
 						JOptionPane.showMessageDialog(this, error, "Share failed", JOptionPane.WARNING_MESSAGE)));
 			}
 		});
-	}
-
-	// "3 days ago" style age for the stored bank snapshot, so it's obvious how stale the fallback is.
-	private static String relativeTime(long epochSeconds)
-	{
-		final long secs = Math.max(0, System.currentTimeMillis() / 1000L - epochSeconds);
-		if (secs < 3600)
-		{
-			return Math.max(1, secs / 60) + "m ago";
-		}
-		if (secs < 86400)
-		{
-			return secs / 3600 + "h ago";
-		}
-		return secs / 86400 + "d ago";
-	}
-
-	// Builds a template from the last bank snapshot Exchange Insights holds for this account - the same
-	// [id, qty, tab] triples the plugin uploads - so capturing still works while logged out of the game.
-	// The triples carry their own tab, so they're grouped by it rather than re-sliced by varbit counts.
-	private void captureFromSnapshot()
-	{
-		final String input = JOptionPane.showInputDialog(this,
-			"Name for the captured template (max " + MAX_NAME_LENGTH + " chars):", "My bank");
-		if (input == null || input.trim().isEmpty())
-		{
-			return;
-		}
-		final String name = uniqueName(capName(input));
-
-		repositoryClient.fetchMe(true, me -> SwingUtilities.invokeLater(() ->
-		{
-			final List<int[]> items = me != null && me.snapshot != null ? me.snapshot.items : null;
-			if (items == null || items.isEmpty())
-			{
-				JOptionPane.showMessageDialog(this, "Couldn't load your saved bank from Exchange Insights.",
-					"Capture failed", JOptionPane.WARNING_MESSAGE);
-				return;
-			}
-			final BankTemplate captured = new BankTemplate();
-			captured.setName(name);
-			captured.setColumns(BankLayoutRenderer.ITEMS_PER_ROW);
-			for (int tab = 1; tab <= 9; tab++)
-			{
-				final List<Integer> layout = snapshotTab(items, tab);
-				if (!layout.isEmpty())
-				{
-					captured.putTab(tab, layout);
-				}
-			}
-			final List<Integer> main = snapshotTab(items, BankTemplate.MAIN_TAB);
-			if (!main.isEmpty())
-			{
-				captured.putTab(BankTemplate.MAIN_TAB, main);
-			}
-			if (captured.tabCount() == 0 || !templateManager.saveUserTemplate(captured))
-			{
-				JOptionPane.showMessageDialog(this, "Couldn't capture that bank.", "Capture failed", JOptionPane.WARNING_MESSAGE);
-				return;
-			}
-			// No success dialog: the new card scrolled into view is the confirmation.
-			revealName = captured.getName();
-			rebuildOnEdt();
-		}));
-	}
-
-	private static List<Integer> snapshotTab(List<int[]> items, int tab)
-	{
-		final List<Integer> out = new ArrayList<>();
-		for (int[] it : items)
-		{
-			if (it != null && it.length >= 3 && it[2] == tab)
-			{
-				out.add(it[0] > 0 ? it[0] : BankTemplate.EMPTY);
-			}
-		}
-		return out;
 	}
 
 	private void captureCurrentBank()
@@ -2892,14 +2205,9 @@ public class BankTemplatesPanel extends PluginPanel
 	private void deleteLocal(BankTemplate template)
 	{
 		final boolean shared = template.isOwned() && template.getRepoId() != null && repositoryClient.isEnabled();
-		// A duplex-synced template lives in your website My Templates too, so deleting it here has to delete
-		// it there - otherwise the next sync just pulls it straight back.
-		final boolean webBacked = !template.isOwned() && template.getWebId() != null && repositoryClient.isEnabled();
 		final String msg = shared
 			? "Delete \"" + template.getName() + "\" locally AND remove it from the community repository?"
-			: webBacked
-				? "Delete \"" + template.getName() + "\" locally AND from your Exchange Insights website My Templates?"
-				: "Delete template \"" + template.getName() + "\"?";
+			: "Delete template \"" + template.getName() + "\"?";
 		final int choice = JOptionPane.showConfirmDialog(this, msg, "Delete template", JOptionPane.YES_NO_OPTION);
 		if (choice != JOptionPane.YES_OPTION)
 		{
@@ -2912,47 +2220,33 @@ public class BankTemplatesPanel extends PluginPanel
 			rebuildOnEdt();
 			onActiveChanged.run();
 		});
-		final Consumer<String> onDeleteError = error -> SwingUtilities.invokeLater(() ->
-		{
-			final int alsoLocal = JOptionPane.showConfirmDialog(this,
-				error + "\n\nDelete the local copy anyway?", "Delete failed",
-				JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-			if (alsoLocal == JOptionPane.YES_OPTION)
-			{
-				removeLocally.run();
-			}
-		});
 
-		if (shared)
+		if (!shared)
 		{
-			if (!requireLogin())
-			{
-				return;
-			}
-			repositoryClient.delete(template.getRepoId(), removeLocally, onDeleteError);
-		}
-		else if (webBacked)
-		{
-			if (!requireLogin())
-			{
-				return;
-			}
-			// If this copy was also imported from someone else's community share, drop that import count too.
-			if (template.getRepoId() != null)
-			{
-				repositoryClient.unimport(template.getRepoId());
-			}
-			repositoryClient.delete(template.getWebId(), removeLocally, onDeleteError);
-		}
-		else
-		{
-			// Deleting an imported copy: tell the repo so its import count drops back.
-			if (!template.isOwned() && template.getRepoId() != null && repositoryClient.isEnabled())
-			{
-				repositoryClient.unimport(template.getRepoId());
-			}
 			removeLocally.run();
+			return;
 		}
+		if (!requireLogin())
+		{
+			return;
+		}
+		final long repoId = template.getRepoId();
+		repositoryClient.delete(repoId,
+			() -> SwingUtilities.invokeLater(() ->
+			{
+				mineIds.remove(repoId);
+				removeLocally.run();
+			}),
+			error -> SwingUtilities.invokeLater(() ->
+			{
+				final int alsoLocal = JOptionPane.showConfirmDialog(this,
+					error + "\n\nDelete the local copy anyway?", "Delete failed",
+					JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+				if (alsoLocal == JOptionPane.YES_OPTION)
+				{
+					removeLocally.run();
+				}
+			}));
 	}
 
 	private JPanel buildEnablePrompt()
@@ -2983,7 +2277,6 @@ public class BankTemplatesPanel extends PluginPanel
 		{
 			configManager.setConfiguration(BankTemplatesConfig.GROUP, "enableRepository", true);
 			newSearch();
-			syncWebTemplates(); // start the duplex sync loop now that the repo is on
 		});
 		panel.add(enable);
 		return panel;
@@ -2996,20 +2289,15 @@ public class BankTemplatesPanel extends PluginPanel
 	private static final Color ICON_GOLD = new Color(0xE8, 0xC0, 0x50); // gold - the view / web actions
 	private static final Color STAT_MUTED = new Color(0x70, 0x70, 0x70); // greyed share stats (not shared yet)
 
-	// The Exchange Insights logo, scaled for the Browse control (clickable to open the web browse page).
-	private static final ImageIcon EI_ICON = loadEiIcon();
-
 	// Header icons. Drawn small and light so they read on the dark panel without competing with the
-	// account row underneath them. A missing resource yields null, and every use is null-guarded, so a
-	// bad build loses a button rather than the whole panel.
+	// tabs underneath them. A missing resource yields null, and every use is null-guarded, so a bad
+	// build loses a button rather than the whole panel.
 	private static final ImageIcon BELL_ICON = loadPanelIcon("bell.png");
 	private static final ImageIcon COG_ICON = loadPanelIcon("cog.png");
 	private static final ImageIcon SUPPORT_ICON = loadPanelIcon("support.png");
 
-	// Deep-links into the support form with the plugin and area already chosen, so somebody who
-	// already has a problem is not also asked to classify it.
-	private static final String SUPPORT_URL =
-		"https://exchange-insights.gg/support?group=plugins&cat=plugin-bank-templates";
+	// The plugin's issue tracker: bug reports and questions both go there.
+	private static final String SUPPORT_URL = "https://github.com/TheSpryt/bank-templates/issues/new";
 
 	/** A flat, icon-only header button. Falls back to a short text label when the icon is missing. */
 	private JButton headerIcon(ImageIcon icon, String alt, String tooltip, Runnable action)
@@ -3041,22 +2329,8 @@ public class BankTemplatesPanel extends PluginPanel
 		}
 	}
 
-	private static ImageIcon loadEiIcon()
-	{
-		try
-		{
-			final BufferedImage img = ImageUtil.loadImageResource(BankTemplatesPlugin.class, "/com/banktemplates/logo.png");
-			final int h = 22;
-			final int w = Math.max(1, img.getWidth() * h / img.getHeight());
-			return new ImageIcon(img.getScaledInstance(w, h, Image.SCALE_SMOOTH));
-		}
-		catch (RuntimeException e)
-		{
-			return null;
-		}
-	}
-	// The narrow side panel can't fit long names (e.g. auto-generated Exchange Insights display names),
-	// so clamp them with an ellipsis and show the full text on hover.
+	// The narrow side panel can't fit long names, so clamp them with an ellipsis and show the full text
+	// on hover.
 	// The card's title and its "by <uploader>" line, both bold so the template name and its attribution
 	// carry the card. Passed to clampedLabel so its ellipsis measurement uses the font it renders in.
 	// RuneScape's are BITMAP fonts, so deriveFont(BOLD) synthesises the weight by smearing the glyphs and
@@ -3101,41 +2375,12 @@ public class BankTemplatesPanel extends PluginPanel
 		return label;
 	}
 
-	// Browse card title: name + imports (▲, green) and reports (▼, red) shown as up/down votes.
-	// "x / y items" (x = how many of the template's items you own) plus tab count, for a Browse card. Falls
-	// back to "y items" until the bank has loaded.
-	private String remoteMeta(RemoteTemplate rt)
+	// "y items · n tabs" for a Browse card, straight from the index entry (no layout needed).
+	private static String remoteMeta(RemoteTemplate rt)
 	{
-		final BankTemplate t = rt.toTemplate();
-		final int total = t.itemCount();
-		final int tabs = t.tabCount();
-		final Set<Integer> ownedSet = ownedForCounts();
-		final String items = ownedSet != null
-			? ownedOfTemplate(t, ownedSet) + " / " + total + " items"
-			: total + " items";
-		return items + (tabs > 1 ? " · " + tabs + " tabs" : "");
+		final int tabs = rt.tabCount();
+		return rt.items + " items" + (tabs > 1 ? " · " + tabs + " tabs" : "");
 	}
-
-	// Ranking score for the "Items owned" sort. Not a plain percentage: it weights the absolute number of the
-	// template's items you own by the fraction you own (owned^2 / total), so owning more items is preferred and
-	// a near-complete small template doesn't outrank a big one you have a lot of - e.g. 487/936 beats 180/276.
-	private double ownershipScore(RemoteTemplate rt)
-	{
-		final Set<Integer> ownedSet = ownedForCounts();
-		if (ownedSet == null)
-		{
-			return 0;
-		}
-		final BankTemplate t = rt.toTemplate();
-		final int total = t.itemCount();
-		if (total == 0)
-		{
-			return 0;
-		}
-		final int owned = ownedOfTemplate(t, ownedSet);
-		return (double) owned * owned / total;
-	}
-
 
 	// A non-interactive stat chip (drawn icon + count) for a local card's share stats. count < 0 hides the
 	// number (used until the server reports real counts), leaving just the coloured/greyed icon.
@@ -3417,533 +2662,84 @@ public class BankTemplatesPanel extends PluginPanel
 	{
 		final int total = template.itemCount();
 		final int tabs = template.tabCount();
-		// "x / y items" when the bank is known (x = how many of the template's items you currently own),
-		// otherwise just "y items" until the bank has loaded. Ownership is already stated by the card's
-		// "by …" line, so it isn't repeated here.
-		final Set<Integer> ownedSet2 = ownedForCounts();
-		final String items = ownedSet2 != null
-			? ownedOfTemplate(template, ownedSet2) + " / " + total + " items"
-			: total + " items";
-		return items + (tabs > 1 ? " · " + tabs + " tabs" : "");
+		// Ownership is already stated by the card's "by ..." line, so it isn't repeated here.
+		return total + " items" + (tabs > 1 ? " · " + tabs + " tabs" : "");
 	}
 
-	// Recompute the owned-items set on the client thread (reading client state isn't EDT-safe), then refresh
-	// the cards if it changed. Triggered when the local view is built and whenever the bank container changes,
-	// so the "x / y items" counts fill in (and update) live without leaving and re-entering My Templates.
-	void refreshOwnedCanon()
+	// Fold the index's live import and report counts into the local templates that mirror a shared one:
+	// your own shares (matched by repoId) and unedited imports (through their uploader snapshot). Nothing
+	// else reports these numbers now, so this is what stops My Templates' counts freezing at the moment
+	// of the share or import. Persisted without stamping updatedAt: it isn't an edit.
+	private void applyIndexStats(List<RemoteTemplate> index)
 	{
-		clientThread.invoke(() ->
+		final Map<Long, RemoteTemplate> byId = new HashMap<>();
+		for (RemoteTemplate rt : index)
 		{
-			final long accountHash = client.getAccountHash();
-			// Switched account (or logged out): the old set belonged to a different bank - drop it so the new
-			// account's live bank or cache fills in instead.
-			if (accountHash != ownedAccountHash)
+			byId.put(rt.id, rt);
+		}
+		for (BankTemplate t : templateManager.getUserTemplates())
+		{
+			if (t.isPreset() || t.getRepoId() == null)
 			{
-				ownedAccountHash = accountHash;
-				ownedCanon = null;
-				countsChanged();
+				continue;
 			}
-
-			final Set<Integer> live = ownedBankCanonical();
-			if (live != null)
+			final RemoteTemplate rt = byId.get(t.getRepoId());
+			if (rt == null)
 			{
-				if (!Objects.equals(live, ownedCanon))
+				continue;
+			}
+			if (t.isOwned())
+			{
+				if (!Integer.valueOf(rt.downloads).equals(t.getShareDownloads())
+					|| !Integer.valueOf(rt.reports).equals(t.getShareReports()))
 				{
-					ownedCanon = live;
-					countsChanged();
-					// Persist this account's latest snapshot (off the client thread - file IO).
-					if (accountHash != -1)
-					{
-						executor.execute(() -> ownedCache.put(accountHash, live));
-					}
+					t.setShareDownloads(rt.downloads);
+					t.setShareReports(rt.reports);
+					templateManager.saveUnchanged(t);
 				}
 			}
-			else if (ownedCanon == null && accountHash != -1)
+			else if (t.getOwnerProfile() != null)
 			{
-				// Bank not loaded yet - show the last-known snapshot for this account until it recalculates.
-				executor.execute(() ->
+				final BankTemplate.OwnerProfile op = t.getOwnerProfile();
+				if (!Integer.valueOf(rt.downloads).equals(op.downloads) || !Integer.valueOf(rt.reports).equals(op.reports))
 				{
-					final Set<Integer> cached = ownedCache.get(accountHash);
-					if (cached != null)
-					{
-						SwingUtilities.invokeLater(() ->
-						{
-							// Only if the live bank still hasn't taken over and we're still on this account.
-							if (ownedCanon == null && accountHash == ownedAccountHash)
-							{
-								ownedCanon = cached;
-								countsChanged();
-							}
-						});
-					}
-				});
-			}
-		});
-	}
-
-	// The "x / y items" counts are shown on My Templates and Browse cards, so rebuild on either (a Browse
-	// rebuild reuses the cached results - no re-fetch). The Updates view just keeps the freshly-computed set.
-	private void countsChanged()
-	{
-		if (LOCAL.equals(mode) || BROWSE.equals(mode))
-		{
-			rebuild();
-		}
-	}
-
-	// Variant-collapsed ids the player owns (qty > 0). Bank placeholders (qty 0) and bank fillers (the 🚫
-	// reserved-slot item) are excluded, so neither counts as owned. Returns null if the bank container hasn't
-	// loaded yet. Client thread only.
-	private Set<Integer> ownedBankCanonical()
-	{
-		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
-		if (bank == null)
-		{
-			return null;
-		}
-		final Set<Integer> owned = new HashSet<>();
-		for (Item it : bank.getItems())
-		{
-			if (it.getId() > 0 && it.getId() != BankTemplate.FILLER && it.getQuantity() > 0)
-			{
-				owned.add(ItemVariants.base(it.getId()));
-			}
-		}
-		return owned;
-	}
-
-	// How many of the template's items the player currently has in their bank (variant-aware).
-	private int ownedOfTemplate(BankTemplate template, Set<Integer> owned)
-	{
-		int n = 0;
-		for (TabLayout t : template.getTabs())
-		{
-			for (Integer v : t.getLayout())
-			{
-				if (v != null && v > 0 && v != BankTemplate.FILLER
-					&& owned.contains(ItemVariants.base(v)))
-				{
-					n++;
+					op.downloads = rt.downloads;
+					op.reports = rt.reports;
+					templateManager.saveUnchanged(t);
 				}
 			}
 		}
-		return n;
 	}
 
-	// Duplex "My Templates" sync with the linked Exchange Insights account. The account's editable in-game
-	// templates (imports and in-plugin creations, plus copies previously pulled from the website) are sent
-	// up; the server reconciles them last-write-wins against the website set and returns the authoritative
-	// list, which we mirror back. Net effect: create or edit on either side and it shows on both; delete on
-	// the website and it's removed in-game. Requires an Exchange Insights account linked via the Exchange
-	// Insights plugin - webSyncLinked tracks that so the panel can explain it.
-	// Kick a sync now (called on login / account switch, and when the repository is first enabled). Starts
-	// the self-rescheduling sync loop if it isn't already running.
-	void syncWebTemplates()
+	// Ask the server which ids this character owns, once per identity (the first Browse render after a
+	// login). Cleared on logout so another character's shares never read as yours.
+	private void maybeFetchMine()
 	{
-		syncStopped = false; // an explicit kick (login, repo enabled) restarts a stopped loop
-		syncIdleMs = 0;
-		scheduleSync(0);
-	}
-
-	// Panel visibility drives the poll cadence: an open panel syncs immediately (throttled) and then
-	// polls fast, so a template imported or edited on the website appears in My Templates in seconds.
-	private volatile boolean panelActive;
-	private volatile long lastSyncStartedAt;
-
-	@Override
-	public void onActivate()
-	{
-		panelActive = true;
-		syncIdleMs = 0; // a freshly opened panel polls fast again, however long it had stepped down to
-		if (repositoryClient.isEnabled() && !syncStopped)
+		if (!repositoryClient.hasIdentity())
 		{
-			// ALWAYS re-arm, because closing the panel now stops the loop rather than slowing it. Opening
-			// again is the only thing that restarts it, so skipping the schedule when a sync happened in the
-			// last ACTIVATE_SYNC_MIN_MS would leave it stopped for good. Wait out the remainder of that
-			// throttle instead of ignoring the open: rapid open/close still collapses into one sync.
-			final long since = System.currentTimeMillis() - lastSyncStartedAt;
-			scheduleSync(Math.max(0, ACTIVATE_SYNC_MIN_MS - since));
+			mineIds.clear();
+			mineFetchedFor = null;
+			return;
 		}
-	}
-
-	@Override
-	public void onDeactivate()
-	{
-		panelActive = false;
-	}
-
-	// A local change happened: push it up soon (debounced so a burst of edits collapses into one sync).
-	void requestSync()
-	{
-		syncStopped = false;
-		syncIdleMs = 0; // the user did something - stop stepping down
-		changeSeq++;
-		scheduleSync(SYNC_DEBOUNCE_MS);
-	}
-
-	// True after stopSync: cancel(false) can't stop an already-executing pass, and afterSync re-arms the
-	// next poll - this flag stops a disabled plugin's in-flight pass from resurrecting the loop.
-	private volatile boolean syncStopped;
-
-	// Stop the sync loop and any in-flight account link poll (plugin shutdown).
-	synchronized void stopSync()
-	{
-		syncStopped = true;
-		if (pendingSyncTask != null)
-		{
-			pendingSyncTask.cancel(false);
-			pendingSyncTask = null;
-		}
-		if (linkPollTask != null)
-		{
-			linkPollTask.cancel(false);
-			linkPollTask = null;
-		}
-		linking = false;
-	}
-
-	// (Re)arm the single pending sync task, replacing any already scheduled one so the soonest wins.
-	private synchronized void scheduleSync(long delayMs)
-	{
-		if (syncStopped)
+		final String id = repositoryClient.clientId();
+		if (id.equals(mineFetchedFor))
 		{
 			return;
 		}
-		if (pendingSyncTask != null)
+		mineFetchedFor = id;
+		repositoryClient.fetchMine(ids -> SwingUtilities.invokeLater(() ->
 		{
-			pendingSyncTask.cancel(false);
-		}
-		pendingSyncTask = executor.schedule(
-			() -> SwingUtilities.invokeLater(this::runSync), Math.max(0, delayMs), TimeUnit.MILLISECONDS);
-	}
-
-	// One sync pass. Gathers the editable set (imports + in-plugin creations, minus public shares), giving
-	// each a stable client key, and sends it up; the result handler mirrors the authoritative set back and
-	// schedules the next pass. Runs on the EDT so it reads the template store safely.
-	private void runSync()
-	{
-		if (!repositoryClient.isEnabled())
-		{
-			// Loop idles while the repository is off; enabling it (or logging in) kicks it again.
-			return;
-		}
-		lastSyncStartedAt = System.currentTimeMillis(); // throttles the open-panel kick in onActivate
-		// Refresh imported cards' popularity on the same cadence. Independent of the account sync below (imports
-		// work without a linked account), and best-effort - a failure leaves the last-known counts in place.
-		refreshImportStats();
-		// Snapshot the change counter before gathering, so afterSync knows exactly which changes this pass
-		// covers - a change that arrives mid-sync bumps the counter and is retried, never dropped.
-		final long startSeq = changeSeq;
-		final List<BankTemplate> local = new ArrayList<>();
-		for (BankTemplate t : templateManager.getUserTemplates())
-		{
-			if (!t.isPreset() && !t.isOwned())
+			if (!id.equals(repositoryClient.clientId()))
 			{
-				ensureSyncKey(t);
-				local.add(t);
+				return; // logged out or switched character before the answer came
 			}
-		}
-		repositoryClient.sync(local, result -> SwingUtilities.invokeLater(() -> applySyncResult(result, startSeq)));
-	}
-
-	// Pull live import/report counts for every imported-but-unedited template and fold them into the owner
-	// snapshot the card renders from. Only these carry an ownerProfile with a repoId, so the set is naturally
-	// scoped to imports. On any failure the callback leaves the card as-is.
-	private void refreshImportStats()
-	{
-		final Map<Long, BankTemplate> byRepoId = new HashMap<>();
-		for (BankTemplate t : templateManager.getUserTemplates())
-		{
-			if (!t.isPreset() && !t.isOwned() && t.getOwnerProfile() != null && t.getRepoId() != null)
+			mineIds.clear();
+			mineIds.addAll(ids);
+			if (!ids.isEmpty() && BROWSE.equals(mode))
 			{
-				byRepoId.put(t.getRepoId(), t);
+				rebuildOnEdt();
 			}
-		}
-		if (byRepoId.isEmpty())
-		{
-			return;
-		}
-		repositoryClient.fetchStats(byRepoId.keySet(),
-			stats -> SwingUtilities.invokeLater(() -> applyImportStats(byRepoId, stats)),
-			err ->
-			{
-				// Keep the last-known snapshot: a blanked card is worse than a slightly stale count.
-			});
-	}
-
-	private void applyImportStats(Map<Long, BankTemplate> byRepoId, Map<Long, int[]> stats)
-	{
-		boolean changed = false;
-		for (Map.Entry<Long, int[]> e : stats.entrySet())
-		{
-			final BankTemplate t = byRepoId.get(e.getKey());
-			// The template may have been edited into the user's own (or deleted) between the request and its
-			// reply; in that case its counts are no longer the original's, so leave it alone.
-			if (t == null || t.isOwned() || t.getOwnerProfile() == null)
-			{
-				continue;
-			}
-			final BankTemplate.OwnerProfile op = t.getOwnerProfile();
-			final int downloads = e.getValue()[0];
-			final int reports = e.getValue()[1];
-			if (!Integer.valueOf(downloads).equals(op.downloads) || !Integer.valueOf(reports).equals(op.reports))
-			{
-				op.downloads = downloads;
-				op.reports = reports;
-				// Not a user edit - saveSyncedTemplate persists without stamping updatedAt, so this refresh
-				// can't masquerade as a local change and trigger a spurious duplex push.
-				templateManager.saveSyncedTemplate(t);
-				changed = true;
-			}
-		}
-		if (changed)
-		{
-			rebuild();
-		}
-	}
-
-	private void applySyncResult(TemplateRepositoryClient.SyncResult result, long startSeq)
-	{
-		if (result != null && result.linked)
-		{
-			// Suppress change events for the whole reconcile so sync's own writes (renames, removals) don't
-			// re-trigger a sync in an endless loop.
-			templateManager.setSuppressChangeEvents(true);
-			try
-			{
-				reconcile(result);
-			}
-			finally
-			{
-				templateManager.setSuppressChangeEvents(false);
-			}
-			webSyncLinked = true;
-			// The linked account's own profile, so YOUR cards can carry your avatar/theme/name instead of
-			// the defaulted placeholder. Kept from the last sync that supplied one.
-			if (result.profile != null)
-			{
-				selfProfile = result.profile;
-			}
-			if (result.bankValue != null)
-			{
-				setBankValue(result.bankValue); // fresh heartbeat value - no bank change needed
-			}
-			rebuildOnEdt();
-		}
-		else if (result != null)
-		{
-			webSyncLinked = false; // linked=false: leave everything local, just refresh the note
-			rebuildOnEdt();
-		}
-		// result == null: sync failed (network/unverified) - change nothing.
-		afterSync(result, startSeq);
-	}
-
-	// Mirror the authoritative website set back into the local store (called with change events suppressed).
-	private void reconcile(TemplateRepositoryClient.SyncResult result)
-	{
-		final List<TemplateRepositoryClient.WebTemplate> remote =
-			result.templates != null ? result.templates : Collections.<TemplateRepositoryClient.WebTemplate>emptyList();
-
-		// Index the current duplex set so each returned row updates its existing local copy in place.
-		final Map<String, BankTemplate> byKey = new HashMap<>();
-		final Map<Long, BankTemplate> byWebId = new HashMap<>();
-		for (BankTemplate t : templateManager.getUserTemplates())
-		{
-			if (t.isPreset() || t.isOwned())
-			{
-				continue;
-			}
-			if (t.getClientKey() != null)
-			{
-				byKey.put(t.getClientKey(), t);
-			}
-			if (t.getWebId() != null)
-			{
-				byWebId.put(t.getWebId(), t);
-			}
-		}
-
-		final BankTemplate active = templateManager.getActive();
-		final String activeName = active != null ? active.getName() : null;
-
-		final Set<Long> seenIds = new HashSet<>();
-		final Set<String> seenKeys = new HashSet<>();
-		for (TemplateRepositoryClient.WebTemplate wt : remote)
-		{
-			if (wt.id <= 0)
-			{
-				continue;
-			}
-			seenIds.add(wt.id);
-			if (wt.clientKey != null)
-			{
-				seenKeys.add(wt.clientKey);
-			}
-			BankTemplate localCopy = wt.clientKey != null ? byKey.get(wt.clientKey) : null;
-			if (localCopy == null)
-			{
-				localCopy = byWebId.get(wt.id);
-			}
-			if (localCopy != null)
-			{
-				applyRemote(localCopy, wt);
-			}
-			else
-			{
-				final BankTemplate t = wt.toTemplate();
-				t.setOwned(false);
-				t.setWebSynced(true);
-				t.setWebId(wt.id);
-				t.setClientKey(wt.clientKey);
-				t.setUpdatedAt(wt.updatedAt);
-				t.setName(uniqueName(capName(t.getName())));
-				templateManager.saveSyncedTemplate(t);
-			}
-		}
-
-		// Copies the server refused because the website deleted them. These generally have NO webId (they
-		// were never created up there), so the web-backed pass below can't see them - and the server will
-		// keep refusing them, so they would otherwise sit here forever, absent from the website and
-		// inflating the local count against it. Only keys the server explicitly named are removed.
-		if (result.deleted != null && !result.deleted.isEmpty())
-		{
-			final Set<String> refused = new HashSet<>(result.deleted);
-			for (BankTemplate t : new ArrayList<>(templateManager.getUserTemplates()))
-			{
-				if (!t.isPreset() && !t.isOwned() && t.getClientKey() != null && refused.contains(t.getClientKey()))
-				{
-					templateManager.deleteUserTemplate(t);
-				}
-			}
-		}
-
-		// Remove local copies that were web-backed (had a webId) but are gone from the authoritative set -
-		// they were deleted on the website. A template that was never synced up (webId still null - e.g.
-		// one the server declined at the private cap) is never touched, so nothing local is ever lost.
-		for (BankTemplate t : new ArrayList<>(templateManager.getUserTemplates()))
-		{
-			if (t.isPreset() || t.isOwned() || t.getWebId() == null)
-			{
-				continue;
-			}
-			final boolean stillThere = seenIds.contains(t.getWebId())
-				|| (t.getClientKey() != null && seenKeys.contains(t.getClientKey()));
-			if (!stillThere)
-			{
-				templateManager.deleteUserTemplate(t);
-			}
-		}
-
-		if (activeName != null && templateManager.getActive() == null)
-		{
-			final BankTemplate again = templateManager.findByName(activeName);
-			if (again != null)
-			{
-				templateManager.setActive(again);
-				onActiveChanged.run();
-			}
-		}
-	}
-
-	// Decide when the next sync runs: retry-with-backoff after a failure, a short retry when a change was
-	// rate-limited and still needs pushing, otherwise the slow poll that pulls website-side changes down.
-	private void afterSync(TemplateRepositoryClient.SyncResult result, long startSeq)
-	{
-		long next;
-		if (result == null)
-		{
-			// Failure/offline: back off up to the poll interval, but keep trying so a queued change lands.
-			syncBackoffMs = syncBackoffMs <= 0 ? SYNC_RETRY_MIN_MS : Math.min(syncBackoffMs * 2, SYNC_POLL_MS);
-			next = syncBackoffMs;
-		}
-		else
-		{
-			syncBackoffMs = 0;
-			if (result.applied)
-			{
-				// This pass pushed everything up to the snapshot; later changes (changeSeq > startSeq) remain.
-				syncedSeq = Math.max(syncedSeq, startSeq);
-			}
-			if (!result.linked || !result.privateSync)
-			{
-				// Pushes can't (not linked) or won't (private sync off) apply - stop retrying them; the slow
-				// poll still pulls website-side changes down.
-				syncedSeq = Math.max(syncedSeq, changeSeq);
-			}
-			// A rate-limited push (linked + privateSync + !applied) advances neither, so it retries soon.
-			final boolean pending = changeSeq > syncedSeq;
-			if (pending)
-			{
-				syncIdleMs = 0;
-				next = SYNC_RETRY_MIN_MS;
-			}
-			else if (!result.linked)
-			{
-				// Nothing to push and no account to pull from: the slowest cadence we keep.
-				syncIdleMs = 0;
-				next = SYNC_POLL_UNLINKED_MS;
-			}
-			else if (!panelActive)
-			{
-				// Linked, but nobody is looking. Stop rather than poll a panel no one can see - onActivate()
-				// syncs on open, requestSync() on any local edit and syncWebTemplates() on login all restart
-				// the loop, so every way a change can reach the user already re-arms this.
-				syncIdleMs = 0;
-				return;
-			}
-			else
-			{
-				// Panel open and idle: 20s, then 40s, then 80s, until something actually happens.
-				syncIdleMs = syncIdleMs <= 0 ? SYNC_POLL_ACTIVE_MS : Math.min(syncIdleMs * 2, SYNC_POLL_IDLE_MAX_MS);
-				next = syncIdleMs;
-			}
-		}
-		scheduleSync(next);
-	}
-
-	// Give a template a stable client key (and nothing else) so the server can correlate it across syncs.
-	// updatedAt is deliberately left untouched: only a genuine user edit (saveUserTemplate) stamps it, so a
-	// pre-existing copy with no timestamp reads as "oldest" and pulls the website version down rather than
-	// overwriting it.
-	private void ensureSyncKey(BankTemplate t)
-	{
-		if (t.getClientKey() == null || t.getClientKey().isEmpty())
-		{
-			t.setClientKey(java.util.UUID.randomUUID().toString());
-			templateManager.saveSyncedTemplate(t);
-		}
-	}
-
-	// Overwrite a local copy with the authoritative website version (content the server returned already
-	// won last-write-wins). Writes the server's updatedAt so it isn't mistaken for a fresh local edit and
-	// pushed straight back. Re-keys via rename when the name changed so the manager's name-keyed store stays
-	// consistent.
-	private void applyRemote(BankTemplate localCopy, TemplateRepositoryClient.WebTemplate wt)
-	{
-		final BankTemplate fresh = wt.toTemplate();
-		localCopy.setDescription(fresh.getDescription());
-		localCopy.restoreTabsFrom(fresh); // copies tabs + columns
-		localCopy.setWebId(wt.id);
-		localCopy.setWebSynced(true);
-		// Refreshed on every sync, so the card's import and report counts track the shared copy.
-		localCopy.setShareDownloads(wt.downloads);
-		localCopy.setShareReports(wt.reports);
-		if (wt.clientKey != null)
-		{
-			localCopy.setClientKey(wt.clientKey);
-		}
-		localCopy.setUpdatedAt(wt.updatedAt);
-
-		final String newName = capName(wt.name);
-		if (!newName.isEmpty() && !newName.equals(localCopy.getName()) && templateManager.findByName(newName) == null)
-		{
-			templateManager.renameTemplate(localCopy, newName); // re-keys + persists
-		}
-		else
-		{
-			templateManager.saveSyncedTemplate(localCopy);
-		}
+		}));
 	}
 
 	private String capName(String s)
@@ -3995,7 +2791,7 @@ public class BankTemplatesPanel extends PluginPanel
 	}
 
 	// An imported template the user actually changes becomes their OWN new template: its card switches to
-	// the user's (defaulted) profile, it drops the original owner, and it detaches from the community source
+	// "by you", it drops the original uploader, and it detaches from the community source
 	// so nothing is pushed back there and it can be shared fresh. Only fires when an edit really happened
 	// (updatedAt moved), so merely opening the editor to look doesn't claim someone else's template.
 	private void claimOwnershipIfEdited(BankTemplate template, long editedFrom)
