@@ -40,46 +40,28 @@ public class BankTemplate
 	private boolean owned;
 	// Whether this template was shared anonymously - remembered so re-sharing (Update) keeps the choice.
 	private boolean sharedAnonymously;
-	// True once this template is backed by a row in the linked Exchange Insights account's website "My
-	// Templates" (see BankTemplatesPanel#syncWebTemplates). Distinguishes duplex-synced templates from
-	// browse-imported community templates, which share the same owned=false + repoId shape.
-	private boolean webSynced;
-	// The website row id this template corresponds to in the user's own "My Templates" (duplex sync). Kept
-	// separate from repoId, which is the COMMUNITY source id (the template you imported from, or your public
-	// share) - a template can be both an import (repoId) and your own private web copy (webId) at once.
-	private Long webId;
-	// A stable, client-generated id for a template that originated in-game (an import or an in-plugin
-	// creation). Sent up on sync so the server can match this local copy to the web row it creates for it,
-	// on this and every later sync, without ever duplicating it.
-	private String clientKey;
-	// Wall-clock ms of the last local (in-game) edit, for last-write-wins duplex reconciliation. Only bumped
-	// by genuine user edits (import, create, layout edit, rename) - never when sync writes the server's copy
-	// back down, which would otherwise ping-pong the template between the two sides.
+	// Wall-clock ms of the last edit. Only bumped by genuine user edits (import, create, layout edit,
+	// rename), never by a background write such as a refreshed import count: the panel compares it before
+	// and after the editor closes to tell an edit from a look, and "Recently updated" sorts on it.
 	private long updatedAt;
 
-	// The ORIGINAL uploader's captured public profile, stored when this template was imported from the
-	// community Browse list, so its card can show the owner's name/avatar/theme even though the local
-	// template model carries no live server profile. Cleared once the user edits the template (it then
-	// becomes their own). Null for self-made templates and presets.
+	// The ORIGINAL uploader, stored when this template was imported from the community Browse list, so
+	// its card can name them. Cleared once the user edits the template (it then becomes their own). Null
+	// for self-made templates and presets.
 	private OwnerProfile ownerProfile;
 
 	// Popularity of this template's SHARED community copy (owned templates that were shared): how many
-	// players imported it, and how many reported it. Null until the server reports them via sync, so the
-	// card can grey the stat icons out until real numbers exist.
+	// players imported it, and how many reported it. Refreshed from the catalogue index whenever Browse
+	// loads it.
 	private Integer shareDownloads;
 	private Integer shareReports;
 
-	/** A snapshot of the uploader's public profile, captured at import time for the profile card. */
+	/** Who shared an imported template, captured at import time for its card. */
 	public static class OwnerProfile
 	{
-		public String name;            // display name (or author), for the "by …" line
-		public String handle;          // @handle, when known
-		public String bg;              // profile_bg theme key (null → the neutral default card)
-		public Integer avatarItemId;   // item whose icon is the avatar (null → initial letter)
-		// The ORIGINAL community template's popularity at import time. Kept here, not in shareDownloads/
-		// shareReports, because the My Templates sync overwrites those with YOUR private copy's counts
-		// (which are zero - you haven't shared it), leaving an imported card reading 0 imports while it
-		// still shows the original owner. Snapshot like the rest of this profile; cleared on the edit
+		public String name;            // author (or "Anonymous"), for the "by ..." line
+		// The ORIGINAL community template's popularity, so an imported card shows how the shared
+		// template is doing rather than the zeros of your own not-yet-shared copy. Cleared on the edit
 		// that claims the template, so it never lingers once the card becomes yours.
 		public Integer downloads;      // how many imported the original
 		public Integer reports;        // how many reported the original
@@ -147,36 +129,6 @@ public class BankTemplate
 	public void setSharedAnonymously(boolean sharedAnonymously)
 	{
 		this.sharedAnonymously = sharedAnonymously;
-	}
-
-	public boolean isWebSynced()
-	{
-		return webSynced;
-	}
-
-	public void setWebSynced(boolean webSynced)
-	{
-		this.webSynced = webSynced;
-	}
-
-	public Long getWebId()
-	{
-		return webId;
-	}
-
-	public void setWebId(Long webId)
-	{
-		this.webId = webId;
-	}
-
-	public String getClientKey()
-	{
-		return clientKey;
-	}
-
-	public void setClientKey(String clientKey)
-	{
-		this.clientKey = clientKey;
 	}
 
 	public long getUpdatedAt()
@@ -473,9 +425,6 @@ public class BankTemplate
 		c.repoId = repoId;
 		c.owned = owned;
 		c.sharedAnonymously = sharedAnonymously;
-		c.webSynced = webSynced;
-		c.webId = webId;
-		c.clientKey = clientKey;
 		c.updatedAt = updatedAt;
 		c.preset = preset;
 		c.tabs = new ArrayList<>();

@@ -5,7 +5,7 @@
 **Save, apply, and share bank layouts. Your real bank is never touched.**
 
 [![Plugin Hub installs](https://img.shields.io/endpoint?url=https://api.runelite.net/pluginhub/shields/installs/plugin/bank-templates&label=installs&color=brightgreen)](https://runelite.net/plugin-hub/show/bank-templates)
-[![Version](https://img.shields.io/badge/version-2.3.3-blue)](https://github.com/TheSpryt/bank-templates/releases)
+[![Version](https://img.shields.io/badge/version-3.0.0-blue)](https://github.com/TheSpryt/bank-templates/releases)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-orange)](LICENSE)
 [![RuneLite](https://img.shields.io/badge/RuneLite-Plugin%20Hub-yellow)](https://runelite.net/plugin-hub)
 
@@ -19,10 +19,8 @@ Jagex's third-party client rules. You can snapshot your current bank as a templa
 the community's, build layouts for items you don't even own yet, and get guided help reorganising your
 *real* bank to match.
 
-> **Free forever.** Every feature this plugin has now - and everything we keep adding to it - stays
-> free, with no ads and nothing paywalled. [Exchange Insights](https://exchange-insights.gg) membership
-> is a separate, optional thing for going further on the website (bank-value tracking and more);
-> linking an account is opt-in and never changes the free plugin.
+> **Free forever.** No ads, no accounts, nothing to sign up for. Everything the plugin does, it does on
+> your machine, apart from the optional community repository.
 
 ## ✨ Highlights
 
@@ -32,10 +30,7 @@ the community's, build layouts for items you don't even own yet, and get guided 
 - 🧭 **Reorganise helper** that guides you, move by move, to make your real bank match, with colour
   coding, on-item labels, or step-by-step prompts (mix and match).
 - 🌍 **Community repository** to browse, preview, import, and share templates (opt-in).
-- 🔢 **"x / y items" counts** on every card so you can see, at a glance, how much of a template you own.
-- 🖼️ **Profile cards** showing each template's tab icons, its uploader, and its import and report counts.
-- 🔄 **Two-way website sync** for anyone who links an [Exchange Insights](https://exchange-insights.gg)
-  account (opt-in): templates you make in game appear on the site and vice versa.
+- 🖱️ **Right-click any card** for everything you can do with it.
 
 ---
 
@@ -59,9 +54,6 @@ the community's, build layouts for items you don't even own yet, and get guided 
 ### Applying templates over your bank
 
 - **Virtual, read-only** - the layout is drawn over the bank; your real items never move.
-- **"x / y items" counts** - each card shows how many of a template's items you currently own out of the
-  total (variant-aware). The count is cached per account, so it shows from your last visit even before
-  you open the bank, then updates live as your bank changes.
 - **Click a card to apply it** - clicking anywhere on a template's card (except its icon buttons)
   applies it, and clicking the applied one again turns it off. The active template's card is ringed
   in red.
@@ -93,22 +85,23 @@ as the same item, so the helper won't flag a slot just because you hold a differ
 
 ### Community repository (optional, opt-in)
 
-- **Browse and search** - search matches template names *and* RuneScape names. Sort by **Most imported**,
-  **Newest**, **Popular (30 days)**, or **Items owned** (how much of each you already have). *My
-  templates* has its own search and sorting (**Recently updated**, **Name (A-Z)**, **Most items**).
-  Both lists page, with the pager at each end so it sits where you left it.
-- **Profile cards** - each card shows the uploader's name and avatar, the template's tab icons, its
-  import and report counts, and how many of its items you own. Clicking an avatar opens that player's
-  Exchange Insights profile in your browser.
-- **Preview and import** - preview any template, then import a copy to *My templates*.
+- **Browse and search** - the whole catalogue loads at once, so searching, sorting and paging are
+  instant and search matches as you type. Sort by **Most imported**, **Newest** or **Popular (30
+  days)**. *My templates* has its own search and sorting (**Recently updated**, **Name (A-Z)**,
+  **Most items**). Both lists page, with the pager at each end so it sits where you left it.
+- **Cards** - each card shows the template's name, who shared it, how many items and tabs it has,
+  its tab icons, and its import and report counts.
+- **Preview and import** - click a card to preview it, then import a copy to *My templates*.
 - **Share** - upload your template with an optional description (up to 500 characters), credited to your
-  RuneScape name or shared **anonymously**.
-- **Votes and reports** - each template shows imports vs reports; report flags one for moderation.
+  RuneScape name or shared **anonymously**. Edit your local copy and push the update whenever you like,
+  or remove the shared copy; both are tied to the character you shared it from.
+- **Report** - flag a template for moderation.
 
 ### Updates tab
 
 The side panel shows the latest patch notes after each update, opening on them once until you've seen
-that version's notes.
+that version's notes. The bell in the panel header reopens them any time; the cog opens settings, and
+the question mark opens a new issue on GitHub if something is wrong.
 
 ---
 
@@ -128,13 +121,13 @@ Open the **Bank Templates** side panel from the RuneLite toolbar.
 ### Capture and apply
 
 1. Arrange your bank, then click the green **+** card at the top of *My templates* and choose **Capture
-   current bank**. Name it, and it appears in the list showing "x / y items · M tabs".
+   current bank**. Name it, and it appears in the list showing its item and tab counts.
 2. Click a template's card to apply it. Open the bank and switch tabs; each tab shows its own layout.
    Items you don't own appear faded; 🚫 marks reserved slots. Click the applied card again to switch it
    off.
-3. The icon buttons along the bottom of a card handle everything else: 🔍 previews a preset, ✏️ opens
-   your own layout to edit, ⬆ shares it, 🌐 opens it on the website, and ✕ deletes it (for a template
-   you've shared, it offers to remove the shared copy too).
+3. Right-click a card for its full menu, or use the icon buttons along its bottom edge: 🔍 previews a
+   preset, ✏️ opens your own layout to edit, ⬆ shares it, and ✕ deletes it (for a template you've
+   shared, it offers to remove the shared copy too).
 
 ### Build and edit layouts
 
@@ -180,9 +173,7 @@ it in settings. Then browse, sort, preview, import, share, and report as above.
 | Hide items not in the template | off | Hide leftover items instead of showing them below |
 | Target highlight | cyan | Reorganise-helper destination-slot highlight colour |
 | Reorganise tab colours | palette | Per-tab colours used by the colour-coding mode (main + tabs 1-9) |
-| Enable community repository | off | Opt-in; browse/share (sends your IP to the repo server) |
-| Account token | empty | Links this character to an Exchange Insights account. The panel's link button sets it for you |
-| Sync bank value | on | For linked characters only: send bank contents for bank-value tracking on the website |
+| Enable community repository | off | Opt-in; browse/share (sends your IP to the repository) |
 
 The **Reorganise** mode (Off / Colour-coded / Labels / Step-by-step and combinations) is chosen in the
 side panel, in the card pinned at the bottom, not in settings.
@@ -191,24 +182,14 @@ side panel, in the card pinned at the bottom, not in settings.
 
 ## 🔒 Privacy
 
-The community repository feature is opt-in. When enabled, browsing and sharing send your IP address to
-the configured server (the required RuneLite notice is shown). Sharing and reporting also send a
-**salted hash of your account id** (not the raw account hash, not your username) so the server can
-attribute ownership and enforce limits. Sharing sends your RuneScape name to credit the template; choose
-**Share anonymously** and other players see **"Anonymous"** instead (your name is still stored privately
-on the server for moderation). Nothing is sent while the feature is disabled.
-
-The "x / y items" counts are computed on your own machine from your open bank, and nothing is sent for
-the **Items owned** sort. Signed out of the game, a linked account falls back to the bank snapshot the
-website already holds for it (see below), so the counts still show; without a linked account the card
-just shows the template's total. For characters **linked to an Exchange Insights account** (and only those), the
-plugin also sends a snapshot of your bank's contents - item IDs and quantities only, no placement or
-notes - to power bank-value tracking on the website. This can be turned off any time with **Sync bank
-value** in settings; turning it off (or unlinking) stops new snapshots, and deleting your Exchange
-Insights account removes the stored data. Unlinked characters never send bank contents anywhere.
-
-You can ask for a copy of everything held on your account at any time from the account settings section
-on [exchange-insights.gg](https://exchange-insights.gg), and it is emailed to you as a JSON file.
+Everything except the community repository happens on your own machine, and the repository is opt-in.
+When it is enabled, browsing fetches the catalogue from a public file store and sends nothing but your
+IP address (the required RuneLite notice is shown). Sharing, reporting and importing also send a
+**salted hash of your account id** (not the raw account hash, not your username) so the repository can
+tell your shared templates are yours and enforce limits. Sharing sends your RuneScape name to credit the
+template; choose **Share anonymously** and other players see **"Anonymous"** instead (your name is still
+stored privately for moderation). Nothing is sent while the feature is disabled, and your bank's
+contents are never sent anywhere.
 
 ---
 

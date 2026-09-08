@@ -53,12 +53,6 @@ public class TemplateManager
 
 	private BankTemplate active;
 
-	// Notified after a genuine user change to the templates (save/delete/rename) so the panel can push it to
-	// the website. Not fired for sync-driven writes: those run with suppressChangeEvents set, so mirroring
-	// the website back down can never trigger another sync in a loop.
-	private Runnable changeListener;
-	private boolean suppressChangeEvents;
-
 	@Inject
 	TemplateManager(Gson gson, ConfigManager configManager, ScheduledExecutorService executor)
 	{
@@ -72,26 +66,6 @@ public class TemplateManager
 		loadPresets();
 		loadUserTemplates();
 		resolveActiveFromConfig();
-	}
-
-	/** Sets the listener notified after a genuine user change (save/delete/rename), for duplex sync. */
-	void setChangeListener(Runnable listener)
-	{
-		this.changeListener = listener;
-	}
-
-	/** While true, sync-driven writes don't notify the change listener (so mirroring can't loop). */
-	void setSuppressChangeEvents(boolean suppress)
-	{
-		this.suppressChangeEvents = suppress;
-	}
-
-	private void fireChanged()
-	{
-		if (!suppressChangeEvents && changeListener != null)
-		{
-			changeListener.run();
-		}
 	}
 
 	private void loadPresets()
@@ -234,8 +208,8 @@ public class TemplateManager
 	}
 
 	/**
-	 * Saves a user template as a genuine edit: stamps {@code updatedAt} to now (so duplex sync knows this
-	 * side changed more recently) and writes it to disk. Returns false if the name collides with a preset.
+	 * Saves a user template as a genuine edit: stamps {@code updatedAt} to now and writes it to disk.
+	 * Returns false if the name collides with a preset.
 	 */
 	public boolean saveUserTemplate(BankTemplate template)
 	{
@@ -243,11 +217,10 @@ public class TemplateManager
 	}
 
 	/**
-	 * Saves a template written by duplex sync from the authoritative website copy, WITHOUT bumping
-	 * {@code updatedAt} - the caller has already set it to the server's value, and touching it would make
-	 * the copy look freshly edited in-game and push it straight back up.
+	 * Persists a template whose content the user did not touch (a refreshed import count, say) WITHOUT
+	 * bumping {@code updatedAt}, so a background write never reads as an edit.
 	 */
-	public boolean saveSyncedTemplate(BankTemplate template)
+	public boolean saveUnchanged(BankTemplate template)
 	{
 		return saveUserTemplate(template, false);
 	}
@@ -278,10 +251,6 @@ public class TemplateManager
 		}
 		userTemplates.put(name, template);
 		writeAsync(template);
-		if (markEdited)
-		{
-			fireChanged();
-		}
 		return true;
 	}
 
@@ -329,12 +298,8 @@ public class TemplateManager
 		userTemplates.remove(oldName);
 		template.setName(trimmed);
 		userTemplates.put(trimmed, template);
-		// A user rename is a genuine edit, so it wins last-write-wins and pushes up; a sync-driven rename
-		// (suppressed) keeps the server's timestamp so it doesn't bounce straight back.
-		if (!suppressChangeEvents)
-		{
-			template.setUpdatedAt(System.currentTimeMillis());
-		}
+		// A rename is a genuine edit.
+		template.setUpdatedAt(System.currentTimeMillis());
 
 		// Write the new file first, then drop the old one - but only if it's a different file (a rename that
 		// only changes case or punctuation can map to the same safe file name, which we must not delete).
@@ -350,7 +315,6 @@ public class TemplateManager
 		{
 			configManager.setConfiguration(BankTemplatesConfig.GROUP, BankTemplatesConfig.ACTIVE_TEMPLATE_KEY, trimmed);
 		}
-		fireChanged();
 		return true;
 	}
 
@@ -367,7 +331,6 @@ public class TemplateManager
 			setActive(null);
 		}
 		deleteAsync(template.getName());
-		fireChanged();
 	}
 
 	private void writeAsync(BankTemplate template)

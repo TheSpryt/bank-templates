@@ -4,7 +4,6 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
-import java.awt.geom.Ellipse2D;
 import java.awt.image.BufferedImage;
 import javax.swing.ImageIcon;
 
@@ -32,11 +31,6 @@ final class PanelIcons
 	static ImageIcon magnifier(Color c)
 	{
 		return cached("magnifier", c, PanelIcons::drawMagnifier);
-	}
-
-	static ImageIcon globe(Color c)
-	{
-		return cached("globe", c, PanelIcons::drawGlobe);
 	}
 
 	static ImageIcon xMark(Color c)
@@ -96,18 +90,6 @@ final class PanelIcons
 		final Graphics2D g = canvas(img, c, 1.6f);
 		g.drawOval(2, 2, 7, 7);
 		g.drawLine(9, 9, 12, 12);
-		g.dispose();
-		return new ImageIcon(img);
-	}
-
-	/** Globe (outline + equator + a meridian) - the "open on the website" action. */
-	private static ImageIcon drawGlobe(Color c)
-	{
-		final BufferedImage img = new BufferedImage(14, 14, BufferedImage.TYPE_INT_ARGB);
-		final Graphics2D g = canvas(img, c, 1.3f);
-		g.drawOval(1, 1, 11, 11);                        // outline
-		g.drawLine(1, 6, 12, 6);                         // equator
-		g.draw(new Ellipse2D.Float(4f, 1f, 5f, 11f));    // meridian
 		g.dispose();
 		return new ImageIcon(img);
 	}
