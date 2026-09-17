@@ -44,16 +44,11 @@ import okhttp3.Response;
 @Singleton
 public class TemplateRepositoryClient
 {
-	// Where the catalogue files and the write API live. These are the defaults baked into the build;
-	// origins.json in the plugin repository overrides them once per session (see resolveOrigins), so
-	// a hostname change on Cloudflare's side is a one-file edit on GitHub rather than a hub release.
-	// Neither is a custom domain: the service is meant to outlive any domain registration.
-	static final String DEFAULT_CDN_BASE = "https://pub-b3f8a01834d74fb3a6360430c8a4e843.r2.dev";
-	static final String DEFAULT_API_BASE = "https://bank-templates-lite.spryt.workers.dev";
-	private static final String ORIGINS_URL = "https://raw.githubusercontent.com/TheSpryt/bank-templates/master/origins.json";
-	private volatile String cdnBase = DEFAULT_CDN_BASE;
-	private volatile String apiBase = DEFAULT_API_BASE;
-	private final java.util.concurrent.atomic.AtomicBoolean originsResolved = new java.util.concurrent.atomic.AtomicBoolean();
+	// Where the catalogue files and the write API live. Neither is a custom domain: the service is
+	// meant to outlive any domain registration. A hostname change on Cloudflare's side means a plugin
+	// update.
+	static final String CDN_BASE = "https://pub-b3f8a01834d74fb3a6360430c8a4e843.r2.dev";
+	static final String API_BASE = "https://bank-templates-lite.spryt.workers.dev";
 
 	private static final MediaType JSON = MediaType.parse("application/json");
 	// Salt so the value sent to the server is a derived hash, not the raw RuneLite account hash.
@@ -94,74 +89,6 @@ public class TemplateRepositoryClient
 	boolean isEnabled()
 	{
 		return config.enableRepository();
-	}
-
-	String cdnBase()
-	{
-		resolveOrigins();
-		return cdnBase;
-	}
-
-	String apiBase()
-	{
-		resolveOrigins();
-		return apiBase;
-	}
-
-	// One fetch per session of the repository's origins.json. Only https URLs are accepted, anything
-	// else leaves the defaults in place, and a failure is silent: the defaults are what the build was
-	// tested against. The first request may race this and go to the defaults; that is fine, they are
-	// the same hostnames unless something has been deliberately moved.
-	private void resolveOrigins()
-	{
-		if (!originsResolved.compareAndSet(false, true))
-		{
-			return;
-		}
-		okHttpClient.newCall(new Request.Builder().url(ORIGINS_URL).get().build()).enqueue(new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-			}
-
-			@Override
-			public void onResponse(Call call, Response response)
-			{
-				try (Response r = response)
-				{
-					if (!r.isSuccessful() || r.body() == null)
-					{
-						return;
-					}
-					final JsonObject o = gson.fromJson(r.body().string(), JsonObject.class);
-					final String cdn = originOf(o, "cdn");
-					final String api = originOf(o, "api");
-					if (cdn != null)
-					{
-						cdnBase = cdn;
-					}
-					if (api != null)
-					{
-						apiBase = api;
-					}
-				}
-				catch (IOException | RuntimeException e)
-				{
-					// Malformed or unreachable: keep the defaults.
-				}
-			}
-		});
-	}
-
-	private static String originOf(JsonObject o, String key)
-	{
-		if (o == null || !o.has(key) || !o.get(key).isJsonPrimitive())
-		{
-			return null;
-		}
-		final String v = o.get(key).getAsString().trim().replaceAll("/+$", "");
-		return v.startsWith("https://") && HttpUrl.parse(v) != null ? v : null;
 	}
 
 	/** Updates the account identity. Pass the value of {@code client.getAccountHash()} (-1 when logged out). */
@@ -269,7 +196,7 @@ public class TemplateRepositoryClient
 			}
 			revalidate = force || indexStale;
 		}
-		final Request.Builder rb = new Request.Builder().url(cdnBase() + "/index.json").get();
+		final Request.Builder rb = new Request.Builder().url(CDN_BASE + "/index.json").get();
 		if (revalidate)
 		{
 			// The file is served with max-age=60, so within that window OkHttp would answer from its own
@@ -342,7 +269,7 @@ public class TemplateRepositoryClient
 			onError.accept("The community repository is turned off. Enable it in the plugin settings.");
 			return;
 		}
-		final Request request = new Request.Builder().url(cdnBase() + "/t/" + id + "-" + rev + ".json").get().build();
+		final Request request = new Request.Builder().url(CDN_BASE + "/t/" + id + "-" + rev + ".json").get().build();
 		okHttpClient.newCall(request).enqueue(new Callback()
 		{
 			@Override
@@ -397,7 +324,7 @@ public class TemplateRepositoryClient
 			onDone.accept(Collections.emptySet());
 			return;
 		}
-		final HttpUrl url = HttpUrl.parse(apiBase() + "/api/mine").newBuilder()
+		final HttpUrl url = HttpUrl.parse(API_BASE + "/api/mine").newBuilder()
 			.addQueryParameter("clientId", clientId()).build();
 		okHttpClient.newCall(new Request.Builder().url(url).get().build()).enqueue(new Callback()
 		{
@@ -440,7 +367,7 @@ public class TemplateRepositoryClient
 	{
 		final String bodyJson = gson.toJson(payload(template, author, anonymous));
 		final Request.Builder rb = new Request.Builder()
-			.url(apiBase() + "/api/templates")
+			.url(API_BASE + "/api/templates")
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
 		send(rb.build(), body ->
@@ -456,7 +383,7 @@ public class TemplateRepositoryClient
 	{
 		final String bodyJson = gson.toJson(payload(template, author, anonymous));
 		final Request.Builder rb = new Request.Builder()
-			.url(apiBase() + "/api/templates/" + repoId)
+			.url(API_BASE + "/api/templates/" + repoId)
 			.put(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
 		send(rb.build(), body ->
@@ -468,7 +395,7 @@ public class TemplateRepositoryClient
 
 	void delete(long repoId, Runnable onSuccess, Consumer<String> onError)
 	{
-		final HttpUrl url = HttpUrl.parse(apiBase() + "/api/templates/" + repoId)
+		final HttpUrl url = HttpUrl.parse(API_BASE + "/api/templates/" + repoId)
 			.newBuilder().addQueryParameter("clientId", clientId()).build();
 		final Request.Builder rb = new Request.Builder().url(url).delete();
 		addSig(rb, "");
@@ -499,7 +426,7 @@ public class TemplateRepositoryClient
 		body.addProperty("clientId", clientId());
 		final String bodyJson = gson.toJson(body);
 		final Request.Builder rb = new Request.Builder()
-			.url(apiBase() + "/api/templates/" + repoId + "/" + subPath)
+			.url(API_BASE + "/api/templates/" + repoId + "/" + subPath)
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
 		okHttpClient.newCall(rb.build()).enqueue(new Callback()
@@ -531,7 +458,7 @@ public class TemplateRepositoryClient
 		body.addProperty("clientId", clientId());
 		final String bodyJson = gson.toJson(body);
 		final Request.Builder rb = new Request.Builder()
-			.url(apiBase() + "/api/templates/" + repoId + "/report")
+			.url(API_BASE + "/api/templates/" + repoId + "/report")
 			.post(RequestBody.create(JSON, bodyJson));
 		addSig(rb, bodyJson);
 		send(rb.build(), b -> onSuccess.run(), onError);
