@@ -1,5 +1,11 @@
 [
   {
+    "version": "3.0.1",
+    "notes": [
+      "A new setting, Show the add-item button, hides the green + in the bank. Turn it off and the + appears only while you have a template open for editing, so a template you are simply using leaves the bank clear. It stays on by default, and the slot behaves like any other bank slot once the button is gone."
+    ]
+  },
+  {
       "version": "3.0.0",
       "notes": [
         "The community repository has moved to a new home that does not depend on the Exchange Insights website, so browsing, importing and sharing keep working after that site is retired. Everything already shared carries over, and nothing on your side needs redoing.",

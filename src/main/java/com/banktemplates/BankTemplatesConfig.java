@@ -117,6 +117,18 @@ public interface BankTemplatesConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "showAddButton",
+		name = "Show the add-item button",
+		description = "Draw the green + button in the bank so you can add items to the applied template at any time. Turn this off to keep the bank clear: the + then appears only while you have the template open for editing.",
+		position = 3,
+		section = layoutSection
+	)
+	default boolean showAddButton()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "hideNonTemplateItems",
 		name = "Hide items not in the template",
 		description = "When a template is applied, hide bank items it doesn't include instead of showing them below. Note: those items stay invisible in the bank view until you switch the template off.",

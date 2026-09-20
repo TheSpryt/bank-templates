@@ -182,11 +182,15 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		// widget bounds sit over the bank's bottom buttons - only show/hit-test it when it's actually
 		// inside the visible bank area.
 		final Rectangle container = itemContainer.getBounds();
-		Widget addChild = renderer.slotWidgetAt(len);
+		// With the button switched off it belongs to an edit session only, so a template you are just
+		// using leaves the bank alone. Nulling the rect also drops its click handling, not merely the
+		// drawing, so the slot underneath behaves like any other.
+		final boolean wantAdd = config.showAddButton() || layoutEditor.isEditing();
+		Widget addChild = wantAdd ? renderer.slotWidgetAt(len) : null;
 		// If another plugin (e.g. Inventory Setups) rearranged the bank so the slot after the layout now holds
 		// a real item, move the "+" to the first genuinely-empty slot so it never covers - and blocks the
 		// withdrawal of - an item.
-		if (addChild == null || addChild.getItemId() > 0)
+		if (wantAdd && (addChild == null || addChild.getItemId() > 0))
 		{
 			final Widget empty = renderer.firstEmptySlot();
 			if (empty != null)
