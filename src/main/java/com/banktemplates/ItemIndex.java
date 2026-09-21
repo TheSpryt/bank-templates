@@ -36,12 +36,16 @@ class ItemIndex
 		private final int id;
 		private final String name;
 		private final String lower;
+		// Name plus appearance, used only to drop exact duplicates. Two items that share a name but look
+		// different (a bowl of sweetcorn and raw sweetcorn are both "Sweetcorn") keep separate keys.
+		private final String dedupeKey;
 
-		Entry(int id, String name)
+		Entry(int id, String name, String appearance)
 		{
 			this.id = id;
 			this.name = name;
 			this.lower = name.toLowerCase(Locale.ROOT);
+			this.dedupeKey = lower + "|" + appearance;
 		}
 
 		int getId()
@@ -140,7 +144,7 @@ class ItemIndex
 				{
 					continue;
 				}
-				acc.add(new Entry(id, trimmed));
+				acc.add(new Entry(id, trimmed, appearance(c)));
 			}
 			if (end < n)
 			{
@@ -148,14 +152,15 @@ class ItemIndex
 				return;
 			}
 			// The cache holds several distinct, non-placeholder, non-noted copies of some items under one name
-			// (e.g. three "Law rune"s - a real tradeable one plus leftover/minigame duplicates). Keep only the
-			// first of each name; because we index in ascending id order, that's the base game item (id 563 for
-			// Law rune), not a later duplicate whose id might not variation-map to the item in your bank. Items
-			// with genuinely different names ("Arclight" vs "Arclight (or)") are untouched.
+			// (e.g. three "Law rune"s - a real tradeable one plus leftover/minigame duplicates). Those copies
+			// look identical, so drop any item whose name AND appearance match one already kept; because we
+			// index in ascending id order, the kept one is the base game item (id 563 for Law rune). Matching
+			// on the name alone went too far: it also dropped items that merely share a name, like the bowl of
+			// sweetcorn or each coloured-egg bird nest (issue #45), leaving no way to add them to a layout.
 			final java.util.Map<String, Entry> unique = new java.util.LinkedHashMap<>();
 			for (Entry e : acc)
 			{
-				unique.putIfAbsent(e.lower, e);
+				unique.putIfAbsent(e.dedupeKey, e);
 			}
 			index = unique.values().toArray(new Entry[0]);
 			final List<Runnable> fire;
@@ -170,6 +175,15 @@ class ItemIndex
 				SwingUtilities.invokeLater(r);
 			}
 		});
+	}
+
+	// What an item looks like in the bank: its inventory model and any recolours or retextures applied to
+	// it. The coloured-egg bird nests share a model and differ only in recolour, so both matter.
+	private static String appearance(ItemComposition c)
+	{
+		return c.getInventoryModel()
+			+ ":" + java.util.Arrays.toString(c.getColorToReplaceWith())
+			+ ":" + java.util.Arrays.toString(c.getTextureToReplaceWith());
 	}
 
 	/** Name search: prefix matches first, then substring matches, capped at {@code max}. Empty until built. */
