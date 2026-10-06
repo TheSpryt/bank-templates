@@ -35,6 +35,7 @@ import net.runelite.api.gameval.SpriteID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.VarClientInt;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.util.Text;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.input.MouseListener;
 import net.runelite.client.ui.overlay.Overlay;
@@ -555,11 +556,59 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		return e;
 	}
 
+	// Whether the open chatbox input is asking for a number. Reads the prompt the game shows above the
+	// input; when no prompt can be read we allow it, since the bank is open and the caller only asks
+	// during the filler step.
+	private boolean amountPromptOpen()
+	{
+		final Widget area = client.getWidget(InterfaceID.Chatbox.MES_LAYER);
+		if (area == null)
+		{
+			return true;
+		}
+		for (Widget[] group : new Widget[][]{area.getDynamicChildren(), area.getStaticChildren(), area.getNestedChildren()})
+		{
+			if (group == null)
+			{
+				continue;
+			}
+			for (Widget w : group)
+			{
+				if (w == null || w.getText() == null || w.getText().isEmpty())
+				{
+					continue;
+				}
+				final String text = Text.removeTags(w.getText()).toLowerCase(java.util.Locale.ROOT);
+				if (text.contains("amount") || text.contains("quantity"))
+				{
+					return true;
+				}
+				if (text.contains("look up") || text.contains("search"))
+				{
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
 	// Draws the filler count prominently at the top of the chatbox while the "Enter amount" input is open.
 	private void drawChatboxAmount(Graphics2D g, int needed)
 	{
-		// INPUT_TYPE is non-zero whenever a chatbox input dialog (here, "Enter amount") is open.
+		// INPUT_TYPE is non-zero for ANY chatbox input, not just this one, and the chatbox is on screen
+		// everywhere. On its own it drew the number over unrelated prompts, like the Grand Exchange's
+		// "Select an item to look up" search (issue #46). Require the bank to be open, and the prompt to
+		// be an amount prompt, so the number only appears where it was asked for.
 		if (client.getVarcIntValue(VarClientInt.INPUT_TYPE) == 0)
+		{
+			return;
+		}
+		final Widget bankItems = client.getWidget(InterfaceID.Bankmain.ITEMS);
+		if (bankItems == null || bankItems.isHidden())
+		{
+			return;
+		}
+		if (!amountPromptOpen())
 		{
 			return;
 		}

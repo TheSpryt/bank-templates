@@ -1,5 +1,11 @@
 [
   {
+    "version": "3.0.3",
+    "notes": [
+      "The reorganise helper's \"Type N\" prompt no longer appears over unrelated interfaces. While it was waiting for you to enter a bank filler count, it drew that number over any chatbox input, including the Grand Exchange price lookup. It now shows only when the bank is open and the game is actually asking for an amount."
+    ]
+  },
+  {
     "version": "3.0.2",
     "notes": [
       "The layout editor's item search finds every item again, including ones that share a name with another item. The bowl of sweetcorn and each coloured-egg bird nest were missing because the game calls them plain \"Sweetcorn\" and \"Bird nest\". Items with the same name now show as separate rows; the icon tells them apart."
