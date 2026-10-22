@@ -1,5 +1,11 @@
 [
   {
+    "version": "3.0.4",
+    "notes": [
+      "Skipping a step in the reorganise helper now only skips it in the template you skipped it in. Before, the helper remembered a skip by tab and slot alone, so any other template with a step in the same place skipped it too. Applying a different template now starts its steps fresh."
+    ]
+  },
+  {
     "version": "3.0.3",
     "notes": [
       "The reorganise helper's \"Type N\" prompt no longer appears over unrelated interfaces. While it was waiting for you to enter a bank filler count, it drew that number over any chatbox input, including the Grand Exchange price lookup. It now shows only when the bank is open and the game is actually asking for an amount."

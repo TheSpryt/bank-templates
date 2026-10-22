@@ -62,8 +62,12 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 	// Screen bounds of the title-bar "Skip" button (set while the filler-setup step is shown).
 	private volatile Rectangle skipButtonRect;
 	// Single move steps the user has skipped this session (by signature), so each is bypassed and the next
-	// step is shown instead. Cleared when the reorg helper is closed.
+	// step is shown instead. Cleared when the reorg helper is closed, and whenever the active template
+	// changes: a signature only names a tab and a slot, so the same one occurs in other templates and a
+	// skip would otherwise silently carry over to them (issue #47).
 	private final java.util.Set<String> skippedSteps = java.util.concurrent.ConcurrentHashMap.newKeySet();
+	// Which template the skips above belong to.
+	private volatile String skipScope;
 	// Signature of the move step currently shown (null during the filler step or when nothing is shown). The
 	// title-bar Skip button adds this to skippedSteps.
 	private volatile String currentStepSig;
@@ -105,6 +109,13 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		setPosition(OverlayPosition.DYNAMIC);
 	}
 
+	// Identifies the applied template for the skip set. A shared template has a repository id, which
+	// survives renames; anything else is identified by name, which the panel already keeps unique.
+	private static String scopeOf(BankTemplate t)
+	{
+		return t.getRepoId() != null ? "id:" + t.getRepoId() : "name:" + t.getName();
+	}
+
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
@@ -113,6 +124,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			skipFillers = false;
 			skipButtonRect = null;
 			skippedSteps.clear();
+			skipScope = null;
 			return null;
 		}
 		skipButtonRect = null;
@@ -123,6 +135,14 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		if (template == null)
 		{
 			return null;
+		}
+		// Applying a different template starts its own run, so its steps begin unskipped.
+		final String scope = scopeOf(template);
+		if (!scope.equals(skipScope))
+		{
+			skippedSteps.clear();
+			skipFillers = false;
+			skipScope = scope;
 		}
 
 		final BankTemplatesConfig.ReorgDisplay mode = config.reorgDisplay();
