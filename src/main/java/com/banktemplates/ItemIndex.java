@@ -186,6 +186,34 @@ class ItemIndex
 			+ ":" + java.util.Arrays.toString(c.getTextureToReplaceWith());
 	}
 
+	/**
+	 * The id of the item with exactly this name, ignoring case, or null when there isn't one or the index
+	 * isn't built yet. Where several items share a name (raw and cooked "Sweetcorn"), this is the one with
+	 * the lowest id, the base game item, matching what a search lists first.
+	 */
+	Integer idForName(String name)
+	{
+		final Entry[] idx = index;
+		if (idx == null || name == null)
+		{
+			return null;
+		}
+		final String q = name.trim().toLowerCase(Locale.ROOT);
+		if (q.isEmpty())
+		{
+			return null;
+		}
+		Entry best = null;
+		for (Entry e : idx)
+		{
+			if (e.lower.equals(q) && (best == null || e.id < best.id))
+			{
+				best = e;
+			}
+		}
+		return best == null ? null : best.id;
+	}
+
 	/** Name search: prefix matches first, then substring matches, capped at {@code max}. Empty until built. */
 	List<Entry> search(String query, int max)
 	{

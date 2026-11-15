@@ -108,6 +108,7 @@ public class BankTemplatesPanel extends PluginPanel
 	private final BankTemplatesConfig config;
 	private final LayoutEditor layoutEditor;
 	private final ItemIndex itemIndex;
+	private final Gson gson;
 
 	// Tracks the scroll viewport's width so it never grows wider than the panel (e.g. a long dropdown item or
 	// label can't push it out). Without this, "full-width" buttons stretch past the visible area and their
@@ -173,6 +174,7 @@ public class BankTemplatesPanel extends PluginPanel
 		this.config = config;
 		this.layoutEditor = layoutEditor;
 		this.itemIndex = itemIndex;
+		this.gson = gson;
 		this.latestUpdate = Changelog.latest(gson);
 		this.allUpdates = Changelog.all(gson);
 
@@ -1022,6 +1024,8 @@ public class BankTemplatesPanel extends PluginPanel
 		content.add(dialogChoice("New empty template", canCapture ? ChoiceStyle.NEUTRAL : ChoiceStyle.PRIMARY,
 			dialog, this::createNewLayout));
 		content.add(Box.createVerticalStrut(6));
+		content.add(dialogChoice("Import from clipboard", ChoiceStyle.NEUTRAL, dialog, this::importFromClipboard));
+		content.add(Box.createVerticalStrut(6));
 		content.add(dialogChoice("Cancel", ChoiceStyle.NEGATIVE, dialog, null));
 
 		dialog.setContentPane(content);
@@ -1230,6 +1234,7 @@ public class BankTemplatesPanel extends PluginPanel
 				menuItem(menu, shared ? "Update shared copy" : "Share to the community", () -> share(template));
 			}
 		}
+		menuItem(menu, "Copy as JSON", () -> copyAsJson(template));
 		if (template.getRepoId() != null && !template.isOwned() && repositoryClient.isEnabled())
 		{
 			menuItem(menu, "Report shared version", () -> reportRepo(template.getRepoId()));
@@ -2847,6 +2852,94 @@ public class BankTemplatesPanel extends PluginPanel
 				}),
 				error -> SwingUtilities.invokeLater(() ->
 					JOptionPane.showMessageDialog(this, error, "Update failed", JOptionPane.WARNING_MESSAGE)));
+		});
+	}
+
+	// Puts the template on the clipboard as JSON, item names included, so it can be read, edited elsewhere
+	// (an AI included) and brought back with Import from clipboard (issue #42). Item names have to be read
+	// on the client thread; the clipboard is set back on the EDT.
+	private void copyAsJson(BankTemplate template)
+	{
+		clientThread.invoke(() ->
+		{
+			final java.util.Map<Integer, String> names = new java.util.HashMap<>();
+			for (TabLayout tl : template.getTabs())
+			{
+				for (Integer id : tl.getLayout())
+				{
+					if (id != null && id > 0 && id != BankTemplate.FILLER && !names.containsKey(id))
+					{
+						String n = null;
+						try
+						{
+							n = itemManager.getItemComposition(id).getName();
+						}
+						catch (RuntimeException ignored)
+						{
+							// Unknown id: the slot is exported with just its number.
+						}
+						names.put(id, n == null || "null".equalsIgnoreCase(n) ? null : n);
+					}
+				}
+			}
+			SwingUtilities.invokeLater(() ->
+			{
+				final String json = TemplateJson.export(template, names::get, gson);
+				try
+				{
+					java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+						.setContents(new java.awt.datatransfer.StringSelection(json), null);
+				}
+				catch (IllegalStateException e)
+				{
+					JOptionPane.showMessageDialog(this, "Couldn't reach the clipboard. Try again in a moment.",
+						"Copy failed", JOptionPane.WARNING_MESSAGE);
+					return;
+				}
+				JOptionPane.showMessageDialog(this, "Copied \"" + template.getName() + "\" to the clipboard as JSON.",
+					"Copied", JOptionPane.INFORMATION_MESSAGE);
+			});
+		});
+	}
+
+	// Creates a template from JSON on the clipboard: the format Copy as JSON writes, or the plugin's own
+	// saved-file format. It always becomes a new template of your own, never linked to a shared copy.
+	private void importFromClipboard()
+	{
+		final String text;
+		try
+		{
+			final java.awt.datatransfer.Transferable t = java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().getContents(null);
+			text = t != null && t.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.stringFlavor)
+				? (String) t.getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor)
+				: null;
+		}
+		catch (IllegalStateException | java.awt.datatransfer.UnsupportedFlavorException | java.io.IOException e)
+		{
+			JOptionPane.showMessageDialog(this, "Couldn't read the clipboard. Try again in a moment.",
+				"Import failed", JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+		// Slots that carry only an item name are looked up in the item index, so build it first.
+		itemIndex.ensureBuilt(() ->
+		{
+			final TemplateJson.Result result = TemplateJson.parse(text, itemIndex::idForName, gson);
+			if (result.error != null)
+			{
+				JOptionPane.showMessageDialog(this, result.error, "Import failed", JOptionPane.WARNING_MESSAGE);
+				return;
+			}
+			final BankTemplate imported = result.template;
+			imported.setName(uniqueName(capName(imported.getName())));
+			if (!templateManager.saveUserTemplate(imported))
+			{
+				JOptionPane.showMessageDialog(this, "Could not save the imported template.", "Import failed", JOptionPane.ERROR_MESSAGE);
+				return;
+			}
+			revealName = imported.getName();
+			rebuildOnEdt();
+			JOptionPane.showMessageDialog(this, "Imported \"" + imported.getName() + "\" to My Templates.",
+				"Imported", JOptionPane.INFORMATION_MESSAGE);
 		});
 	}
 

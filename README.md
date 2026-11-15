@@ -5,7 +5,7 @@
 **Save, apply, and share bank layouts. Your real bank is never touched.**
 
 [![Plugin Hub installs](https://img.shields.io/endpoint?url=https://api.runelite.net/pluginhub/shields/installs/plugin/bank-templates&label=installs&color=brightgreen)](https://runelite.net/plugin-hub/show/bank-templates)
-[![Version](https://img.shields.io/badge/version-3.0.5-blue)](https://github.com/TheSpryt/bank-templates/releases)
+[![Version](https://img.shields.io/badge/version-3.0.6-blue)](https://github.com/TheSpryt/bank-templates/releases)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-orange)](LICENSE)
 [![RuneLite](https://img.shields.io/badge/RuneLite-Plugin%20Hub-yellow)](https://runelite.net/plugin-hub)
 
@@ -42,6 +42,8 @@ the community's, build layouts for items you don't even own yet, and get guided 
   applies whichever tab you're viewing. The all-items view shows your whole template grouped tab-by-tab,
   with thin dividers between tabs and before any items not in the template.
 - **Capture your bank** - one click snapshots every tab, in order, into a new template.
+- **Copy as JSON / Import from clipboard** - copy one of your templates as editable text, change it in
+  any text editor (or let an AI rearrange it), then import it back as a new template.
 - **Layout editor** - build or tweak a layout *without owning the items*: search for any item and drop
   it in as a faded placeholder, then drag to rearrange, swap or insert, and mark filler / empty slots.
 - **Placeholders** - items a template wants but you don't own yet show as faded icons in place.
@@ -145,6 +147,13 @@ bank** or **New empty template**, then click ✏️ on the template:
 - **New tab** - drag an item onto the bank's **+** button to start a new template tab (up to nine).
 - Changes save automatically. **Apply** / **Cancel** sit in the editor's bottom-right; closing the editor
   discards unsaved changes. Your real bank is never touched.
+
+### Edit a template as text
+
+Right-click a template in *My templates* and choose **Copy as JSON**. Each slot is one line: an item as
+`"4151: Abyssal whip"`, or `"empty"` / `"filler"`. Edit it however you like, copy the result, then click
+the green **+** card and choose **Import from clipboard**. A slot can also be just an item id or an exact
+item name; if a name doesn't match any item, the import lists it and asks you to add the id.
 
 ### Reorganise helper
 

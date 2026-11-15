@@ -1,5 +1,12 @@
 [
   {
+    "version": "3.0.6",
+    "notes": [
+      "Right-click a template in My templates and choose \"Copy as JSON\" to copy it to your clipboard as text, one slot per line, so you can edit it in any text editor or hand it to an AI to rearrange.",
+      "To bring it back, click the green + card and choose \"Import from clipboard\". It adds the template to My templates as a new one. Slots can be an item id, \"id: name\" or just an exact item name, and the import tells you which names it couldn't match."
+    ]
+  },
+  {
     "version": "3.0.5",
     "notes": [
       "Dropping an item onto a Bank Tags tag tab tags it and leaves your template alone. Before, the plugin also moved that item to the end of the tab you were in.",
