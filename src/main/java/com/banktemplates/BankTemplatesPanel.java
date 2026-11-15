@@ -1228,6 +1228,8 @@ public class BankTemplatesPanel extends PluginPanel
 		else
 		{
 			menuItem(menu, layoutEditor.isEditing(template) ? "Finish editing" : "Edit layout", () -> editTemplate(template));
+			menuItem(menu, "Replace with current bank", () -> replaceWithBank(template));
+			menuItem(menu, "Update from clipboard", () -> updateFromClipboard(template));
 			if (repositoryClient.isEnabled())
 			{
 				final boolean shared = template.isOwned() && template.getRepoId() != null;
@@ -2906,18 +2908,9 @@ public class BankTemplatesPanel extends PluginPanel
 	// saved-file format. It always becomes a new template of your own, never linked to a shared copy.
 	private void importFromClipboard()
 	{
-		final String text;
-		try
+		final String text = readClipboard("Import failed");
+		if (text == null)
 		{
-			final java.awt.datatransfer.Transferable t = java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().getContents(null);
-			text = t != null && t.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.stringFlavor)
-				? (String) t.getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor)
-				: null;
-		}
-		catch (IllegalStateException | java.awt.datatransfer.UnsupportedFlavorException | java.io.IOException e)
-		{
-			JOptionPane.showMessageDialog(this, "Couldn't read the clipboard. Try again in a moment.",
-				"Import failed", JOptionPane.WARNING_MESSAGE);
 			return;
 		}
 		// Slots that carry only an item name are looked up in the item index, so build it first.
@@ -2941,6 +2934,133 @@ public class BankTemplatesPanel extends PluginPanel
 			JOptionPane.showMessageDialog(this, "Imported \"" + imported.getName() + "\" to My Templates.",
 				"Imported", JOptionPane.INFORMATION_MESSAGE);
 		});
+	}
+
+	// The clipboard's text, or null after telling the player it couldn't be read. EDT.
+	private String readClipboard(String failTitle)
+	{
+		try
+		{
+			final java.awt.datatransfer.Transferable t = java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().getContents(null);
+			if (t != null && t.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.stringFlavor))
+			{
+				return (String) t.getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor);
+			}
+			JOptionPane.showMessageDialog(this, "There's no text on the clipboard. Copy a template as JSON first.",
+				failTitle, JOptionPane.WARNING_MESSAGE);
+			return null;
+		}
+		catch (IllegalStateException | java.awt.datatransfer.UnsupportedFlavorException | java.io.IOException e)
+		{
+			JOptionPane.showMessageDialog(this, "Couldn't read the clipboard. Try again in a moment.",
+				failTitle, JOptionPane.WARNING_MESSAGE);
+			return null;
+		}
+	}
+
+	// Overwrites a template's layout with the open bank, the same capture the + card does, but keeping the
+	// template's name, description and link to its shared copy. Lets a sharer refresh a popular template
+	// from a rearranged real bank without starting a new listing.
+	private void replaceWithBank(BankTemplate template)
+	{
+		if (!readyToReplace(template) || !confirmReplace(template, "your current bank"))
+		{
+			return;
+		}
+		clientThread.invoke(() ->
+		{
+			final BankTemplate captured = BankCapture.capture(client, itemManager, template.getName());
+			SwingUtilities.invokeLater(() ->
+			{
+				if (captured == null)
+				{
+					JOptionPane.showMessageDialog(this, "Open your bank first, then try again.", "Replace failed",
+						JOptionPane.WARNING_MESSAGE);
+					return;
+				}
+				applyReplacement(template, captured);
+			});
+		});
+	}
+
+	// Overwrites a template's layout with JSON from the clipboard (Copy as JSON's format or a saved file),
+	// keeping its name, description and shared link. The JSON's own name and description are ignored.
+	private void updateFromClipboard(BankTemplate template)
+	{
+		if (!readyToReplace(template))
+		{
+			return;
+		}
+		final String text = readClipboard("Update failed");
+		if (text == null)
+		{
+			return;
+		}
+		itemIndex.ensureBuilt(() ->
+		{
+			// Parse before asking, so a bad clipboard is reported without a pointless confirmation.
+			final TemplateJson.Result result = TemplateJson.parse(text, itemIndex::idForName, gson);
+			if (result.error != null)
+			{
+				JOptionPane.showMessageDialog(this, result.error, "Update failed", JOptionPane.WARNING_MESSAGE);
+				return;
+			}
+			if (confirmReplace(template, "the template on your clipboard"))
+			{
+				applyReplacement(template, result.template);
+			}
+		});
+	}
+
+	// A template open in the editor would fight the replacement (and Cancel would undo it), so ask for the
+	// edit to be finished first.
+	private boolean readyToReplace(BankTemplate template)
+	{
+		if (layoutEditor.isEditing(template))
+		{
+			JOptionPane.showMessageDialog(this, "Finish editing \"" + template.getName() + "\" first.",
+				"Still editing", JOptionPane.INFORMATION_MESSAGE);
+			return false;
+		}
+		return true;
+	}
+
+	private boolean confirmReplace(BankTemplate template, String source)
+	{
+		return JOptionPane.showConfirmDialog(this,
+			"<html><body style='width:240px'>Replace the layout of \"" + escape(template.getName()) + "\" with "
+				+ source + "?<br><br>Its name, description and shared listing stay the same.</body></html>",
+			"Replace layout", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.OK_OPTION;
+	}
+
+	private void applyReplacement(BankTemplate template, BankTemplate source)
+	{
+		final long before = template.getUpdatedAt();
+		template.replaceLayoutFrom(source);
+		if (!templateManager.saveUserTemplate(template))
+		{
+			JOptionPane.showMessageDialog(this, "Could not save \"" + template.getName() + "\".", "Replace failed",
+				JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+		// Same rules as an edit: an imported template you change becomes your own.
+		claimOwnershipIfEdited(template, before);
+		rebuildOnEdt();
+		final BankTemplate active = templateManager.getActive();
+		if (active != null && active.getName().equals(template.getName()))
+		{
+			onActiveChanged.run();
+		}
+		if (repositoryClient.isEnabled() && template.isOwned() && template.getRepoId() != null)
+		{
+			// Shared: offer to push it now, which also confirms the replace worked.
+			maybePromptPushAfterEdit(template);
+		}
+		else
+		{
+			JOptionPane.showMessageDialog(this, "Updated the layout of \"" + template.getName() + "\".", "Updated",
+				JOptionPane.INFORMATION_MESSAGE);
+		}
 	}
 
 	private void createNewLayout()

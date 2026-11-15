@@ -1,5 +1,13 @@
 [
   {
+    "version": "3.0.8",
+    "notes": [
+      "Right-click one of your templates and choose \"Replace with current bank\" to recapture your bank into it. It keeps the template's name, description and shared listing, so you can refresh a template you've shared without starting a new one.",
+      "\"Update from clipboard\" does the same with JSON from Copy as JSON, so you can edit a template as text and put the result back into it.",
+      "If the template is shared, you're offered to update the shared copy straight after, and it keeps its downloads."
+    ]
+  },
+  {
     "version": "3.0.7",
     "notes": [
       "An item can now go in more than one tab of a template, once per tab, like a hammer in both your Construction and Smithing tabs. When you add an item that's already in another tab, the editor asks whether to add a copy or move it.",

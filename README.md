@@ -5,7 +5,7 @@
 **Save, apply, and share bank layouts. Your real bank is never touched.**
 
 [![Plugin Hub installs](https://img.shields.io/endpoint?url=https://api.runelite.net/pluginhub/shields/installs/plugin/bank-templates&label=installs&color=brightgreen)](https://runelite.net/plugin-hub/show/bank-templates)
-[![Version](https://img.shields.io/badge/version-3.0.7-blue)](https://github.com/TheSpryt/bank-templates/releases)
+[![Version](https://img.shields.io/badge/version-3.0.8-blue)](https://github.com/TheSpryt/bank-templates/releases)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-orange)](LICENSE)
 [![RuneLite](https://img.shields.io/badge/RuneLite-Plugin%20Hub-yellow)](https://runelite.net/plugin-hub)
 
@@ -101,7 +101,9 @@ as the same item, so the helper won't flag a slot just because you hold a differ
 - **Preview and import** - click a card to preview it, then import a copy to *My templates*.
 - **Share** - upload your template with an optional description (up to 500 characters), credited to your
   RuneScape name or shared **anonymously**. Edit your local copy and push the update whenever you like,
-  or remove the shared copy; both are tied to the character you shared it from.
+  or remove the shared copy; both are tied to the character you shared it from. Rearranged your real
+  bank? Right-click the template and choose **Replace with current bank**, then update the shared copy:
+  it keeps its listing and downloads.
 - **Report** - flag a template for moderation.
 
 ### Updates tab
@@ -159,6 +161,10 @@ Right-click a template in *My templates* and choose **Copy as JSON**. Each slot 
 `"4151: Abyssal whip"`, or `"empty"` / `"filler"`. Edit it however you like, copy the result, then click
 the green **+** card and choose **Import from clipboard**. A slot can also be just an item id or an exact
 item name; if a name doesn't match any item, the import lists it and asks you to add the id.
+
+To put the edited layout back into an existing template instead, right-click that template and choose
+**Update from clipboard**. **Replace with current bank** does the same from your open bank. Both keep the
+template's name, description and shared listing.
 
 ### Reorganise helper
 

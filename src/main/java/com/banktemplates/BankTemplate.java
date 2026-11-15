@@ -437,6 +437,39 @@ public class BankTemplate
 		return c;
 	}
 
+	/**
+	 * Takes {@code other}'s tabs and column count, keeping everything else (name, description, sharing).
+	 * Used by "Replace with current bank" and "Update from clipboard". A tab icon {@code other} sets wins;
+	 * otherwise a tab keeps the custom icon it had here, as long as the new layout still holds that item.
+	 */
+	public synchronized void replaceLayoutFrom(BankTemplate other)
+	{
+		normalize();
+		other.normalize();
+		final java.util.Map<Integer, Integer> oldIcons = new java.util.HashMap<>();
+		for (TabLayout t : tabs)
+		{
+			if (t.getCustomIconId() > 0)
+			{
+				oldIcons.put(t.getTab(), t.getCustomIconId());
+			}
+		}
+		tabs.clear();
+		for (TabLayout t : other.tabs)
+		{
+			final TabLayout copy = new TabLayout(t.getTab(), new ArrayList<>(t.getLayout()));
+			int icon = t.getCustomIconId();
+			if (icon <= 0)
+			{
+				final Integer old = oldIcons.get(t.getTab());
+				icon = old != null && copy.getLayout().contains(old) ? old : 0;
+			}
+			copy.setCustomIconId(icon);
+			tabs.add(copy);
+		}
+		columns = other.columns;
+	}
+
 	/** Replaces this template's tab layouts with those of {@code other} (used when reverting edits). */
 	public synchronized void restoreTabsFrom(BankTemplate other)
 	{
