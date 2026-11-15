@@ -5,7 +5,7 @@
 **Save, apply, and share bank layouts. Your real bank is never touched.**
 
 [![Plugin Hub installs](https://img.shields.io/endpoint?url=https://api.runelite.net/pluginhub/shields/installs/plugin/bank-templates&label=installs&color=brightgreen)](https://runelite.net/plugin-hub/show/bank-templates)
-[![Version](https://img.shields.io/badge/version-3.0.4-blue)](https://github.com/TheSpryt/bank-templates/releases)
+[![Version](https://img.shields.io/badge/version-3.0.5-blue)](https://github.com/TheSpryt/bank-templates/releases)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-orange)](LICENSE)
 [![RuneLite](https://img.shields.io/badge/RuneLite-Plugin%20Hub-yellow)](https://runelite.net/plugin-hub)
 
@@ -46,8 +46,8 @@ the community's, build layouts for items you don't even own yet, and get guided 
   it in as a faded placeholder, then drag to rearrange, swap or insert, and mark filler / empty slots.
 - **Placeholders** - items a template wants but you don't own yet show as faded icons in place.
 - **Filler slots (🚫)** - reserve slots for items you still need to acquire.
-- **Bigger-than-your-bank templates** - extra slots are still drawn, and the bank's slot counter shows
-  the template's size (turning red if it won't fit).
+- **Bigger-than-your-bank templates** - extra slots are still drawn. The bank's slot counter keeps
+  showing your real usage, and switches to the template's size in red when the template won't fit.
 - **Template-defined width** - layouts render at the column count they were designed for (default 8),
   so they look the same regardless of your bank window size.
 
@@ -170,7 +170,9 @@ it in settings. Then browse, sort, preview, import, share, and report as above.
 | Notify me about updates | on | Show an Updates tab with the latest patch notes |
 | Apply template to bank | on | Render the active template over the bank |
 | Show placeholders for unowned items | on | Faded icons for items you don't own yet |
-| Hide items not in the template | off | Hide leftover items instead of showing them below |
+| Placeholder transparency | 47% | How see-through the faded placeholder icons are |
+| Show the add-item button | on | Draw the green + in the bank; off shows it only while editing |
+| Hide items from other tabs | off | In a tab, hide items the template places in another tab; items not in the template at all still show |
 | Target highlight | cyan | Reorganise-helper destination-slot highlight colour |
 | Reorganise tab colours | palette | Per-tab colours used by the colour-coding mode (main + tabs 1-9) |
 | Enable community repository | off | Opt-in; browse/share (sends your IP to the repository) |

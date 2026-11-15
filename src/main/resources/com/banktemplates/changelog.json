@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.0.5",
+    "notes": [
+      "Dropping an item onto a Bank Tags tag tab tags it and leaves your template alone. Before, the plugin also moved that item to the end of the tab you were in.",
+      "Switching to another tab opens it at the top, the way the game does, instead of keeping the scroll position from the tab you left.",
+      "The \"Hide items not in the template\" setting is now \"Hide items from other tabs\". With it on, a tab hides items the template places in its other tabs, and still lists anything the template doesn't include, so new loot stays visible. Before, it hid both. If you had it on, it stays on.",
+      "Dragging items in the bank follows the game's own Swap and Insert button. Before, every drag inserted.",
+      "The bank's slot counter shows your real usage again. It shows the template's size, in red, only when the template won't fit in your bank."
+    ]
+  },
+  {
     "version": "3.0.4",
     "notes": [
       "Skipping a step in the reorganise helper now only skips it in the template you skipped it in. Before, the helper remembered a skip by tab and slot alone, so any other template with a step in the same place skipped it too. Applying a different template now starts its steps fresh."

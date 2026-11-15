@@ -3,6 +3,7 @@ package com.banktemplates;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +29,7 @@ import net.runelite.api.widgets.ItemQuantityMode;
 import net.runelite.api.widgets.JavaScriptCallback;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetType;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.util.Text;
 
@@ -60,6 +62,7 @@ public class BankLayoutRenderer
 	private final TemplateManager templateManager;
 	private final BankTemplatesConfig config;
 	private final LayoutEditor layoutEditor;
+	private final ClientThread clientThread;
 
 	// True while drawing for the layout editor: items render as faded placeholders even if unowned, and
 	// non-template bank items are not appended, so the design (and the "+" slot) stays clean.
@@ -91,13 +94,14 @@ public class BankLayoutRenderer
 
 	@Inject
 	BankLayoutRenderer(Client client, ItemManager itemManager, TemplateManager templateManager,
-		BankTemplatesConfig config, LayoutEditor layoutEditor)
+		BankTemplatesConfig config, LayoutEditor layoutEditor, ClientThread clientThread)
 	{
 		this.client = client;
 		this.itemManager = itemManager;
 		this.templateManager = templateManager;
 		this.config = config;
 		this.layoutEditor = layoutEditor;
+		this.clientThread = clientThread;
 	}
 
 	/**
@@ -307,7 +311,7 @@ public class BankLayoutRenderer
 		this.liveEditable = !template.isPreset();
 		try
 		{
-			layout(layout, template.getColumns());
+			layout(layout, template.getColumns(), otherTabsItems(template, currentTab));
 		}
 		finally
 		{
@@ -392,6 +396,37 @@ public class BankLayoutRenderer
 		decorateBank(template);
 	}
 
+	// The tab the bank was last decorated on, so a tab change can start at the top.
+	private int lastDecoratedTab = -1;
+
+	// Starts a newly opened tab at the top, as the game does. The plugin switches to its own extra tabs by
+	// rebuilding the bank directly, which skips the game's tab-click handling, so the previous tab's scroll
+	// position used to carry over (issue #48). Only a change of tab resets it, so a rebuild on the same tab
+	// (an item arriving, say) leaves the scroll where you put it.
+	private void resetScrollOnTabChange()
+	{
+		final int tab = client.getVarbitValue(VarbitID.BANK_CURRENTTAB);
+		if (tab == lastDecoratedTab)
+		{
+			return;
+		}
+		lastDecoratedTab = tab;
+		// Deferred: this runs from the bank's build-script callback, and redrawing the scrollbar means
+		// running another script, which the client forbids while one is still running ("scripts are not
+		// reentrant"). invokeLater waits until the bank build has finished.
+		clientThread.invokeLater(() ->
+		{
+			final Widget items = client.getWidget(InterfaceID.Bankmain.ITEMS);
+			if (items == null || items.isHidden() || items.getScrollY() == 0)
+			{
+				return;
+			}
+			items.setScrollY(0);
+			items.revalidateScroll();
+			client.runScript(ScriptID.UPDATE_SCROLLBAR, InterfaceID.Bankmain.SCROLLBAR, InterfaceID.Bankmain.ITEMS, 0);
+		});
+	}
+
 	/**
 	 * Post-build bank decoration: tab icons/selection, the slot counter, and the title bar. Also invoked when
 	 * an overlay extra tab is clicked (which doesn't trigger a native rebuild), so the native tab selection,
@@ -400,15 +435,19 @@ public class BankLayoutRenderer
 	private void decorateBank(BankTemplate template)
 	{
 		applyTabIcons(template);
+		resetScrollOnTabChange();
 
-		// Overwrite the bank's slot counter to show the active template's footprint (items + placeholders +
-		// fillers) instead of your live item count, in red when it won't fit your bank.
-		final int used = templateSlotCount(template);
+		// The bank's slot counter keeps showing your real usage. It switches to the template's footprint
+		// (items, placeholders and fillers across every tab), in red, only when that footprint won't fit,
+		// which is the one case where the number tells you something the real count can't. Showing the
+		// footprint all the time read as an inflated count (issue #48). Filtered views (a tag tab or a
+		// search) aren't showing the template, so they keep the real count too.
+		final int needed = templateSlotCount(template);
 		final int capacity = parseCount(client.getWidget(InterfaceID.Bankmain.CAPACITY));
 		final Widget occupied = client.getWidget(InterfaceID.Bankmain.OCCUPIEDSLOTS);
-		if (occupied != null && used > 0)
+		if (occupied != null && capacity > 0 && needed > capacity && !isBankFiltered(client))
 		{
-			occupied.setText(capacity > 0 && used > capacity ? "<col=ff3030>" + used + "</col>" : Integer.toString(used));
+			occupied.setText("<col=ff3030>" + needed + "</col>");
 		}
 
 		// Title bar: the editing banner while editing (the native title is correct otherwise, since the viewed
@@ -424,18 +463,28 @@ public class BankLayoutRenderer
 	// placeholders for items you don't, and fillers) - i.e. everything except empty gaps.
 	private static int templateSlotCount(BankTemplate template)
 	{
-		int n = 0;
+		// A real item occupies one bank slot however many tabs list it; each filler is its own slot.
+		int fillers = 0;
+		final java.util.Set<Integer> items = new java.util.HashSet<>();
 		for (TabLayout tl : template.getTabs())
 		{
 			for (Integer v : tl.getLayout())
 			{
-				if (v != null && v > 0)
+				if (v == null || v <= 0)
 				{
-					n++;
+					continue;
+				}
+				if (v == BankTemplate.FILLER)
+				{
+					fillers++;
+				}
+				else
+				{
+					items.add(v);
 				}
 			}
 		}
-		return n;
+		return items.size() + fillers;
 	}
 
 	private static int parseCount(Widget w)
@@ -653,7 +702,38 @@ public class BankLayoutRenderer
 		return 0;
 	}
 
-	private void layout(int[] layout, int columns)
+	// Every item the template places in a tab other than the one on screen. The all-items view already
+	// shows every tab, so nothing counts as "elsewhere" there.
+	private static int[] otherTabsItems(BankTemplate template, int currentTab)
+	{
+		if (currentTab == BankTemplate.MAIN_TAB)
+		{
+			return new int[0];
+		}
+		final List<Integer> out = new ArrayList<>();
+		for (TabLayout tl : template.getTabs())
+		{
+			if (tl.getTab() == currentTab)
+			{
+				continue;
+			}
+			for (Integer v : tl.getLayout())
+			{
+				if (v != null && v > 0 && v != BankTemplate.FILLER)
+				{
+					out.add(v);
+				}
+			}
+		}
+		final int[] arr = new int[out.size()];
+		for (int i = 0; i < arr.length; i++)
+		{
+			arr[i] = out.get(i);
+		}
+		return arr;
+	}
+
+	private void layout(int[] layout, int columns, int[] elsewhere)
 	{
 		this.templateLen = layout.length;
 		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
@@ -782,14 +862,53 @@ public class BankLayoutRenderer
 			placed[pos] = c;
 		}
 
+		// With "Hide items not in the template" on, work out which leftover items the template places in
+		// another tab, matched the same way as above (exact, placeholder, variant) so the answer agrees with
+		// how those tabs render. Only those get hidden: an item the template doesn't mention anywhere, such
+		// as new loot, still shows below the layout. Hiding everything left over made new items vanish from
+		// every view (issue #48).
+		final Set<Integer> claimedElsewhere = new HashSet<>();
+		if (config.hideNonTemplateItems() && elsewhere.length > 0)
+		{
+			final Set<Integer> pool = new LinkedHashSet<>(bankItems);
+			final Set<Integer> seen = new HashSet<>();
+			for (ItemMatcher matcher : matchers)
+			{
+				for (int itemId : elsewhere)
+				{
+					if (seen.contains(itemId))
+					{
+						continue;
+					}
+					final int matched = matcher.match(pool, itemId);
+					if (matched != -1)
+					{
+						seen.add(itemId);
+						claimedElsewhere.add(matched);
+						pool.remove(matched);
+						final int ph = client.getItemDefinition(matched).getPlaceholderId();
+						if (ph != -1)
+						{
+							claimedElsewhere.add(ph);
+							pool.remove(ph);
+						}
+					}
+				}
+			}
+		}
+
 		// Append the player's other (non-template) items below the layout, using each one's own widget. In
 		// a numbered tab while editing we skip them (the grid is the design surface); in the all-items view
 		// we still show them, separated by a divider, so you can see what's not yet in the template.
 		int slotIdx = appendStart;
-		if ((!editing || mainView) && !config.hideNonTemplateItems() && !virtualTab)
+		if ((!editing || mainView) && !virtualTab)
 		{
 			for (int itemId : bankItems)
 			{
+				if (claimedElsewhere.contains(itemId))
+				{
+					continue;
+				}
 				final Widget own = itemToWidget.remove(itemId);
 				final Widget c = own != null ? own : takeSpare(spares, itemContainer, virt);
 				if (c == null)

@@ -594,6 +594,25 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		return e;
 	}
 
+	// Left edge of the template's item grid: the leftmost slot on screen, else the "+" button.
+	private int gridLeft()
+	{
+		int left = Integer.MAX_VALUE;
+		for (Rectangle r : slotRects)
+		{
+			if (r != null && r.x < left)
+			{
+				left = r.x;
+			}
+		}
+		final Rectangle add = addRect;
+		if (add != null && add.x < left)
+		{
+			left = add.x;
+		}
+		return left == Integer.MAX_VALUE ? Integer.MIN_VALUE : left;
+	}
+
 	@Override
 	public java.awt.event.MouseEvent mouseReleased(java.awt.event.MouseEvent e)
 	{
@@ -684,16 +703,33 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		final Rectangle container = containerRect;
 		if (target < 0)
 		{
-			if ((add != null && add.contains(p)) || (container != null && container.contains(p)))
+			// Dropped in empty space past the items -> move to the end. Only the item grid counts: Bank Tags
+			// draws its tag tabs inside the same container, in the gutter left of the first column, and a
+			// drop there means "tag this item", not "move it to the end" (issue #48).
+			if ((add != null && add.contains(p)) || (container != null && container.contains(p) && p.x >= gridLeft()))
 			{
-				target = slotRects.length; // dropped past the items -> move to the end
+				target = slotRects.length;
 			}
 		}
 
 		if (target >= 0 && target != from)
 		{
 			final int dest = target;
-			clientThread.invoke(() -> layoutEditor.moveSlot(tab, from, dest));
+			// Follow the game's own Swap/Insert button, as a real bank drag does. A drop past the last item
+			// has nothing to swap with, so it stays a move to the end in either mode.
+			final boolean withinItems = dest < slotRects.length;
+			clientThread.invoke(() ->
+			{
+				// Read on the client thread, where varbits are safe to read.
+				if (withinItems && client.getVarbitValue(VarbitID.BANK_INSERTMODE) == 0)
+				{
+					layoutEditor.swapSlots(tab, from, dest);
+				}
+				else
+				{
+					layoutEditor.moveSlot(tab, from, dest);
+				}
+			});
 		}
 		return e;
 	}

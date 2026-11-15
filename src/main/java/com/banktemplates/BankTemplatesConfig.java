@@ -130,9 +130,9 @@ public interface BankTemplatesConfig extends Config
 
 	@ConfigItem(
 		keyName = "hideNonTemplateItems",
-		name = "Hide items not in the template",
-		description = "When a template is applied, hide bank items it doesn't include instead of showing them below. Note: those items stay invisible in the bank view until you switch the template off.",
-		position = 3,
+		name = "Hide items from other tabs",
+		description = "In a tab, hide your items that the template places in one of its other tabs, instead of listing them below. Items the template doesn't include anywhere, such as new loot, still show below so you can see them.",
+		position = 4,
 		section = layoutSection
 	)
 	default boolean hideNonTemplateItems()
