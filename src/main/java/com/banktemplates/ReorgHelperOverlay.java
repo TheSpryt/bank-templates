@@ -255,12 +255,12 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 					continue;
 				}
 				// An item listed in two template tabs can only physically live in one, so the first tab to
-				// list it claims it. Skip the later tab's orphaned copy entirely - crucially without advancing
-				// this tab's rank - otherwise every item after it in this tab is ranked one slot too far and
-				// gets a wrong-slot label, even though the step-by-step packing (which skips the absent item)
-				// considers the tab correctly sorted. That mismatch is what made the labels disagree with the
-				// "Bank matches the template" header.
-				if (targetTab.containsKey(canon))
+				// list it (its home, see homeTabs) claims it. Skip the later tab's copy entirely - crucially
+				// without advancing this tab's rank - otherwise every item after it in this tab is ranked one
+				// slot too far and gets a wrong-slot label, even though the step-by-step packing (which skips
+				// the absent item) considers the tab correctly sorted. That mismatch is what made the labels
+				// disagree with the "Bank matches the template" header.
+				if (targetTab.containsKey(canon) || awayCopy(v, tl.getTab()))
 				{
 					continue;
 				}
@@ -317,7 +317,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		{
 			for (Integer v : tl.getLayout())
 			{
-				if (v == null || v <= 0)
+				if (v == null || v <= 0 || awayCopy(v, tl.getTab()))
 				{
 					continue;
 				}
@@ -408,7 +408,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			}
 			for (Integer v : tl.getLayout())
 			{
-				if (v == null || v <= 0)
+				if (v == null || v <= 0 || awayCopy(v, tab))
 				{
 					continue;
 				}
@@ -1038,7 +1038,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 
 	// Builds the desired packed order for a tab: each template slot takes the real item if owned, otherwise a
 	// filler; leftovers are appended. Mirrors drawPositionStep so tabSorted agrees with it.
-	private List<Integer> buildTabTarget(int[] desired, List<Integer> current)
+	private List<Integer> buildTabTarget(int[] desired, List<Integer> current, int tab)
 	{
 		final int fillerCanon = reorgId(BankTemplate.FILLER);
 		final Map<Integer, Integer> remaining = new HashMap<>();
@@ -1049,7 +1049,8 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		final List<Integer> target = new ArrayList<>();
 		for (int id : desired)
 		{
-			if (id == BankTemplate.EMPTY)
+			// Empty slots and copies of items whose home is another tab take no real bank slot here.
+			if (id == BankTemplate.EMPTY || awayCopy(id, tab))
 			{
 				continue;
 			}
@@ -1112,7 +1113,7 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 			return true;
 		}
 		final List<Integer> cur = tabItemsCanonical(tab);
-		final List<Integer> target = buildTabTarget(desired, cur);
+		final List<Integer> target = buildTabTarget(desired, cur, tab);
 		// Advance over slots that already match or were skipped, to the first slot that's both wrong and live.
 		int i = 0;
 		while (i < cur.size() && i < target.size())
@@ -1168,7 +1169,8 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		final List<Integer> target = new ArrayList<>();
 		for (int id : desired)
 		{
-			if (id == BankTemplate.EMPTY)
+			// Empty slots and copies of items whose home is another tab take no real bank slot here.
+			if (id == BankTemplate.EMPTY || awayCopy(id, currentTab))
 			{
 				continue;
 			}
@@ -1312,6 +1314,10 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 	private static final long SET_CACHE_TTL_MS = 500;
 	private Set<Integer> cachedOwned;
 	private Set<Integer> cachedShared;
+	// Home tab of each template item (by reorgId): the first tab that lists it. A template may place one
+	// item in several tabs (a hammer in both a Construction and a Smithing tab), but the real bank holds it
+	// in one, so only its home tab sorts it or reserves a filler for it. Copies in other tabs are skipped.
+	private Map<Integer, Integer> cachedHome = java.util.Collections.emptyMap();
 	private BankTemplate cachedFor;
 	private long cachedAt;
 
@@ -1332,8 +1338,39 @@ public class ReorgHelperOverlay extends Overlay implements MouseListener
 		}
 		cachedShared = sharedExactIds(template);
 		cachedOwned = ownedItems();
+		// reorgId reads exactShared, so set it before working out home tabs.
+		exactShared = cachedShared;
+		cachedHome = homeTabs(template);
 		cachedFor = template;
 		cachedAt = now;
+	}
+
+	// The first tab (in the template's tab order) that lists each item, keyed by reorgId.
+	private Map<Integer, Integer> homeTabs(BankTemplate template)
+	{
+		final Map<Integer, Integer> home = new HashMap<>();
+		for (TabLayout tl : template.getTabs())
+		{
+			for (Integer v : tl.getLayout())
+			{
+				if (v != null && v > 0 && v != BankTemplate.FILLER)
+				{
+					home.putIfAbsent(reorgId(v), tl.getTab());
+				}
+			}
+		}
+		return home;
+	}
+
+	// True for a real item in {@code tab} whose home is another tab: a copy the real bank can't also hold.
+	private boolean awayCopy(int id, int tab)
+	{
+		if (id <= 0 || id == BankTemplate.FILLER)
+		{
+			return false;
+		}
+		final Integer home = cachedHome.get(reorgId(id));
+		return home != null && home != tab;
 	}
 
 	/**

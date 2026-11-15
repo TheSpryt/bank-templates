@@ -466,22 +466,25 @@ public class BankTemplate
 		return null;
 	}
 
-	/** Total real items across all tabs (excludes empty and filler slots). */
+	/**
+	 * Distinct real items across all tabs (excludes empty and filler slots). An item placed in two tabs
+	 * counts once, matching the repository's own count.
+	 */
 	public synchronized int itemCount()
 	{
 		normalize();
-		int n = 0;
+		final java.util.Set<Integer> items = new java.util.HashSet<>();
 		for (TabLayout t : tabs)
 		{
 			for (Integer v : t.getLayout())
 			{
 				if (v != null && v > 0 && v != FILLER)
 				{
-					n++;
+					items.add(v);
 				}
 			}
 		}
-		return n;
+		return items.size();
 	}
 
 	public synchronized int tabCount()

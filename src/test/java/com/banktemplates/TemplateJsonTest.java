@@ -153,6 +153,27 @@ public class TemplateJsonTest
 	}
 
 	@Test
+	public void anItemCanBeInSeveralTabsButOnceInEach()
+	{
+		final String twoTabs = "{\"tabs\":[{\"tab\":1,\"slots\":[\"4151: Abyssal whip\",385]},{\"tab\":2,\"slots\":[4151]}]}";
+		final TemplateJson.Result ok = TemplateJson.parse(twoTabs, TemplateJsonTest::byName, GSON);
+		assertNull(ok.error);
+		assertEquals(Arrays.asList(WHIP, SHARK), tab(ok.template, 1));
+		assertEquals(Arrays.asList(WHIP), tab(ok.template, 2));
+		// The whip counts once, the way the repository counts it.
+		assertEquals(2, ok.template.itemCount());
+
+		final String sameTab = "{\"tabs\":[{\"tab\":3,\"slots\":[\"4151: Abyssal whip\",\"Abyssal whip\"]}]}";
+		final TemplateJson.Result bad = TemplateJson.parse(sameTab, TemplateJsonTest::byName, GSON);
+		assertNull(bad.template);
+		assertTrue(bad.error.startsWith("Tab 3 lists \"Abyssal whip\" more than once"));
+
+		// Fillers can repeat.
+		final String fillers = "{\"tabs\":[{\"tab\":0,\"slots\":[\"filler\",\"filler\",4151]}]}";
+		assertNull(TemplateJson.parse(fillers, TemplateJsonTest::byName, GSON).error);
+	}
+
+	@Test
 	public void longNamesAreCappedAndMissingOnesGetADefault()
 	{
 		final String longName = "{\"name\":\"An extremely long template name for testing\",\"tabs\":[{\"tab\":0,\"slots\":[4151]}]}";

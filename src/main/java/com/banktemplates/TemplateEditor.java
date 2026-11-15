@@ -352,11 +352,18 @@ final class TemplateEditor
 
 		left.add(button("Add item", () -> ItemSearch.open(parent, itemIndex, id ->
 		{
-			// An item can only live in one bank tab. If the picked item is already in the layout, don't add a
-			// duplicate: if it's in this same tab there's nothing to do, and if it's in another tab, offer to
-			// move the original here instead. Otherwise add it normally.
+			// An item can sit in several tabs, once in each. If it's already in this tab there's nothing to
+			// do; if it's in another tab, ask whether to add a second copy here or move the original. Otherwise
+			// add it normally.
 			clientThread.invoke(() ->
 			{
+				if (editor.findInTab(tab, id) >= 0)
+				{
+					final String name = editor.displayName(id);
+					SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(dialog,
+						name + " is already in this tab.", "Already in tab", JOptionPane.INFORMATION_MESSAGE));
+					return;
+				}
 				final int[] loc = editor.find(id);
 				if (loc == null)
 				{
@@ -364,19 +371,15 @@ final class TemplateEditor
 					return;
 				}
 				final String name = editor.displayName(id);
-				if (loc[0] == tab)
-				{
-					SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(dialog,
-						name + " is already in this tab.", "Already in tab", JOptionPane.INFORMATION_MESSAGE));
-					return;
-				}
 				final String from = editor.tabLabel(loc[0]);
 				SwingUtilities.invokeLater(() ->
 				{
-					final int choice = JOptionPane.showConfirmDialog(dialog,
-						name + " is already in " + from + ". Move it to this tab?",
-						"Move item", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
-					if (choice == JOptionPane.OK_OPTION)
+					final int choice = askCopyOrMove(dialog, name, from);
+					if (choice == ADD_COPY)
+					{
+						clientThread.invoke(() -> editor.addItem(tab, id));
+					}
+					else if (choice == MOVE_HERE)
 					{
 						clientThread.invoke(() -> editor.moveToTab(loc[0], loc[1], tab));
 					}
@@ -670,7 +673,17 @@ final class TemplateEditor
 					}
 					else if (destTab != tab)
 					{
-						editor.moveToTab(tab, index, destTab);
+						clientThread.invoke(() ->
+						{
+							final String why = editor.alreadyInTabMessage(tab, index, destTab);
+							if (why != null)
+							{
+								SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(dialog, why,
+									"Already in tab", JOptionPane.INFORMATION_MESSAGE));
+								return;
+							}
+							editor.moveToTab(tab, index, destTab);
+						});
 					}
 					return;
 				}
@@ -782,6 +795,20 @@ final class TemplateEditor
 				SwingUtilities.invokeLater(() ->
 					JOptionPane.showMessageDialog(dialog, msg, "Already in layout", JOptionPane.INFORMATION_MESSAGE)))),
 			true);
+	}
+
+	static final int ADD_COPY = 0;
+	static final int MOVE_HERE = 1;
+
+	// Asked when the picked item already sits in another tab. Returns ADD_COPY, MOVE_HERE, or anything else
+	// for cancel. A copy in each tab is allowed (a hammer in both a Construction and a Smithing tab); the
+	// all-items view then shows it in both places. EDT only.
+	static int askCopyOrMove(Component parent, String name, String fromTab)
+	{
+		final Object[] options = {"Add a copy", "Move it here", "Cancel"};
+		return JOptionPane.showOptionDialog(parent,
+			name + " is already in " + fromTab + ". Add a copy to this tab too, or move it here?",
+			"Item in another tab", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
 	}
 
 	private JMenuItem item(String text, Runnable action)

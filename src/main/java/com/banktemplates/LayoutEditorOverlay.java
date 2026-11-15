@@ -417,6 +417,19 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 	// After moving an item to another tab, if the tab we were viewing collapsed (its last item left), follow
 	// the item to its destination so we're not stranded on a tab that no longer exists. Runs on the client
 	// thread (called from clientThread.invoke).
+	// Moves a slot onto another tab, or says why not when that tab already holds the item. Client thread.
+	private void moveToTabOrExplain(int sourceTab, int from, int destTab)
+	{
+		final String why = layoutEditor.alreadyInTabMessage(sourceTab, from, destTab);
+		if (why != null)
+		{
+			javax.swing.SwingUtilities.invokeLater(() -> javax.swing.JOptionPane.showMessageDialog(
+				null, why, "Already in tab", javax.swing.JOptionPane.INFORMATION_MESSAGE));
+			return;
+		}
+		navigateIfCollapsed(sourceTab, layoutEditor.moveToTab(sourceTab, from, destTab));
+	}
+
 	private void navigateIfCollapsed(int sourceTab, int dest)
 	{
 		if (dest < 0)
@@ -682,7 +695,7 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 		final int extraDest = extraTabAt(p);
 		if (extraDest >= 1 && extraDest != tab)
 		{
-			clientThread.invoke(() -> navigateIfCollapsed(tab, layoutEditor.moveToTab(tab, from, extraDest)));
+			clientThread.invoke(() -> moveToTabOrExplain(tab, from, extraDest));
 			return e;
 		}
 
@@ -693,7 +706,7 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 			if (r != null && r.contains(p) && en.getKey() != tab)
 			{
 				final int destTab = en.getKey();
-				clientThread.invoke(() -> navigateIfCollapsed(tab, layoutEditor.moveToTab(tab, from, destTab)));
+				clientThread.invoke(() -> moveToTabOrExplain(tab, from, destTab));
 				return e;
 			}
 		}
@@ -823,8 +836,15 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 			ItemSearch.open(client.getCanvas(), itemIndex, id ->
 				clientThread.invoke(() ->
 				{
-					// An item can only live in one bank tab: don't add a duplicate. Already in this tab -> nothing
-					// to do; already in another tab -> offer to move the original here; otherwise add it.
+					// An item can sit in several tabs, once in each. Already in this tab -> nothing to do; already
+					// in another tab -> ask whether to add a second copy here or move the original; else add it.
+					if (layoutEditor.findInTab(tab, id) >= 0)
+					{
+						final String name = layoutEditor.displayName(id);
+						javax.swing.SwingUtilities.invokeLater(() -> javax.swing.JOptionPane.showMessageDialog(
+							null, name + " is already in this tab.", "Already in tab", javax.swing.JOptionPane.INFORMATION_MESSAGE));
+						return;
+					}
 					final int[] loc = layoutEditor.find(id);
 					if (loc == null)
 					{
@@ -832,19 +852,15 @@ public class LayoutEditorOverlay extends Overlay implements MouseListener
 						return;
 					}
 					final String name = layoutEditor.displayName(id);
-					if (loc[0] == tab)
-					{
-						javax.swing.SwingUtilities.invokeLater(() -> javax.swing.JOptionPane.showMessageDialog(
-							null, name + " is already in this tab.", "Already in tab", javax.swing.JOptionPane.INFORMATION_MESSAGE));
-						return;
-					}
 					final String from = layoutEditor.tabLabel(loc[0]);
 					javax.swing.SwingUtilities.invokeLater(() ->
 					{
-						final int choice = javax.swing.JOptionPane.showConfirmDialog(null,
-							name + " is already in " + from + ". Move it to this tab?",
-							"Move item", javax.swing.JOptionPane.OK_CANCEL_OPTION, javax.swing.JOptionPane.QUESTION_MESSAGE);
-						if (choice == javax.swing.JOptionPane.OK_OPTION)
+						final int choice = TemplateEditor.askCopyOrMove(null, name, from);
+						if (choice == TemplateEditor.ADD_COPY)
+						{
+							clientThread.invoke(() -> layoutEditor.addItem(tab, id));
+						}
+						else if (choice == TemplateEditor.MOVE_HERE)
 						{
 							clientThread.invoke(() -> layoutEditor.moveToTab(loc[0], loc[1], tab));
 						}

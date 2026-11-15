@@ -1,5 +1,15 @@
 [
   {
+    "version": "3.0.7",
+    "notes": [
+      "An item can now go in more than one tab of a template, once per tab, like a hammer in both your Construction and Smithing tabs. When you add an item that's already in another tab, the editor asks whether to add a copy or move it.",
+      "The all-items view shows the item in each tab's section, and you can withdraw from any copy.",
+      "The reorganise helper keeps the item in the first tab that lists it, since your real bank can only hold it in one place. It doesn't reserve fillers for the other copies.",
+      "Importing a tab into a template no longer takes its items out of the template's other tabs.",
+      "Template cards count an item once, however many tabs it's in."
+    ]
+  },
+  {
     "version": "3.0.6",
     "notes": [
       "Right-click a template in My templates and choose \"Copy as JSON\" to copy it to your clipboard as text, one slot per line, so you can edit it in any text editor or hand it to an AI to rearrange.",

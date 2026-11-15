@@ -3068,15 +3068,10 @@ public class BankTemplatesPanel extends PluginPanel
 				return;
 			}
 			dest.putTab(BankTemplate.MAIN_TAB, layout);
-			// An item can only live in one bank tab, so release any item this view brings in from wherever
-			// it already sat in the destination's numbered tabs - it "moves" to the main view.
-			final int released = releaseDuplicates(dest, BankTemplate.MAIN_TAB, layout);
+			// Items may also sit in the destination's numbered tabs: one copy per tab is allowed.
 			templateManager.saveUserTemplate(dest);
 			rebuildOnEdt();
-			final String extra = released > 0
-				? " Moved " + released + " item" + (released == 1 ? "" : "s") + " out of other tabs (they can't be in two tabs at once)."
-				: "";
-			JOptionPane.showMessageDialog(this, "Replaced the main view of \"" + dest.getName() + "\"." + extra,
+			JOptionPane.showMessageDialog(this, "Replaced the main view of \"" + dest.getName() + "\".",
 				"Imported tab", JOptionPane.INFORMATION_MESSAGE);
 			return;
 		}
@@ -3089,60 +3084,11 @@ public class BankTemplatesPanel extends PluginPanel
 			return;
 		}
 		dest.putTab(free, layout);
-		// An item can only live in one bank tab, so release any item this tab brings in from wherever it
-		// already sat in the destination - it "moves" to the imported tab.
-		final int released = releaseDuplicates(dest, free, layout);
+		// Items may also sit in the destination's other tabs: one copy per tab is allowed.
 		templateManager.saveUserTemplate(dest);
 		rebuildOnEdt();
-		final String extra = released > 0
-			? " Moved " + released + " item" + (released == 1 ? "" : "s") + " out of other tabs (they can't be in two tabs at once)."
-			: "";
-		JOptionPane.showMessageDialog(this, "Added the tab to \"" + dest.getName() + "\" as tab " + free + "." + extra,
+		JOptionPane.showMessageDialog(this, "Added the tab to \"" + dest.getName() + "\" as tab " + free + ".",
 			"Imported tab", JOptionPane.INFORMATION_MESSAGE);
-	}
-
-	// Releases (removes, shifting the rest up) any real item the newly imported tab contains from the
-	// destination's other tabs, so each item lives in a single tab. Fillers and empty slots are left alone.
-	// Returns how many slots were released.
-	private static int releaseDuplicates(BankTemplate dest, int importedTab, List<Integer> importedLayout)
-	{
-		final java.util.Set<Integer> imported = new java.util.HashSet<>();
-		for (Integer v : importedLayout)
-		{
-			if (v != null && v > 0 && v != BankTemplate.FILLER)
-			{
-				imported.add(v);
-			}
-		}
-		if (imported.isEmpty())
-		{
-			return 0;
-		}
-
-		int released = 0;
-		for (Integer t : dest.definedTabs())
-		{
-			if (t == importedTab)
-			{
-				continue;
-			}
-			final List<Integer> layout = dest.copyTab(t);
-			final List<Integer> kept = new ArrayList<>(layout.size());
-			for (Integer v : layout)
-			{
-				if (v != null && imported.contains(v))
-				{
-					released++;
-					continue;
-				}
-				kept.add(v);
-			}
-			if (kept.size() != layout.size())
-			{
-				dest.putTab(t, kept);
-			}
-		}
-		return released;
 	}
 
 	// Whether a tab layout holds at least one real item (not empty, not filler). Null layout -> false.

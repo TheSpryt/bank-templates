@@ -838,11 +838,14 @@ public class BankLayoutRenderer
 				}
 				else
 				{
-					// You don't own this item yet: faded placeholder on a spare widget.
+					// A spare widget: either you don't own this item yet (faded placeholder), or it's a second
+					// copy of an item the template puts in two tabs, which the all-items view shows in both
+					// places. The item's own widget went to the first copy, so this one draws the matched bank
+					// item on a spare; remapWithdraw points its clicks at the real bank slot.
 					c = takeSpare(spares, itemContainer, virt);
 					if (c != null)
 					{
-						drawItem(c, bank, slot, pos, columns);
+						drawItem(c, bank, matched != null ? matched : slot, pos, columns);
 						lastContentSlot = pos;
 					}
 				}

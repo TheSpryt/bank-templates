@@ -5,7 +5,7 @@
 **Save, apply, and share bank layouts. Your real bank is never touched.**
 
 [![Plugin Hub installs](https://img.shields.io/endpoint?url=https://api.runelite.net/pluginhub/shields/installs/plugin/bank-templates&label=installs&color=brightgreen)](https://runelite.net/plugin-hub/show/bank-templates)
-[![Version](https://img.shields.io/badge/version-3.0.6-blue)](https://github.com/TheSpryt/bank-templates/releases)
+[![Version](https://img.shields.io/badge/version-3.0.7-blue)](https://github.com/TheSpryt/bank-templates/releases)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-orange)](LICENSE)
 [![RuneLite](https://img.shields.io/badge/RuneLite-Plugin%20Hub-yellow)](https://runelite.net/plugin-hub)
 
@@ -48,6 +48,8 @@ the community's, build layouts for items you don't even own yet, and get guided 
   it in as a faded placeholder, then drag to rearrange, swap or insert, and mark filler / empty slots.
 - **Placeholders** - items a template wants but you don't own yet show as faded icons in place.
 - **Filler slots (🚫)** - reserve slots for items you still need to acquire.
+- **One item, several tabs** - put an item in more than one tab (a hammer in both Construction and
+  Smithing), once per tab. The all-items view shows it in each tab's section.
 - **Bigger-than-your-bank templates** - extra slots are still drawn. The bank's slot counter keeps
   showing your real usage, and switches to the template's size in red when the template won't fit.
 - **Template-defined width** - layouts render at the column count they were designed for (default 8),
@@ -81,6 +83,9 @@ plugin only shows you what to do. Pick any combination of three display styles:
   insert, rather than nudging its neighbours over one at a time. It also helps you set up: reserving slots
   for items you don't own yet with the game's **Bank Fillers** (telling you the exact number to enter,
   with a **Skip** option), and creating extra tabs by dragging onto the **+**.
+
+When a template puts an item in more than one tab, the helper keeps it in the first tab that lists it,
+since your real bank can only hold it in one place.
 
 Item kits and alternate versions of an item (charged/uncharged, degraded, recoloured, and so on) count
 as the same item, so the helper won't flag a slot just because you hold a different variant.
@@ -139,7 +144,7 @@ bank** or **New empty template**, then click ✏️ on the template:
 - An editor window opens beside the client, and the template renders **editably over your bank** with a
   green **+** button after the last slot. (Editing doesn't activate the template.)
 - **Add items** - click **+** (in the bank or the editor) and search by name; the item drops in as a
-  faded placeholder.
+  faded placeholder. If the item is already in another tab, choose whether to add a copy or move it.
 - **Arrange** - drag items to rearrange them, over the bank or in the editor grid, just like moving items
   normally. Toggle **Swap mode** (a pressed = swap, released = insert button) to choose how a drop
   behaves. Right-click a slot in the editor for *filler / empty / release*.

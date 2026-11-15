@@ -174,10 +174,13 @@ public class LayoutEditor
 
 	// ---- Layout mutations (all no-ops unless this template is being edited) ------------------
 
-	/** Appends an item (or a filler) to a tab. Real items are deduped silently; fillers can repeat. */
+	/**
+	 * Appends an item (or a filler) to a tab. An item can sit in several tabs but only once in each, so a
+	 * real item already in this tab is skipped silently; fillers can repeat.
+	 */
 	void addItem(int tab, int itemId)
 	{
-		if (itemId == BankTemplate.FILLER || (itemId > 0 && !contains(itemId)))
+		if (itemId == BankTemplate.FILLER || (itemId > 0 && findInTab(tab, itemId) < 0))
 		{
 			edit(tab, slots -> addOrFill(slots, itemId));
 		}
@@ -201,9 +204,10 @@ public class LayoutEditor
 
 	/**
 	 * Replaces the slot at {@code pos} in {@code tab} with a real item, or - if that item is already
-	 * elsewhere in the layout - reports where via {@code onDup} (with a user-facing message) and changes
-	 * nothing. Fillers replace unconditionally. Must run on the client thread (it reads the item name).
-	 * {@code onDup} is invoked on the client thread.
+	 * elsewhere in the same tab - reports where via {@code onDup} (with a user-facing message) and changes
+	 * nothing. The item may already sit in other tabs: one copy per tab is allowed. Fillers replace
+	 * unconditionally. Must run on the client thread (it reads the item name). {@code onDup} is invoked on
+	 * the client thread.
 	 */
 	void replaceItemOrReport(int tab, int pos, int itemId, Consumer<String> onDup)
 	{
@@ -225,17 +229,47 @@ public class LayoutEditor
 		{
 			return;
 		}
-		final int[] loc = locate(t, itemId);
+		final int at = findInTab(tab, itemId);
 		// Picking the item that's already in this same slot is a no-op, not a duplicate.
-		if (loc != null && !(loc[0] == tab && loc[1] == pos))
+		if (at >= 0 && at != pos)
 		{
 			if (onDup != null)
 			{
-				onDup.accept(itemName(itemId) + " is already in " + describe(t, loc[0], loc[1]) + ".");
+				onDup.accept(itemName(itemId) + " is already in " + describe(t, tab, at) + ". An item can only be in a tab once.");
 			}
 			return;
 		}
 		setSlot(tab, pos, itemId);
+	}
+
+	/** Index of {@code itemId} in {@code tab} of the template being edited, or -1 if that tab doesn't hold it. */
+	int findInTab(int tab, int itemId)
+	{
+		final BankTemplate t = liveTemplate();
+		if (t == null)
+		{
+			return -1;
+		}
+		synchronized (t)
+		{
+			for (TabLayout tl : t.getTabs())
+			{
+				if (tl.getTab() != tab)
+				{
+					continue;
+				}
+				final List<Integer> layout = tl.getLayout();
+				for (int i = 0; i < layout.size(); i++)
+				{
+					final Integer v = layout.get(i);
+					if (v != null && v == itemId)
+					{
+						return i;
+					}
+				}
+			}
+		}
+		return -1;
 	}
 
 	// The {tab, index} of itemId in the template, or null if absent.
@@ -278,7 +312,10 @@ public class LayoutEditor
 		}
 	}
 
-	/** The [tab, pos] where {@code itemId} already sits in the layout, or null if it isn't present. Client thread. */
+	/**
+	 * The [tab, pos] where {@code itemId} sits in the layout, or null if it isn't present. When it sits in
+	 * several tabs, the first one listed. Client thread.
+	 */
 	int[] find(int itemId)
 	{
 		final BankTemplate t = liveTemplate();
@@ -322,30 +359,6 @@ public class LayoutEditor
 			}
 			return false;
 		}
-	}
-
-	/** True if {@code itemId} already appears anywhere in the template being edited. */
-	boolean contains(int itemId)
-	{
-		final BankTemplate t = liveTemplate();
-		if (t == null)
-		{
-			return false;
-		}
-		synchronized (t)
-		{
-			for (TabLayout tl : t.getTabs())
-			{
-				for (Integer v : tl.getLayout())
-				{
-					if (v != null && v == itemId)
-					{
-						return true;
-					}
-				}
-			}
-		}
-		return false;
 	}
 
 	/** Sets a slot to an item id, {@link BankTemplate#FILLER} or {@link BankTemplate#EMPTY}. */
@@ -433,6 +446,14 @@ public class LayoutEditor
 			{
 				return -1;
 			}
+			// One copy per tab: moving an item into a tab that already holds it would make a second copy
+			// there, so leave both tabs as they are.
+			final Integer moving = from.get(fromPos);
+			if (moving != null && moving > 0 && moving != BankTemplate.FILLER && t.definedTabs().contains(toTab)
+				&& t.copyTab(toTab).contains(moving))
+			{
+				return -1;
+			}
 			final Integer value = from.remove(fromPos);
 			if (value != null && value != BankTemplate.EMPTY)
 			{
@@ -452,6 +473,36 @@ public class LayoutEditor
 		templateManager.saveUserTemplate(t);
 		notifyChanged();
 		return toTab;
+	}
+
+	/**
+	 * Why dragging the slot at {@code fromPos} in {@code fromTab} onto {@code toTab} does nothing: a
+	 * user-facing message when {@code toTab} already holds that item, else null. Client thread (reads the
+	 * item name).
+	 */
+	String alreadyInTabMessage(int fromTab, int fromPos, int toTab)
+	{
+		final BankTemplate t = liveTemplate();
+		if (t == null)
+		{
+			return null;
+		}
+		final int id;
+		synchronized (t)
+		{
+			final List<Integer> from = t.copyTab(fromTab);
+			if (fromPos < 0 || fromPos >= from.size() || from.get(fromPos) == null)
+			{
+				return null;
+			}
+			id = from.get(fromPos);
+		}
+		if (id <= 0 || id == BankTemplate.FILLER || findInTab(toTab, id) < 0)
+		{
+			return null;
+		}
+		return itemName(id) + " is already in " + tabLabel(toTab)
+			+ ". An item can only be in a tab once.";
 	}
 
 	private static boolean hasRealItems(List<Integer> slots)

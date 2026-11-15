@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.google.gson.JsonParseException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -204,6 +205,8 @@ final class TemplateJson
 			}
 
 			final List<Integer> layout = new ArrayList<>(slotsArr.size());
+			// An item can sit in several tabs, but only once in each.
+			final Set<Integer> inTab = new HashSet<>();
 			for (JsonElement slotEl : slotsArr)
 			{
 				final int id;
@@ -221,8 +224,13 @@ final class TemplateJson
 				{
 					return Result.fail("Tab " + tab + ": " + bad.getMessage());
 				}
-				if (id > 0)
+				if (id > 0 && id != BankTemplate.FILLER)
 				{
+					if (!inTab.add(id))
+					{
+						return Result.fail((tab == BankTemplate.MAIN_TAB ? "The main tab" : "Tab " + tab) + " lists "
+							+ slotText(slotEl) + " more than once. An item can be in several tabs, but only once in each.");
+					}
 					items++;
 				}
 				layout.add(id);
@@ -268,6 +276,16 @@ final class TemplateJson
 			super(null, null, false, false);
 			this.name = name;
 		}
+	}
+
+	// A slot as the player wrote it, quoted, for error messages.
+	private static String slotText(JsonElement el)
+	{
+		if (el != null && el.isJsonPrimitive() && el.getAsJsonPrimitive().isString())
+		{
+			return '"' + el.getAsString().trim() + '"';
+		}
+		return String.valueOf(el);
 	}
 
 	// One slot: a number, "empty", "filler", "<id>: <name>", "<name>", or {"id": .., "name": ..}.
